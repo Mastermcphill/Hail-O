@@ -8,6 +8,14 @@ class PenaltiesDao {
 
   final DatabaseExecutor db;
 
+  Future<void> insert(PenaltyRecord record) async {
+    await db.insert(
+      TableNames.penalties,
+      record.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
+
   Future<List<PenaltyRecord>> listByUserAndReason({
     required String userId,
     required String reason,

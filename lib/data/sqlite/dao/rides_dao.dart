@@ -1,9 +1,19 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/models/ride_trip.dart';
+
 class RidesDao {
   const RidesDao(this.db);
 
   final DatabaseExecutor db;
+
+  Future<void> createRide(RideTrip ride) async {
+    await db.insert(
+      'rides',
+      ride.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
 
   Future<void> upsertAwaitingConnectionFee({
     required String rideId,

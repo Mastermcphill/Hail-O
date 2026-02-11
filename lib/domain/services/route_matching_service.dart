@@ -1,6 +1,14 @@
 import '../models/route_node.dart';
+import '../models/vehicle.dart';
+import 'vehicle_eligibility_service.dart';
 
 class RouteMatchingService {
+  RouteMatchingService({VehicleEligibilityService? vehicleEligibilityService})
+    : _vehicleEligibilityService =
+          vehicleEligibilityService ?? const VehicleEligibilityService();
+
+  final VehicleEligibilityService _vehicleEligibilityService;
+
   bool matchesSubRouteByLabels({
     required List<RouteNode> routeNodes,
     required String pickupLabel,
@@ -34,5 +42,19 @@ class RouteMatchingService {
     final pickupIndex = sorted.indexWhere((node) => node.id == pickupNodeId);
     final dropoffIndex = sorted.indexWhere((node) => node.id == dropoffNodeId);
     return pickupIndex >= 0 && dropoffIndex >= 0 && pickupIndex < dropoffIndex;
+  }
+
+  List<Vehicle> filterEligibleVehiclesByLuggage({
+    required List<Vehicle> vehicles,
+    required int luggageCount,
+  }) {
+    return vehicles
+        .where(
+          (vehicle) => _vehicleEligibilityService.isEligible(
+            type: vehicle.type,
+            luggageCount: luggageCount,
+          ),
+        )
+        .toList(growable: false);
   }
 }
