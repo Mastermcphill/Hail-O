@@ -6,7 +6,7 @@ import '../table_names.dart';
 class SeatsDao {
   const SeatsDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> upsert(Seat seat) async {
     await db.insert(
@@ -24,5 +24,14 @@ class SeatsDao {
       orderBy: 'created_at ASC',
     );
     return rows.map(Seat.fromMap).toList(growable: false);
+  }
+
+  Future<int> sumMarkupMinorByRide(String rideId) async {
+    final seats = await listByRide(rideId);
+    var total = 0;
+    for (final seat in seats) {
+      total += seat.markupMinor;
+    }
+    return total;
   }
 }

@@ -24,7 +24,7 @@ void main() {
 
     final first = await database.open(databasePath: dbPath);
     final firstRows = await first.query(TableNames.schemaMigrations);
-    expect(firstRows.length, 4);
+    expect(firstRows.length, 5);
     final firstByVersion = <int, Map<String, Object?>>{
       for (final row in firstRows)
         (row['version'] as int): Map<String, Object?>.from(row),
@@ -39,11 +39,15 @@ void main() {
       'm0003_mapbox_offline_foundation_v1',
     );
     expect(firstByVersion[4]?['checksum'], 'm0004_fleet_configs_v1');
+    expect(
+      firstByVersion[5]?['checksum'],
+      'm0005_ride_settlement_payout_records_v2',
+    );
     await first.close();
 
     final second = await database.open(databasePath: dbPath);
     final secondRows = await second.query(TableNames.schemaMigrations);
-    expect(secondRows.length, 4);
+    expect(secondRows.length, 5);
     await second.close();
   });
 }

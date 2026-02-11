@@ -3,26 +3,50 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../data/sqlite/dao/escrow_holds_dao.dart';
 import '../../data/sqlite/dao/idempotency_dao.dart';
 import '../models/latlng.dart';
 import 'geo_distance.dart';
+import 'ride_settlement_service.dart';
 
 class EscrowService {
   EscrowService(
     this.db, {
     GeoDistance? geoDistance,
+    RideSettlementService? rideSettlementService,
     DateTime Function()? nowUtc,
   }) : _geoDistance = geoDistance ?? GeoDistance(),
+       _rideSettlementService =
+           rideSettlementService ?? RideSettlementService(db, nowUtc: nowUtc),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
        _idempotencyStore = IdempotencyDao(db);
 
   final Database db;
   final GeoDistance _geoDistance;
+  final RideSettlementService _rideSettlementService;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
 
   static const String _scopeGeofenceRelease = 'escrow.release.geofence';
   static const String _scopeManualRelease = 'escrow.release.manual';
+
+  Future<Map<String, Object?>> releaseOnArrival({
+    required String escrowId,
+    required LatLng driverPosition,
+    required LatLng riderDestination,
+    required String idempotencyKey,
+    double geofenceRadiusMeters = 150,
+    String? settlementIdempotencyKey,
+  }) {
+    return releaseOnGeofenceArrival(
+      escrowId: escrowId,
+      driverPosition: driverPosition,
+      riderDestination: riderDestination,
+      idempotencyKey: idempotencyKey,
+      geofenceRadiusMeters: geofenceRadiusMeters,
+      settlementIdempotencyKey: settlementIdempotencyKey,
+    );
+  }
 
   Future<Map<String, Object?>> releaseOnGeofenceArrival({
     required String escrowId,
@@ -30,6 +54,7 @@ class EscrowService {
     required LatLng riderDestination,
     required String idempotencyKey,
     double geofenceRadiusMeters = 150,
+    String? settlementIdempotencyKey,
   }) async {
     final claim = await _idempotencyStore.claim(
       scope: _scopeGeofenceRelease,
@@ -43,78 +68,97 @@ class EscrowService {
       };
     }
 
-    final distance = _geoDistance.haversineMeters(
-      driverPosition,
-      riderDestination,
-    );
-    final now = _nowUtc();
-    final result = await db.transaction((txn) async {
-      final rows = await txn.query(
-        'escrow_holds',
-        where: 'id = ?',
-        whereArgs: <Object>[escrowId],
-        limit: 1,
+    try {
+      final distance = _geoDistance.haversineMeters(
+        driverPosition,
+        riderDestination,
       );
-      if (rows.isEmpty) {
-        return <String, Object?>{
-          'ok': false,
-          'released': false,
-          'reason': 'escrow_not_found',
-        };
-      }
+      final now = _nowUtc();
+      var result = await db.transaction((txn) async {
+        final escrowDao = EscrowHoldsDao(txn);
+        final escrow = await escrowDao.findById(escrowId);
+        if (escrow == null) {
+          return <String, Object?>{
+            'ok': false,
+            'released': false,
+            'reason': 'escrow_not_found',
+          };
+        }
 
-      final row = rows.first;
-      final status = row['status'] as String? ?? 'held';
-      if (status != 'held') {
+        if (escrow.status != 'held') {
+          return <String, Object?>{
+            'ok': true,
+            'released': false,
+            'reason': 'already_processed',
+            'status': escrow.status,
+            'ride_id': escrow.rideId,
+          };
+        }
+
+        if (distance > geofenceRadiusMeters) {
+          return <String, Object?>{
+            'ok': true,
+            'released': false,
+            'reason': 'geofence_not_matched',
+            'distance_m': distance,
+            'ride_id': escrow.rideId,
+          };
+        }
+
+        await escrowDao.markReleasedIfHeld(
+          escrowId: escrowId,
+          releaseMode: 'geofence',
+          releasedAtIso: _iso(now),
+          idempotencyScope: _scopeGeofenceRelease,
+          idempotencyKey: idempotencyKey,
+        );
         return <String, Object?>{
           'ok': true,
-          'released': false,
-          'reason': 'already_processed',
-          'status': status,
-        };
-      }
-
-      if (distance > geofenceRadiusMeters) {
-        return <String, Object?>{
-          'ok': true,
-          'released': false,
-          'reason': 'geofence_not_matched',
-          'distance_m': distance,
-        };
-      }
-
-      await txn.update(
-        'escrow_holds',
-        <String, Object?>{
-          'status': 'released',
+          'released': true,
           'release_mode': 'geofence',
-          'released_at': _iso(now),
-          'idempotency_scope': _scopeGeofenceRelease,
-          'idempotency_key': idempotencyKey,
-        },
-        where: 'id = ?',
-        whereArgs: <Object>[escrowId],
-      );
-      return <String, Object?>{
-        'ok': true,
-        'released': true,
-        'release_mode': 'geofence',
-        'distance_m': distance,
-      };
-    });
+          'distance_m': distance,
+          'ride_id': escrow.rideId,
+        };
+      });
 
-    await _idempotencyStore.finalizeSuccess(
-      scope: _scopeGeofenceRelease,
-      key: idempotencyKey,
-      resultHash: _hash(result),
-    );
-    return result;
+      final shouldSettle =
+          result['ok'] == true &&
+          ((result['released'] == true) || (result['status'] == 'released'));
+      final rideId = (result['ride_id'] as String?) ?? '';
+      if (shouldSettle && rideId.isNotEmpty) {
+        final settlement = await _rideSettlementService.settleOnEscrowRelease(
+          escrowId: escrowId,
+          rideId: rideId,
+          idempotencyKey: _resolveSettlementIdempotencyKey(
+            escrowId,
+            settlementIdempotencyKey,
+          ),
+          trigger: SettlementTrigger.arrivalGeofence,
+        );
+        result = <String, Object?>{...result, 'settlement': settlement.toMap()};
+      }
+
+      await _idempotencyStore.finalizeSuccess(
+        scope: _scopeGeofenceRelease,
+        key: idempotencyKey,
+        resultHash: _hash(result),
+      );
+      return result;
+    } catch (_) {
+      await _idempotencyStore.finalizeFailure(
+        scope: _scopeGeofenceRelease,
+        key: idempotencyKey,
+        errorCode: 'escrow_geofence_release_exception',
+      );
+      rethrow;
+    }
   }
 
   Future<Map<String, Object?>> releaseOnManualOverride({
     required String escrowId,
     required String riderId,
     required String idempotencyKey,
+    String? settlementIdempotencyKey,
   }) async {
     final claim = await _idempotencyStore.claim(
       scope: _scopeManualRelease,
@@ -128,59 +172,87 @@ class EscrowService {
       };
     }
 
-    final now = _nowUtc();
-    final result = await db.transaction((txn) async {
-      final rows = await txn.query(
-        'escrow_holds',
-        where: 'id = ?',
-        whereArgs: <Object>[escrowId],
-        limit: 1,
-      );
-      if (rows.isEmpty) {
-        return <String, Object?>{
-          'ok': false,
-          'released': false,
-          'reason': 'escrow_not_found',
-        };
-      }
+    try {
+      final now = _nowUtc();
+      var result = await db.transaction((txn) async {
+        final escrowDao = EscrowHoldsDao(txn);
+        final escrow = await escrowDao.findById(escrowId);
+        if (escrow == null) {
+          return <String, Object?>{
+            'ok': false,
+            'released': false,
+            'reason': 'escrow_not_found',
+          };
+        }
 
-      final row = rows.first;
-      final status = row['status'] as String? ?? 'held';
-      if (status != 'held') {
+        if (escrow.status != 'held') {
+          return <String, Object?>{
+            'ok': true,
+            'released': false,
+            'reason': 'already_processed',
+            'status': escrow.status,
+            'ride_id': escrow.rideId,
+          };
+        }
+
+        await escrowDao.markReleasedIfHeld(
+          escrowId: escrowId,
+          releaseMode: 'manual_override',
+          releasedAtIso: _iso(now),
+          idempotencyScope: _scopeManualRelease,
+          idempotencyKey: idempotencyKey,
+        );
         return <String, Object?>{
           'ok': true,
-          'released': false,
-          'reason': 'already_processed',
-          'status': status,
+          'released': true,
+          'release_mode': 'manual_override',
+          'rider_id': riderId,
+          'ride_id': escrow.rideId,
         };
+      });
+
+      final shouldSettle =
+          result['ok'] == true &&
+          ((result['released'] == true) || (result['status'] == 'released'));
+      final rideId = (result['ride_id'] as String?) ?? '';
+      if (shouldSettle && rideId.isNotEmpty) {
+        final settlement = await _rideSettlementService.settleOnEscrowRelease(
+          escrowId: escrowId,
+          rideId: rideId,
+          idempotencyKey: _resolveSettlementIdempotencyKey(
+            escrowId,
+            settlementIdempotencyKey,
+          ),
+          trigger: SettlementTrigger.manualOverride,
+        );
+        result = <String, Object?>{...result, 'settlement': settlement.toMap()};
       }
 
-      await txn.update(
-        'escrow_holds',
-        <String, Object?>{
-          'status': 'released',
-          'release_mode': 'manual_override',
-          'released_at': _iso(now),
-          'idempotency_scope': _scopeManualRelease,
-          'idempotency_key': idempotencyKey,
-        },
-        where: 'id = ?',
-        whereArgs: <Object>[escrowId],
+      await _idempotencyStore.finalizeSuccess(
+        scope: _scopeManualRelease,
+        key: idempotencyKey,
+        resultHash: _hash(result),
       );
-      return <String, Object?>{
-        'ok': true,
-        'released': true,
-        'release_mode': 'manual_override',
-        'rider_id': riderId,
-      };
-    });
+      return result;
+    } catch (_) {
+      await _idempotencyStore.finalizeFailure(
+        scope: _scopeManualRelease,
+        key: idempotencyKey,
+        errorCode: 'escrow_manual_release_exception',
+      );
+      rethrow;
+    }
+  }
 
-    await _idempotencyStore.finalizeSuccess(
-      scope: _scopeManualRelease,
-      key: idempotencyKey,
-      resultHash: _hash(result),
-    );
-    return result;
+  String _resolveSettlementIdempotencyKey(
+    String escrowId,
+    String? providedIdempotencyKey,
+  ) {
+    final provided = providedIdempotencyKey?.trim() ?? '';
+    if (provided.isNotEmpty) {
+      return provided;
+    }
+    return 'settlement:$escrowId';
   }
 
   String _iso(DateTime value) => value.toUtc().toIso8601String();

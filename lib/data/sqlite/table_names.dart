@@ -15,6 +15,7 @@ class TableNames {
   static const String walletLedger = 'wallet_ledger';
   static const String escrowHolds = 'escrow_holds';
   static const String payouts = 'payouts';
+  static const String payoutRecords = 'payout_records';
   static const String penalties = 'penalties';
   static const String referralCodes = 'referral_codes';
   static const String promoEvents = 'promo_events';

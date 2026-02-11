@@ -7,6 +7,7 @@ import 'migrations/m0001_initial_schema.dart';
 import 'migrations/m0002_task2_task3_finance_logistics.dart';
 import 'migrations/m0003_mapbox_offline_foundation.dart';
 import 'migrations/m0004_fleet_configs.dart';
+import 'migrations/m0005_ride_settlement_payout_records.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -19,6 +20,7 @@ class HailODatabase {
              M0002Task2Task3FinanceLogistics(),
              M0003MapboxOfflineFoundation(),
              M0004FleetConfigs(),
+             M0005RideSettlementPayoutRecords(),
            ];
 
   final String databaseName;

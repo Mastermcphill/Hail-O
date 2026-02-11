@@ -40,6 +40,28 @@ class AutosaveService {
     required String referenceId,
     required String idempotencyKey,
   }) async {
+    return db.transaction(
+      (txn) => applyOnConfirmedCommissionCreditWithExecutor(
+        executor: txn,
+        ownerId: ownerId,
+        destinationWalletType: destinationWalletType,
+        grossAmountMinor: grossAmountMinor,
+        sourceKind: sourceKind,
+        referenceId: referenceId,
+        idempotencyKey: idempotencyKey,
+      ),
+    );
+  }
+
+  Future<Map<String, Object?>> applyOnConfirmedCommissionCreditWithExecutor({
+    required DatabaseExecutor executor,
+    required String ownerId,
+    required WalletType destinationWalletType,
+    required int grossAmountMinor,
+    required String sourceKind,
+    required String referenceId,
+    required String idempotencyKey,
+  }) async {
     _requireIdempotency(idempotencyKey);
     if (grossAmountMinor <= 0) {
       throw ArgumentError('grossAmountMinor must be > 0');
@@ -52,129 +74,132 @@ class AutosaveService {
     }
 
     const scope = 'autosave_split_credit';
-    return db.transaction((txn) async {
-      final claimed = await _claimIdempotency(
-        txn,
-        scope: scope,
-        key: idempotencyKey,
-      );
-      if (!claimed) {
-        final hash = await _readHash(txn, scope: scope, key: idempotencyKey);
-        return <String, Object?>{
-          'ok': true,
-          'replayed': true,
-          'result_hash': hash,
-        };
-      }
-
-      final moneyboxRepo = _moneyBoxRepositoryFor(txn);
-      final walletRepo = _walletRepositoryFor(txn);
-      final account = await _ensureMoneyBoxAccountTx(txn, ownerId);
-
-      final autosavePercent = account.autosavePercent.clamp(0, 30);
-      final savedMinor = autosavePercent >= 1
-          ? percentOf(grossAmountMinor, autosavePercent)
-          : 0;
-      final remainderMinor = grossAmountMinor - savedMinor;
-
-      var principalAfter = account.principalMinor;
-      var projectedBonusAfter = account.projectedBonusMinor;
-      var expectedAfter = account.expectedAtMaturityMinor;
-      final now = _nowUtc();
-
-      if (savedMinor > 0) {
-        principalAfter = account.principalMinor + savedMinor;
-        projectedBonusAfter = moneyBoxService.projectedBonusFor(
-          principalMinor: principalAfter,
-          tier: account.tier.value,
-        );
-        expectedAfter = principalAfter + projectedBonusAfter;
-
-        await moneyboxRepo.upsertAccount(
-          MoneyBoxAccount(
-            ownerId: account.ownerId,
-            tier: account.tier,
-            status: account.status,
-            lockStart: account.lockStart,
-            autoOpenDate: account.autoOpenDate,
-            maturityDate: account.maturityDate,
-            principalMinor: principalAfter,
-            projectedBonusMinor: projectedBonusAfter,
-            expectedAtMaturityMinor: expectedAfter,
-            autosavePercent: account.autosavePercent,
-            bonusEligible: account.bonusEligible,
-            createdAt: account.createdAt,
-            updatedAt: now,
-          ),
-        );
-
-        await moneyboxRepo.appendLedger(
-          MoneyBoxLedgerEntry(
-            ownerId: ownerId,
-            entryType: 'autosave_credit',
-            amountMinor: savedMinor,
-            principalAfterMinor: principalAfter,
-            projectedBonusAfterMinor: projectedBonusAfter,
-            expectedAfterMinor: expectedAfter,
-            sourceKind: sourceKind,
-            referenceId: referenceId,
-            idempotencyScope: scope,
-            idempotencyKey: '$idempotencyKey:moneybox',
-            createdAt: now,
-          ),
-        );
-      }
-
-      var destinationWallet = await _ensureWalletTx(
-        txn,
-        ownerId: ownerId,
-        walletType: destinationWalletType,
-      );
-
-      if (remainderMinor > 0) {
-        final walletAfter = destinationWallet.balanceMinor + remainderMinor;
-        destinationWallet = Wallet(
-          ownerId: destinationWallet.ownerId,
-          walletType: destinationWallet.walletType,
-          balanceMinor: walletAfter,
-          reservedMinor: destinationWallet.reservedMinor,
-          currency: destinationWallet.currency,
-          createdAt: destinationWallet.createdAt,
-          updatedAt: now,
-        );
-        await walletRepo.upsertWallet(destinationWallet);
-        await walletRepo.appendLedger(
-          WalletLedgerEntry(
-            ownerId: ownerId,
-            walletType: destinationWalletType,
-            direction: LedgerDirection.credit,
-            amountMinor: remainderMinor,
-            balanceAfterMinor: walletAfter,
-            kind: confirmedCommissionCredit,
-            referenceId: referenceId,
-            idempotencyScope: scope,
-            idempotencyKey: '$idempotencyKey:wallet',
-            createdAt: now,
-          ),
-        );
-      }
-
-      final result = <String, Object?>{
+    final claimed = await _claimIdempotency(
+      executor,
+      scope: scope,
+      key: idempotencyKey,
+    );
+    if (!claimed) {
+      final hash = await _readHash(executor, scope: scope, key: idempotencyKey);
+      return <String, Object?>{
         'ok': true,
-        'owner_id': ownerId,
-        'gross_minor': grossAmountMinor,
-        'saved_minor': savedMinor,
-        'remainder_minor': remainderMinor,
-        'autosave_percent': autosavePercent,
-        'wallet_balance_after_minor': destinationWallet.balanceMinor,
-        'moneybox_principal_after_minor': principalAfter,
-        'moneybox_projected_bonus_after_minor': projectedBonusAfter,
-        'moneybox_expected_after_minor': expectedAfter,
+        'replayed': true,
+        'result_hash': hash,
       };
+    }
 
-      await _finalize(txn, scope: scope, key: idempotencyKey, result: result);
-      return result;
-    });
+    final moneyboxRepo = _moneyBoxRepositoryFor(executor);
+    final walletRepo = _walletRepositoryFor(executor);
+    final account = await _ensureMoneyBoxAccountTx(executor, ownerId);
+
+    final autosavePercent = account.autosavePercent.clamp(0, 30);
+    final savedMinor = autosavePercent >= 1
+        ? percentOf(grossAmountMinor, autosavePercent)
+        : 0;
+    final remainderMinor = grossAmountMinor - savedMinor;
+
+    var principalAfter = account.principalMinor;
+    var projectedBonusAfter = account.projectedBonusMinor;
+    var expectedAfter = account.expectedAtMaturityMinor;
+    final now = _nowUtc();
+
+    if (savedMinor > 0) {
+      principalAfter = account.principalMinor + savedMinor;
+      projectedBonusAfter = moneyBoxService.projectedBonusFor(
+        principalMinor: principalAfter,
+        tier: account.tier.value,
+      );
+      expectedAfter = principalAfter + projectedBonusAfter;
+
+      await moneyboxRepo.upsertAccount(
+        MoneyBoxAccount(
+          ownerId: account.ownerId,
+          tier: account.tier,
+          status: account.status,
+          lockStart: account.lockStart,
+          autoOpenDate: account.autoOpenDate,
+          maturityDate: account.maturityDate,
+          principalMinor: principalAfter,
+          projectedBonusMinor: projectedBonusAfter,
+          expectedAtMaturityMinor: expectedAfter,
+          autosavePercent: account.autosavePercent,
+          bonusEligible: account.bonusEligible,
+          createdAt: account.createdAt,
+          updatedAt: now,
+        ),
+      );
+
+      await moneyboxRepo.appendLedger(
+        MoneyBoxLedgerEntry(
+          ownerId: ownerId,
+          entryType: 'autosave_credit',
+          amountMinor: savedMinor,
+          principalAfterMinor: principalAfter,
+          projectedBonusAfterMinor: projectedBonusAfter,
+          expectedAfterMinor: expectedAfter,
+          sourceKind: sourceKind,
+          referenceId: referenceId,
+          idempotencyScope: scope,
+          idempotencyKey: '$idempotencyKey:moneybox',
+          createdAt: now,
+        ),
+      );
+    }
+
+    var destinationWallet = await _ensureWalletTx(
+      executor,
+      ownerId: ownerId,
+      walletType: destinationWalletType,
+    );
+
+    if (remainderMinor > 0) {
+      final walletAfter = destinationWallet.balanceMinor + remainderMinor;
+      destinationWallet = Wallet(
+        ownerId: destinationWallet.ownerId,
+        walletType: destinationWallet.walletType,
+        balanceMinor: walletAfter,
+        reservedMinor: destinationWallet.reservedMinor,
+        currency: destinationWallet.currency,
+        createdAt: destinationWallet.createdAt,
+        updatedAt: now,
+      );
+      await walletRepo.upsertWallet(destinationWallet);
+      await walletRepo.appendLedger(
+        WalletLedgerEntry(
+          ownerId: ownerId,
+          walletType: destinationWalletType,
+          direction: LedgerDirection.credit,
+          amountMinor: remainderMinor,
+          balanceAfterMinor: walletAfter,
+          kind: confirmedCommissionCredit,
+          referenceId: referenceId,
+          idempotencyScope: scope,
+          idempotencyKey: '$idempotencyKey:wallet',
+          createdAt: now,
+        ),
+      );
+    }
+
+    final result = <String, Object?>{
+      'ok': true,
+      'owner_id': ownerId,
+      'gross_minor': grossAmountMinor,
+      'saved_minor': savedMinor,
+      'remainder_minor': remainderMinor,
+      'autosave_percent': autosavePercent,
+      'wallet_balance_after_minor': destinationWallet.balanceMinor,
+      'moneybox_principal_after_minor': principalAfter,
+      'moneybox_projected_bonus_after_minor': projectedBonusAfter,
+      'moneybox_expected_after_minor': expectedAfter,
+    };
+
+    await _finalize(
+      executor,
+      scope: scope,
+      key: idempotencyKey,
+      result: result,
+    );
+    return result;
   }
 
   Future<MoneyBoxAccount> _ensureMoneyBoxAccountTx(
