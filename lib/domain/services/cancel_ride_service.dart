@@ -72,6 +72,10 @@ class CancelRideService {
   static const String _scopeCancellationPenalty = 'cancellation_penalty';
   static const String _platformOwnerId = 'platform';
 
+  /// Legacy convenience wrapper.
+  ///
+  /// New code should call [collectCancellationPenalty] directly after it has
+  /// already computed/selected the penalty amount and rule code.
   Future<CancellationResult> cancelRideAndCollectPenalty({
     required String rideId,
     required String payerUserId,
@@ -100,6 +104,10 @@ class CancelRideService {
     );
   }
 
+  /// Canonical public cancellation entrypoint.
+  ///
+  /// This method enforces idempotency and guarantees cancellation money
+  /// mutations are ledger-backed before ride status transitions to cancelled.
   Future<CancellationResult> collectCancellationPenalty({
     required String rideId,
     required String payerUserId,
@@ -155,6 +163,8 @@ class CancelRideService {
         final now = cancelledAt?.toUtc() ?? _nowUtc();
         final nowIso = isoNowUtc(now);
 
+        // Compatibility mirror: legacy consumers still read `penalties`.
+        // Canonical audit/idempotency is persisted in `penalty_records`.
         await PenaltiesDao(txn).insert(
           PenaltyRecord(
             id: 'penalty:$rideId',
@@ -199,7 +209,11 @@ class CancelRideService {
                 : null,
           ),
         );
-        await RidesDao(txn).markCancelled(rideId: rideId, nowIso: nowIso);
+        await RidesDao(txn).markCancelled(
+          rideId: rideId,
+          nowIso: nowIso,
+          viaCancelRideService: true,
+        );
 
         return CancellationResult(
           ok: true,
