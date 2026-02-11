@@ -26,6 +26,7 @@ class WalletReversalService {
     required bool requesterIsAdmin,
     required String reason,
     required String idempotencyKey,
+    int? reversalAmountMinor,
   }) async {
     if (!requesterIsAdmin) {
       throw StateError('reversal_forbidden');
@@ -40,7 +41,8 @@ class WalletReversalService {
     final claim = await _idempotencyStore.claim(
       scope: _scopeWalletReversal,
       key: idempotencyKey,
-      requestHash: '$originalLedgerId|$requestedByUserId|$reason',
+      requestHash:
+          '$originalLedgerId|$requestedByUserId|$reason|${reversalAmountMinor ?? 0}',
     );
     if (!claim.isNewClaim) {
       return _buildReplayResponse(claim.record, idempotencyKey);
@@ -74,12 +76,18 @@ class WalletReversalService {
         final ownerId = (original['owner_id'] as String?) ?? '';
         final walletType = (original['wallet_type'] as String?) ?? '';
         final originalDirection = (original['direction'] as String?) ?? '';
-        final amountMinor = (original['amount_minor'] as num?)?.toInt() ?? 0;
+        final originalAmountMinor =
+            (original['amount_minor'] as num?)?.toInt() ?? 0;
+        final amountMinor = reversalAmountMinor ?? originalAmountMinor;
         final originalKind = (original['kind'] as String?) ?? 'unknown';
         final referenceId =
             (original['reference_id'] as String?) ?? 'reversal_reference';
 
-        if (ownerId.isEmpty || walletType.isEmpty || amountMinor <= 0) {
+        if (ownerId.isEmpty ||
+            walletType.isEmpty ||
+            originalAmountMinor <= 0 ||
+            amountMinor <= 0 ||
+            amountMinor > originalAmountMinor) {
           return <String, Object?>{
             'ok': false,
             'error': 'invalid_original_ledger_row',
@@ -160,6 +168,7 @@ class WalletReversalService {
           'original_ledger_id': originalLedgerId,
           'reversal_ledger_id': reversalLedgerId,
           'amount_minor': amountMinor,
+          'original_amount_minor': originalAmountMinor,
           'balance_after_minor': nextBalance,
           'direction': reversalDirection,
         };

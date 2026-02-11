@@ -165,6 +165,96 @@ class RidesDao {
     );
   }
 
+  Future<int> markAccepted({
+    required String rideId,
+    required String driverId,
+    required String acceptedAtIso,
+    required String nowIso,
+    required bool viaAcceptRideService,
+  }) async {
+    if (!viaAcceptRideService) {
+      throw ArgumentError(
+        'RidesDao.markAccepted must be called via AcceptRideService.',
+      );
+    }
+    return db.update(
+      'rides',
+      <String, Object?>{
+        'driver_id': driverId,
+        'status': 'accepted',
+        'bid_accepted_at': acceptedAtIso,
+        'updated_at': nowIso,
+      },
+      where:
+          "id = ? AND status IN ('pending','awaiting_connection_fee','connection_fee_paid') AND (driver_id IS NULL OR driver_id = ?)",
+      whereArgs: <Object>[rideId, driverId],
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
+
+  Future<void> markStarted({
+    required String rideId,
+    required String startedAtIso,
+    required String nowIso,
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw ArgumentError(
+        'RidesDao.markStarted must be called via RideOrchestratorService.',
+      );
+    }
+    final existing = await findById(rideId);
+    if (existing == null) {
+      throw StateError('ride_not_found');
+    }
+    final status = (existing['status'] as String?) ?? '';
+    _lifecycleGuard.assertCanStartRide(status);
+    await db.update(
+      'rides',
+      <String, Object?>{
+        'status': 'in_progress',
+        'started_at': startedAtIso,
+        'updated_at': nowIso,
+      },
+      where: 'id = ?',
+      whereArgs: <Object>[rideId],
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
+
+  Future<void> markCompleted({
+    required String rideId,
+    required String completedAtIso,
+    required String nowIso,
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw ArgumentError(
+        'RidesDao.markCompleted must be called via RideOrchestratorService.',
+      );
+    }
+    final existing = await findById(rideId);
+    if (existing == null) {
+      throw StateError('ride_not_found');
+    }
+    final status = (existing['status'] as String?) ?? '';
+    if (_lifecycleGuard.isAlreadyCompleted(status)) {
+      return;
+    }
+    _lifecycleGuard.assertCanCompleteRide(status);
+    await db.update(
+      'rides',
+      <String, Object?>{
+        'status': 'completed',
+        'arrived_at': completedAtIso,
+        'updated_at': nowIso,
+      },
+      where: 'id = ?',
+      whereArgs: <Object>[rideId],
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+  }
+
   Future<void> updateFinanceIfExists({
     required String rideId,
     required int baseFareMinor,

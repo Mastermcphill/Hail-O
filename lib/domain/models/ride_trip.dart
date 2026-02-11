@@ -32,6 +32,9 @@ class RideTrip {
     required this.biddingMode,
     required this.createdAt,
     required this.updatedAt,
+    this.pricingVersion = 'legacy_v0',
+    this.pricingBreakdownJson = '{}',
+    this.quotedFareMinor = 0,
     this.driverId,
     this.routeId,
     this.pickupNodeId,
@@ -60,6 +63,9 @@ class RideTrip {
   final int totalFareMinor;
   final int connectionFeeMinor;
   final bool connectionFeePaid;
+  final String pricingVersion;
+  final String pricingBreakdownJson;
+  final int quotedFareMinor;
   final DateTime? bidAcceptedAt;
   final DateTime? connectionFeeDeadlineAt;
   final DateTime? connectionFeePaidAt;
@@ -87,6 +93,9 @@ class RideTrip {
       'total_fare_minor': totalFareMinor,
       'connection_fee_minor': connectionFeeMinor,
       'connection_fee_paid': connectionFeePaid ? 1 : 0,
+      'pricing_version': pricingVersion,
+      'pricing_breakdown_json': pricingBreakdownJson,
+      'quoted_fare_minor': quotedFareMinor,
       'bid_accepted_at': bidAcceptedAt?.toUtc().toIso8601String(),
       'connection_fee_deadline_at': connectionFeeDeadlineAt
           ?.toUtc()
@@ -124,6 +133,9 @@ class RideTrip {
       connectionFeeMinor: (map['connection_fee_minor'] as num?)?.toInt() ?? 0,
       connectionFeePaid:
           ((map['connection_fee_paid'] as num?)?.toInt() ?? 0) == 1,
+      pricingVersion: (map['pricing_version'] as String?) ?? 'legacy_v0',
+      pricingBreakdownJson: (map['pricing_breakdown_json'] as String?) ?? '{}',
+      quotedFareMinor: (map['quoted_fare_minor'] as num?)?.toInt() ?? 0,
       bidAcceptedAt: parseNullable('bid_accepted_at'),
       connectionFeeDeadlineAt: parseNullable('connection_fee_deadline_at'),
       connectionFeePaidAt: parseNullable('connection_fee_paid_at'),

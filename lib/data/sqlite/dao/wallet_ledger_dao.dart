@@ -29,4 +29,37 @@ class WalletLedgerDao {
     );
     return rows.map(WalletLedgerEntry.fromMap).toList(growable: false);
   }
+
+  Future<List<WalletLedgerEntry>> listAll() async {
+    final rows = await db.query(
+      TableNames.walletLedger,
+      orderBy: 'created_at ASC, id ASC',
+    );
+    return rows.map(WalletLedgerEntry.fromMap).toList(growable: false);
+  }
+
+  Future<WalletLedgerEntry?> findById(int id) async {
+    final rows = await db.query(
+      TableNames.walletLedger,
+      where: 'id = ?',
+      whereArgs: <Object>[id],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return WalletLedgerEntry.fromMap(rows.first);
+  }
+
+  Future<List<WalletLedgerEntry>> listCreditsByReference(
+    String referenceId,
+  ) async {
+    final rows = await db.query(
+      TableNames.walletLedger,
+      where: 'reference_id = ? AND direction = ?',
+      whereArgs: <Object>[referenceId, LedgerDirection.credit.dbValue],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    return rows.map(WalletLedgerEntry.fromMap).toList(growable: false);
+  }
 }

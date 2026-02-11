@@ -46,4 +46,12 @@ class WalletReversalsDao {
     }
     return WalletReversalRecord.fromMap(rows.first);
   }
+
+  Future<List<WalletReversalRecord>> listAll() async {
+    final rows = await db.query(
+      TableNames.walletReversals,
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(WalletReversalRecord.fromMap).toList(growable: false);
+  }
 }

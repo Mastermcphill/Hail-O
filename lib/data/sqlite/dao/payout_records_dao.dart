@@ -45,4 +45,18 @@ class PayoutRecordsDao {
     }
     return PayoutRecord.fromMap(rows.first);
   }
+
+  Future<PayoutRecord?> findLatestByRideId(String rideId) async {
+    final rows = await db.query(
+      TableNames.payoutRecords,
+      where: 'ride_id = ?',
+      whereArgs: <Object>[rideId],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return PayoutRecord.fromMap(rows.first);
+  }
 }
