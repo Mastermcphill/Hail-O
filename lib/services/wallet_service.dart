@@ -13,11 +13,13 @@ import '../data/sqlite/dao/users_dao.dart';
 import '../data/sqlite/dao/wallet_ledger_dao.dart';
 import '../data/sqlite/dao/wallets_dao.dart';
 import '../domain/models/driver_profile.dart';
+import '../domain/models/ride_trip.dart';
 import '../domain/models/user.dart';
 import '../domain/models/wallet.dart';
 import '../domain/models/wallet_ledger_entry.dart';
 import '../domain/services/cancel_ride_service.dart';
 import '../domain/services/finance_utils.dart';
+import '../domain/services/ride_booking_service.dart';
 
 class WalletService {
   WalletService(
@@ -143,16 +145,17 @@ class WalletService {
       await _ensureUserTx(txn, userId: driverId, role: UserRole.driver.dbValue);
       await _ensureDriverProfileTx(txn, driverId: driverId);
 
-      final nowIso = isoNowUtc(now);
-      await RidesDao(txn).upsertAwaitingConnectionFee(
+      final normalizedScope = tripScope.trim().toLowerCase();
+      final tripScopeEnum = TripScope.fromDbValue(normalizedScope);
+      await RideBookingService(txn).bookAwaitingConnectionFeeRide(
         rideId: rideId,
         riderId: riderId,
         driverId: driverId,
-        tripScope: tripScope,
+        tripScope: tripScopeEnum,
         feeMinor: fee,
-        bidAcceptedAtIso: nowIso,
-        feeDeadlineAtIso: isoNowUtc(deadline),
-        nowIso: nowIso,
+        bidAcceptedAt: now,
+        feeDeadlineAt: deadline,
+        nowUtc: now,
       );
 
       final result = <String, Object?>{

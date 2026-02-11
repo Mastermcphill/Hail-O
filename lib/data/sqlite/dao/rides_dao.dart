@@ -7,7 +7,20 @@ class RidesDao {
 
   final DatabaseExecutor db;
 
-  Future<void> createRide(RideTrip ride) async {
+  /// Creates a booked ride row.
+  ///
+  /// Do not call this directly from app/service code. Use
+  /// `RideBookingService.bookRide(...)` so booking guard invariants are
+  /// enforced.
+  Future<void> createRide(
+    RideTrip ride, {
+    required bool viaRideBookingService,
+  }) async {
+    if (!viaRideBookingService) {
+      throw ArgumentError(
+        'RidesDao.createRide must be called via RideBookingService.',
+      );
+    }
     await db.insert(
       'rides',
       ride.toMap(),
@@ -15,6 +28,11 @@ class RidesDao {
     );
   }
 
+  /// Upserts an accepted-bid ride awaiting connection fee payment.
+  ///
+  /// Do not call this directly from app/service code. Use
+  /// `RideBookingService.bookAwaitingConnectionFeeRide(...)` so booking guard
+  /// invariants are enforced.
   Future<void> upsertAwaitingConnectionFee({
     required String rideId,
     required String riderId,
@@ -24,7 +42,13 @@ class RidesDao {
     required String bidAcceptedAtIso,
     required String feeDeadlineAtIso,
     required String nowIso,
+    required bool viaRideBookingService,
   }) async {
+    if (!viaRideBookingService) {
+      throw ArgumentError(
+        'RidesDao.upsertAwaitingConnectionFee must be called via RideBookingService.',
+      );
+    }
     await db.insert('rides', <String, Object?>{
       'id': rideId,
       'rider_id': riderId,
@@ -69,10 +93,21 @@ class RidesDao {
         .toList(growable: false);
   }
 
+  /// Marks an already-booked ride as cancelled.
+  ///
+  /// Do not call this directly from business flows. Use
+  /// `CancelRideService.collectCancellationPenalty(...)` so penalty, ledger,
+  /// and idempotency invariants are enforced before status mutation.
   Future<void> markCancelled({
     required String rideId,
     required String nowIso,
+    required bool viaCancelRideService,
   }) async {
+    if (!viaCancelRideService) {
+      throw ArgumentError(
+        'RidesDao.markCancelled must be called via CancelRideService.',
+      );
+    }
     await db.update(
       'rides',
       <String, Object?>{

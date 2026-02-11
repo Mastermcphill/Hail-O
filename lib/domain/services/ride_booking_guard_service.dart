@@ -23,7 +23,7 @@ class BookingBlockedException implements Exception {
 class RideBookingGuardService {
   const RideBookingGuardService(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> assertCanBookRide({
     required String riderUserId,

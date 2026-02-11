@@ -8,7 +8,7 @@ class RideBookingService {
   RideBookingService(this.db, {RideBookingGuardService? guardService})
     : _guardService = guardService ?? RideBookingGuardService(db);
 
-  final Database db;
+  final DatabaseExecutor db;
   final RideBookingGuardService _guardService;
 
   Future<void> bookRide(RideTrip ride) async {
@@ -19,6 +19,36 @@ class RideBookingService {
       riderUserId: ride.riderId,
       isCrossBorder: isCrossBorder,
     );
-    await RidesDao(db).createRide(ride);
+    await RidesDao(db).createRide(ride, viaRideBookingService: true);
+  }
+
+  Future<void> bookAwaitingConnectionFeeRide({
+    required String rideId,
+    required String riderId,
+    required String driverId,
+    required TripScope tripScope,
+    required int feeMinor,
+    required DateTime bidAcceptedAt,
+    required DateTime feeDeadlineAt,
+    required DateTime nowUtc,
+  }) async {
+    final isCrossBorder =
+        tripScope == TripScope.crossCountry ||
+        tripScope == TripScope.international;
+    await _guardService.assertCanBookRide(
+      riderUserId: riderId,
+      isCrossBorder: isCrossBorder,
+    );
+    await RidesDao(db).upsertAwaitingConnectionFee(
+      rideId: rideId,
+      riderId: riderId,
+      driverId: driverId,
+      tripScope: tripScope.dbValue,
+      feeMinor: feeMinor,
+      bidAcceptedAtIso: bidAcceptedAt.toUtc().toIso8601String(),
+      feeDeadlineAtIso: feeDeadlineAt.toUtc().toIso8601String(),
+      nowIso: nowUtc.toUtc().toIso8601String(),
+      viaRideBookingService: true,
+    );
   }
 }
