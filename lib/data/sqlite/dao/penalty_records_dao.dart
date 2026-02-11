@@ -31,4 +31,28 @@ class PenaltyRecordsDao {
     }
     return PenaltyAuditRecord.fromMap(rows.first);
   }
+
+  Future<List<PenaltyAuditRecord>> listByRideId(String rideId) async {
+    final rows = await db.query(
+      TableNames.penaltyRecords,
+      where: 'ride_id = ?',
+      whereArgs: <Object>[rideId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(PenaltyAuditRecord.fromMap).toList(growable: false);
+  }
+
+  Future<PenaltyAuditRecord?> findLatestByRideId(String rideId) async {
+    final rows = await db.query(
+      TableNames.penaltyRecords,
+      where: 'ride_id = ?',
+      whereArgs: <Object>[rideId],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return PenaltyAuditRecord.fromMap(rows.first);
+  }
 }

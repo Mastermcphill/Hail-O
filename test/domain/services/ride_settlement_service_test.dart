@@ -345,6 +345,145 @@ void main() {
         expect(afterB, 3000);
       },
     );
+
+    test(
+      'direct settlement ignores alternate idempotency keys per escrow',
+      () async {
+        final now = DateTime.utc(2026, 2, 11, 12, 0);
+        final db = await HailODatabase().open(
+          databasePath: inMemoryDatabasePath,
+        );
+        addTearDown(db.close);
+
+        final walletService = WalletService(db, nowUtc: () => now);
+        final settlementService = RideSettlementService(db, nowUtc: () => now);
+
+        await _seedUsersAndRide(
+          db,
+          now: now,
+          riderId: 'rider_direct',
+          driverId: 'driver_direct',
+          rideId: 'ride_direct',
+          escrowId: 'escrow_direct',
+          baseFareMinor: 10000,
+          premiumMarkupMinor: 0,
+          totalFareMinor: 10000,
+        );
+        await db.update(
+          'escrow_holds',
+          <String, Object?>{
+            'status': 'released',
+            'released_at': now.toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: const <Object>['escrow_direct'],
+        );
+
+        final first = await settlementService.settleOnEscrowRelease(
+          escrowId: 'escrow_direct',
+          rideId: 'ride_direct',
+          idempotencyKey: 'key_one',
+          trigger: SettlementTrigger.manualOverride,
+        );
+        final second = await settlementService.settleOnEscrowRelease(
+          escrowId: 'escrow_direct',
+          rideId: 'ride_direct',
+          idempotencyKey: 'key_two',
+          trigger: SettlementTrigger.manualOverride,
+        );
+
+        expect(first.ok, true);
+        expect(second.ok, true);
+        expect(second.replayed, true);
+
+        final walletA = await walletService.getWalletBalanceMinor(
+          ownerId: 'driver_direct',
+          walletType: WalletType.driverA,
+        );
+        expect(walletA, 8000);
+
+        final payoutRows = await db.query(
+          'payout_records',
+          where: 'escrow_id = ?',
+          whereArgs: const <Object>['escrow_direct'],
+        );
+        expect(payoutRows.length, 1);
+      },
+    );
+
+    test(
+      'settlement penalty due prefers penalty_records over legacy penalties',
+      () async {
+        final now = DateTime.utc(2026, 2, 11, 12, 0);
+        final db = await HailODatabase().open(
+          databasePath: inMemoryDatabasePath,
+        );
+        addTearDown(db.close);
+
+        final settlementService = RideSettlementService(db, nowUtc: () => now);
+
+        await _seedUsersAndRide(
+          db,
+          now: now,
+          riderId: 'rider_penalty_source',
+          driverId: 'driver_penalty_source',
+          rideId: 'ride_penalty_source',
+          escrowId: 'escrow_penalty_source',
+          baseFareMinor: 10000,
+          premiumMarkupMinor: 0,
+          totalFareMinor: 10000,
+        );
+        await db.update(
+          'escrow_holds',
+          <String, Object?>{
+            'status': 'released',
+            'released_at': now.toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: const <Object>['escrow_penalty_source'],
+        );
+
+        await db.insert('penalties', <String, Object?>{
+          'id': 'legacy_penalty_1',
+          'user_id': 'driver_penalty_source',
+          'penalty_kind': 'legacy_source',
+          'amount_minor': 9000,
+          'reason': 'ride_penalty_source',
+          'created_at': now.toIso8601String(),
+          'idempotency_scope': 'legacy',
+          'idempotency_key': 'legacy_penalty_1',
+        });
+        await db.insert('penalty_records', <String, Object?>{
+          'id': 'penalty_record_1',
+          'ride_id': 'ride_penalty_source',
+          'user_id': 'driver_penalty_source',
+          'amount_minor': 2500,
+          'rule_code': 'penalty_record_source',
+          'status': 'assessed',
+          'created_at': now.toIso8601String(),
+          'idempotency_scope': 'cancellation_penalty',
+          'idempotency_key': 'penalty_record_source_1',
+        });
+
+        final result = await settlementService.settleOnEscrowRelease(
+          escrowId: 'escrow_penalty_source',
+          rideId: 'ride_penalty_source',
+          idempotencyKey: 'any_value',
+          trigger: SettlementTrigger.manualOverride,
+        );
+
+        expect(result.ok, true);
+        expect(result.penaltyDueMinor, 2500);
+
+        final payoutRows = await db.query(
+          'payout_records',
+          where: 'escrow_id = ?',
+          whereArgs: const <Object>['escrow_penalty_source'],
+          limit: 1,
+        );
+        expect(payoutRows.first['penalty_due_minor'], 2500);
+      },
+    );
   });
 }
 

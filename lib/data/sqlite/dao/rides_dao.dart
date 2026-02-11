@@ -1,11 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../domain/models/ride_trip.dart';
+import '../../../domain/services/ride_lifecycle_guard_service.dart';
 
 class RidesDao {
   const RidesDao(this.db);
 
   final DatabaseExecutor db;
+  static const RideLifecycleGuardService _lifecycleGuard =
+      RideLifecycleGuardService();
 
   /// Creates a booked ride row.
   ///
@@ -108,6 +111,16 @@ class RidesDao {
         'RidesDao.markCancelled must be called via CancelRideService.',
       );
     }
+    final existing = await findById(rideId);
+    if (existing == null) {
+      throw StateError('ride_not_found');
+    }
+    final status = (existing['status'] as String?) ?? '';
+    if (_lifecycleGuard.isAlreadyCancelled(status)) {
+      return;
+    }
+    _lifecycleGuard.assertCanCancel(status);
+
     await db.update(
       'rides',
       <String, Object?>{
@@ -123,7 +136,23 @@ class RidesDao {
   Future<void> markConnectionFeePaid({
     required String rideId,
     required String nowIso,
+    required bool viaWalletService,
   }) async {
+    if (!viaWalletService) {
+      throw ArgumentError(
+        'RidesDao.markConnectionFeePaid must be called via WalletService.',
+      );
+    }
+    final existing = await findById(rideId);
+    if (existing == null) {
+      throw StateError('ride_not_found');
+    }
+    final status = (existing['status'] as String?) ?? '';
+    if (status.trim().toLowerCase() == 'connection_fee_paid') {
+      return;
+    }
+    _lifecycleGuard.assertCanMarkConnectionFeePaid(status);
+
     await db.update(
       'rides',
       <String, Object?>{
@@ -141,11 +170,22 @@ class RidesDao {
     required int baseFareMinor,
     required int premiumSeatMarkupMinor,
     required String nowIso,
+    required bool viaFinanceSettlementService,
   }) async {
+    if (!viaFinanceSettlementService) {
+      throw ArgumentError(
+        'RidesDao.updateFinanceIfExists must be called via finance settlement services.',
+      );
+    }
     final existing = await findById(rideId);
     if (existing == null) {
       return;
     }
+    final status = (existing['status'] as String?) ?? '';
+    if (_lifecycleGuard.isAlreadyFinanceSettled(status)) {
+      return;
+    }
+    _lifecycleGuard.assertCanSettleFinance(status);
     await db.update(
       'rides',
       <String, Object?>{

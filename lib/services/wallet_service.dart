@@ -268,7 +268,11 @@ class WalletService {
     final fee = (ride['connection_fee_minor'] as int?) ?? 0;
     final nowIso = isoNowUtc(now);
     await db.transaction((txn) async {
-      await RidesDao(txn).markConnectionFeePaid(rideId: rideId, nowIso: nowIso);
+      await RidesDao(txn).markConnectionFeePaid(
+        rideId: rideId,
+        nowIso: nowIso,
+        viaWalletService: true,
+      );
 
       if (fee > 0) {
         await _postWalletCreditTx(
@@ -503,6 +507,7 @@ class WalletService {
         baseFareMinor: baseFareMinor,
         premiumSeatMarkupMinor: premiumSeatMarkupMinor,
         nowIso: isoNowUtc(_nowUtc()),
+        viaFinanceSettlementService: true,
       );
 
       final result = <String, Object?>{

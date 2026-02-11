@@ -121,6 +121,27 @@ void main() {
         nowIso: nowIso,
         viaCancelRideService: true,
       );
+
+      expect(
+        () => dao.markConnectionFeePaid(
+          rideId: 'dao_guard_ride_2',
+          nowIso: nowIso,
+          viaWalletService: false,
+        ),
+        throwsArgumentError,
+      );
+
+      expect(
+        () => dao.updateFinanceIfExists(
+          rideId: 'dao_guard_ride_2',
+          baseFareMinor: 0,
+          premiumSeatMarkupMinor: 0,
+          nowIso: nowIso,
+          viaFinanceSettlementService: false,
+        ),
+        throwsArgumentError,
+      );
+
       final rows = await db.query(
         'rides',
         where: 'id = ?',

@@ -16,6 +16,7 @@ class TableNames {
   static const String escrowHolds = 'escrow_holds';
   static const String payouts = 'payouts';
   static const String payoutRecords = 'payout_records';
+  static const String walletReversals = 'wallet_reversals';
   static const String penalties = 'penalties';
   static const String penaltyRecords = 'penalty_records';
   static const String referralCodes = 'referral_codes';

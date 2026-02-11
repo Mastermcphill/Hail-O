@@ -10,6 +10,7 @@ import '../../data/sqlite/dao/escrow_holds_dao.dart';
 import '../../data/sqlite/dao/fleet_configs_dao.dart';
 import '../../data/sqlite/dao/idempotency_dao.dart';
 import '../../data/sqlite/dao/penalties_dao.dart';
+import '../../data/sqlite/dao/penalty_records_dao.dart';
 import '../../data/sqlite/dao/payout_records_dao.dart';
 import '../../data/sqlite/dao/rides_dao.dart';
 import '../../data/sqlite/dao/seats_dao.dart';
@@ -20,6 +21,7 @@ import '../models/payout_record.dart';
 import '../models/settlement_result.dart';
 import '../models/wallet.dart';
 import '../models/wallet_ledger_entry.dart';
+import 'ride_lifecycle_guard_service.dart';
 import '../../services/autosave_service.dart';
 import '../../services/moneybox_service.dart';
 import 'finance_utils.dart';
@@ -48,6 +50,8 @@ class RideSettlementService {
   final IdempotencyStore _idempotencyStore;
 
   static const String _scopeSettleOnEscrowRelease = 'ride_settlement';
+  static const RideLifecycleGuardService _rideLifecycleGuard =
+      RideLifecycleGuardService();
 
   Future<SettlementResult> settleOnEscrowRelease({
     required String escrowId,
@@ -56,10 +60,11 @@ class RideSettlementService {
     required SettlementTrigger trigger,
   }) async {
     _requireIdempotency(idempotencyKey);
+    final canonicalIdempotencyKey = _canonicalIdempotencyKey(escrowId);
 
     final claim = await _idempotencyStore.claim(
       scope: _scopeSettleOnEscrowRelease,
-      key: idempotencyKey,
+      key: canonicalIdempotencyKey,
       requestHash: '$escrowId|$rideId|${trigger.dbValue}',
     );
 
@@ -73,6 +78,12 @@ class RideSettlementService {
 
     try {
       final result = await db.transaction((txn) async {
+        final payoutDao = PayoutRecordsDao(txn);
+        final existingPayout = await payoutDao.findByEscrowId(escrowId);
+        if (existingPayout != null) {
+          return _settlementFromPayout(existingPayout, replayed: true);
+        }
+
         final escrow = await EscrowHoldsDao(txn).findById(escrowId);
         if (escrow == null) {
           return SettlementResult.error(
@@ -114,6 +125,17 @@ class RideSettlementService {
           );
         }
 
+        final rideStatus = (ride['status'] as String?) ?? '';
+        try {
+          _rideLifecycleGuard.assertCanSettleFinance(rideStatus);
+        } on RideLifecycleViolation catch (e) {
+          return SettlementResult.error(
+            rideId: rideId,
+            escrowId: escrowId,
+            error: e.code,
+          );
+        }
+
         final baseFareMinor = (ride['base_fare_minor'] as int?) ?? 0;
         final ridePremiumMarkupMinor =
             (ride['premium_markup_minor'] as int?) ?? 0;
@@ -124,12 +146,21 @@ class RideSettlementService {
             ? seatPremiumMarkupMinor
             : ridePremiumMarkupMinor;
 
-        final penalties = await PenaltiesDao(
-          txn,
-        ).listByUserAndReason(userId: driverId, reason: rideId);
         var penaltyDueMinor = 0;
-        for (final penalty in penalties) {
-          penaltyDueMinor += penalty.amountMinor;
+        final penaltyAuditRows = await PenaltyRecordsDao(
+          txn,
+        ).listByRideId(rideId);
+        if (penaltyAuditRows.isNotEmpty) {
+          for (final penalty in penaltyAuditRows) {
+            penaltyDueMinor += penalty.amountMinor;
+          }
+        } else {
+          final penalties = await PenaltiesDao(
+            txn,
+          ).listByUserAndReason(userId: driverId, reason: rideId);
+          for (final penalty in penalties) {
+            penaltyDueMinor += penalty.amountMinor;
+          }
         }
 
         final profile = await DriverProfilesDao(txn).findByDriverId(driverId);
@@ -214,7 +245,7 @@ class RideSettlementService {
             driverAllowanceMinor;
         final now = _nowUtc();
 
-        await PayoutRecordsDao(txn).insert(
+        await payoutDao.insert(
           PayoutRecord(
             id: 'payout:$escrowId',
             rideId: rideId,
@@ -238,9 +269,12 @@ class RideSettlementService {
               'premium_locked_minor': premiumLockedMinor,
               'driver_allowance_minor': driverAllowanceMinor,
               'penalty_due_minor': penaltyDueMinor,
+              'penalty_source': penaltyAuditRows.isNotEmpty
+                  ? 'penalty_records'
+                  : 'penalties_legacy',
             }),
             idempotencyScope: _scopeSettleOnEscrowRelease,
-            idempotencyKey: idempotencyKey,
+            idempotencyKey: canonicalIdempotencyKey,
             createdAt: now,
           ),
         );
@@ -250,6 +284,7 @@ class RideSettlementService {
           baseFareMinor: baseFareMinor,
           premiumSeatMarkupMinor: premiumMarkupMinor,
           nowIso: isoNowUtc(now),
+          viaFinanceSettlementService: true,
         );
 
         return SettlementResult(
@@ -273,7 +308,7 @@ class RideSettlementService {
       if (!result.ok) {
         await _idempotencyStore.finalizeFailure(
           scope: _scopeSettleOnEscrowRelease,
-          key: idempotencyKey,
+          key: canonicalIdempotencyKey,
           errorCode: result.error ?? 'ride_settlement_failed',
         );
         return result;
@@ -282,14 +317,14 @@ class RideSettlementService {
       final hash = _hashResult(result);
       await _idempotencyStore.finalizeSuccess(
         scope: _scopeSettleOnEscrowRelease,
-        key: idempotencyKey,
+        key: canonicalIdempotencyKey,
         resultHash: hash,
       );
       return result.copyWith(resultHash: hash);
     } catch (_) {
       await _idempotencyStore.finalizeFailure(
         scope: _scopeSettleOnEscrowRelease,
-        key: idempotencyKey,
+        key: canonicalIdempotencyKey,
         errorCode: 'ride_settlement_exception',
       );
       rethrow;
@@ -302,28 +337,15 @@ class RideSettlementService {
     required String escrowId,
   }) async {
     if (record.status == IdempotencyStatus.success) {
-      final payout = await PayoutRecordsDao(db).findByIdempotency(
-        idempotencyScope: _scopeSettleOnEscrowRelease,
-        idempotencyKey: record.key,
-      );
+      final payout =
+          await PayoutRecordsDao(db).findByEscrowId(escrowId) ??
+          await PayoutRecordsDao(db).findByIdempotency(
+            idempotencyScope: _scopeSettleOnEscrowRelease,
+            idempotencyKey: record.key,
+          );
       if (payout != null) {
-        return SettlementResult(
-          ok: true,
-          rideId: payout.rideId,
-          escrowId: payout.escrowId,
-          trigger: SettlementTrigger.fromDbValue(payout.trigger),
-          recipientOwnerId: payout.recipientOwnerId,
-          recipientWalletType: WalletType.fromDbValue(
-            payout.recipientWalletType,
-          ),
-          totalPaidMinor: payout.totalPaidMinor,
-          commissionGrossMinor: payout.commissionGrossMinor,
-          commissionSavedMinor: payout.commissionSavedMinor,
-          commissionRemainderMinor: payout.commissionRemainderMinor,
-          premiumLockedMinor: payout.premiumLockedMinor,
-          driverAllowanceMinor: payout.driverAllowanceMinor,
-          cashDebtMinor: payout.cashDebtMinor,
-          penaltyDueMinor: payout.penaltyDueMinor,
+        return _settlementFromPayout(
+          payout,
           replayed: true,
           resultHash: record.resultHash,
         );
@@ -343,6 +365,31 @@ class RideSettlementService {
       error: record.errorCode ?? 'ride_settlement_failed',
       resultHash: record.resultHash,
       replayed: true,
+    );
+  }
+
+  SettlementResult _settlementFromPayout(
+    PayoutRecord payout, {
+    required bool replayed,
+    String? resultHash,
+  }) {
+    return SettlementResult(
+      ok: true,
+      rideId: payout.rideId,
+      escrowId: payout.escrowId,
+      trigger: SettlementTrigger.fromDbValue(payout.trigger),
+      recipientOwnerId: payout.recipientOwnerId,
+      recipientWalletType: WalletType.fromDbValue(payout.recipientWalletType),
+      totalPaidMinor: payout.totalPaidMinor,
+      commissionGrossMinor: payout.commissionGrossMinor,
+      commissionSavedMinor: payout.commissionSavedMinor,
+      commissionRemainderMinor: payout.commissionRemainderMinor,
+      premiumLockedMinor: payout.premiumLockedMinor,
+      driverAllowanceMinor: payout.driverAllowanceMinor,
+      cashDebtMinor: payout.cashDebtMinor,
+      penaltyDueMinor: payout.penaltyDueMinor,
+      replayed: replayed,
+      resultHash: resultHash,
     );
   }
 
@@ -437,6 +484,8 @@ class RideSettlementService {
   String _hashResult(SettlementResult result) {
     return sha256.convert(utf8.encode(jsonEncode(result.toMap()))).toString();
   }
+
+  String _canonicalIdempotencyKey(String escrowId) => 'settlement:$escrowId';
 
   void _requireIdempotency(String key) {
     if (key.trim().isEmpty) {

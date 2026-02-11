@@ -18,6 +18,7 @@ import '../models/wallet.dart';
 import '../models/wallet_ledger_entry.dart';
 import 'finance_utils.dart';
 import 'penalty_engine_service.dart';
+import 'ride_lifecycle_guard_service.dart';
 
 class CancellationResult {
   const CancellationResult({
@@ -68,6 +69,8 @@ class CancelRideService {
   final PenaltyEngineService _penaltyEngineService;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
+  static const RideLifecycleGuardService _rideLifecycleGuard =
+      RideLifecycleGuardService();
 
   static const String _scopeCancellationPenalty = 'cancellation_penalty';
   static const String _platformOwnerId = 'platform';
@@ -160,6 +163,57 @@ class CancelRideService {
 
     try {
       final result = await db.transaction((txn) async {
+        final ridesDao = RidesDao(txn);
+        final ride = await ridesDao.findById(rideId);
+        if (ride == null) {
+          return CancellationResult(
+            ok: false,
+            rideId: rideId,
+            penaltyMinor: 0,
+            status: 'failed',
+            replayed: false,
+            error: 'ride_not_found',
+          );
+        }
+
+        final rideStatus = (ride['status'] as String?) ?? '';
+        if (_rideLifecycleGuard.isAlreadyCancelled(rideStatus)) {
+          final existing = await PenaltyRecordsDao(
+            txn,
+          ).findLatestByRideId(rideId);
+          if (existing == null) {
+            return CancellationResult(
+              ok: false,
+              rideId: rideId,
+              penaltyMinor: 0,
+              status: 'failed',
+              replayed: false,
+              error: 'ride_already_cancelled_without_penalty_record',
+            );
+          }
+          return CancellationResult(
+            ok: true,
+            rideId: rideId,
+            penaltyMinor: existing.amountMinor,
+            status: existing.status,
+            replayed: true,
+            ruleCode: existing.ruleCode,
+          );
+        }
+
+        try {
+          _rideLifecycleGuard.assertCanCancel(rideStatus);
+        } on RideLifecycleViolation catch (e) {
+          return CancellationResult(
+            ok: false,
+            rideId: rideId,
+            penaltyMinor: 0,
+            status: 'failed',
+            replayed: false,
+            error: e.code,
+          );
+        }
+
         final now = cancelledAt?.toUtc() ?? _nowUtc();
         final nowIso = isoNowUtc(now);
 
@@ -209,7 +263,7 @@ class CancelRideService {
                 : null,
           ),
         );
-        await RidesDao(txn).markCancelled(
+        await ridesDao.markCancelled(
           rideId: rideId,
           nowIso: nowIso,
           viaCancelRideService: true,
@@ -224,6 +278,15 @@ class CancelRideService {
           ruleCode: ruleCode,
         );
       });
+
+      if (!result.ok) {
+        await _idempotencyStore.finalizeFailure(
+          scope: _scopeCancellationPenalty,
+          key: idempotencyKey,
+          errorCode: result.error ?? 'cancellation_penalty_failed',
+        );
+        return result;
+      }
 
       final hash = sha256
           .convert(utf8.encode(jsonEncode(result.toMap())))
