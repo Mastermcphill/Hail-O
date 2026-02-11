@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
+import 'package:hail_o_finance_core/domain/models/wallet.dart';
 import 'package:hail_o_finance_core/services/autosave_service.dart';
-import 'package:hail_o_finance_core/services/finance_database.dart';
 import 'package:hail_o_finance_core/services/moneybox_service.dart';
 import 'package:hail_o_finance_core/services/wallet_scheduler.dart';
 import 'package:hail_o_finance_core/services/wallet_service.dart';
@@ -166,5 +166,52 @@ void main() {
       expect(accountRows.first['projected_bonus_minor'], 60);
       expect(accountRows.first['expected_at_maturity_minor'], 2060);
     });
+
+    test(
+      'wallet settle idempotency duplicate call does not double-credit',
+      () async {
+        final db = await HailODatabase().open(
+          databasePath: inMemoryDatabasePath,
+        );
+        addTearDown(db.close);
+
+        final walletService = WalletService(db);
+        await walletService.upsertUser(userId: 'driver_idem', role: 'driver');
+
+        final first = await walletService.settleRideFinance(
+          rideId: 'ride_idem_1',
+          driverId: 'driver_idem',
+          baseFareMinor: 10000,
+          premiumSeatMarkupMinor: 0,
+          cashCollectedMinor: 0,
+          idempotencyKey: 'settle_idem_1',
+        );
+        expect(first['replayed'], isNull);
+        expect(first['wallet_a_minor'], 8000);
+
+        final second = await walletService.settleRideFinance(
+          rideId: 'ride_idem_1',
+          driverId: 'driver_idem',
+          baseFareMinor: 10000,
+          premiumSeatMarkupMinor: 0,
+          cashCollectedMinor: 0,
+          idempotencyKey: 'settle_idem_1',
+        );
+        expect(second['replayed'], true);
+
+        final balance = await walletService.getWalletBalanceMinor(
+          ownerId: 'driver_idem',
+          walletType: WalletType.driverA,
+        );
+        expect(balance, 8000);
+
+        final ledgerRows = await db.query(
+          'wallet_ledger',
+          where: 'idempotency_scope = ? AND reference_id = ?',
+          whereArgs: const <Object>['settle_ride_finance', 'ride_idem_1'],
+        );
+        expect(ledgerRows.length, 1);
+      },
+    );
   });
 }

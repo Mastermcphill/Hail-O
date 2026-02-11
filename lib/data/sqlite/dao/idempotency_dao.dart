@@ -38,7 +38,7 @@ abstract class IdempotencyStore {
 class IdempotencyDao implements IdempotencyStore {
   const IdempotencyDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   @override
   Future<IdempotencyClaimResult> claim({

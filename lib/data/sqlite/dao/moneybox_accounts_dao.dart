@@ -6,7 +6,7 @@ import '../table_names.dart';
 class MoneyBoxAccountsDao {
   const MoneyBoxAccountsDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> upsert(MoneyBoxAccount account) async {
     await db.insert(

@@ -3,7 +3,14 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
-import 'finance_database.dart';
+import '../data/repositories/moneybox_repository.dart';
+import '../data/repositories/sqlite_moneybox_repository.dart';
+import '../data/sqlite/dao/idempotency_dao.dart';
+import '../data/sqlite/dao/moneybox_accounts_dao.dart';
+import '../data/sqlite/dao/moneybox_ledger_dao.dart';
+import '../domain/models/moneybox_account.dart';
+import '../domain/models/moneybox_ledger_entry.dart';
+import '../domain/services/finance_utils.dart';
 
 class MoneyBoxService {
   MoneyBoxService(this.db, {DateTime Function()? nowUtc})
@@ -29,37 +36,38 @@ class MoneyBoxService {
         autoOpenDate ??
         lock.add(_tierDuration(safeTier) - const Duration(days: 1));
     final maturity = maturityDate ?? lock.add(_tierDuration(safeTier));
-    final nowIso = isoNowUtc(now);
 
-    await db.insert('moneybox_accounts', <String, Object?>{
-      'owner_id': ownerId,
-      'tier': safeTier,
-      'lock_start': isoNowUtc(lock),
-      'auto_open_date': isoNowUtc(openDate),
-      'maturity_date': isoNowUtc(maturity),
-      'principal_minor': 0,
-      'projected_bonus_minor': 0,
-      'expected_at_maturity_minor': 0,
-      'autosave_percent': safeAutosave,
-      'bonus_eligible': 1,
-      'status': status,
-      'created_at': nowIso,
-      'updated_at': nowIso,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final repo = _moneyBoxRepositoryFor(db);
+    final existing = await repo.getAccount(ownerId);
+    if (existing == null) {
+      await repo.upsertAccount(
+        MoneyBoxAccount(
+          ownerId: ownerId,
+          tier: MoneyBoxTier.fromValue(safeTier),
+          status: status,
+          lockStart: lock,
+          autoOpenDate: openDate,
+          maturityDate: maturity,
+          principalMinor: 0,
+          projectedBonusMinor: 0,
+          expectedAtMaturityMinor: 0,
+          autosavePercent: safeAutosave,
+          bonusEligible: true,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
     return getAccount(ownerId);
   }
 
   Future<Map<String, Object?>> getAccount(String ownerId) async {
-    final rows = await db.query(
-      'moneybox_accounts',
-      where: 'owner_id = ?',
-      whereArgs: <Object>[ownerId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return ensureAccount(ownerId: ownerId);
+    final repo = _moneyBoxRepositoryFor(db);
+    final account = await repo.getAccount(ownerId);
+    if (account != null) {
+      return account.toMap();
     }
-    return Map<String, Object?>.from(rows.first);
+    return ensureAccount(ownerId: ownerId);
   }
 
   Future<Map<String, Object?>> setAutosave({
@@ -85,21 +93,29 @@ class MoneyBoxService {
         };
       }
 
-      await _ensureAccountTx(txn, ownerId);
-      final nowIso = isoNowUtc(_nowUtc());
-      await txn.update(
-        'moneybox_accounts',
-        <String, Object?>{'autosave_percent': safe, 'updated_at': nowIso},
-        where: 'owner_id = ?',
-        whereArgs: <Object>[ownerId],
+      final account = await _ensureAccountTx(txn, ownerId);
+      final updated = MoneyBoxAccount(
+        ownerId: account.ownerId,
+        tier: account.tier,
+        status: account.status,
+        lockStart: account.lockStart,
+        autoOpenDate: account.autoOpenDate,
+        maturityDate: account.maturityDate,
+        principalMinor: account.principalMinor,
+        projectedBonusMinor: account.projectedBonusMinor,
+        expectedAtMaturityMinor: account.expectedAtMaturityMinor,
+        autosavePercent: safe,
+        bonusEligible: account.bonusEligible,
+        createdAt: account.createdAt,
+        updatedAt: _nowUtc(),
       );
+      await _moneyBoxRepositoryFor(txn).upsertAccount(updated);
 
-      final account = await _accountTx(txn, ownerId);
       final result = <String, Object?>{
         'ok': true,
         'owner_id': ownerId,
         'autosave_percent': safe,
-        'status': account['status'],
+        'status': updated.status,
       };
       await _finalize(txn, scope: scope, key: idempotencyKey, result: result);
       return result;
@@ -134,41 +150,49 @@ class MoneyBoxService {
         };
       }
 
-      await _ensureAccountTx(txn, ownerId);
-      final account = await _accountTx(txn, ownerId);
-
-      final tier = (account['tier'] as int?) ?? 1;
-      final principalBefore = (account['principal_minor'] as int?) ?? 0;
-      final principalAfter = principalBefore + amountMinor;
-      final projectedBonusAfter = _projectedBonus(principalAfter, tier);
+      final account = await _ensureAccountTx(txn, ownerId);
+      final principalAfter = account.principalMinor + amountMinor;
+      final projectedBonusAfter = _projectedBonus(
+        principalAfter,
+        account.tier.value,
+      );
       final expectedAfter = principalAfter + projectedBonusAfter;
-      final nowIso = isoNowUtc(_nowUtc());
+      final now = _nowUtc();
+      final repo = _moneyBoxRepositoryFor(txn);
 
-      await txn.update(
-        'moneybox_accounts',
-        <String, Object?>{
-          'principal_minor': principalAfter,
-          'projected_bonus_minor': projectedBonusAfter,
-          'expected_at_maturity_minor': expectedAfter,
-          'updated_at': nowIso,
-        },
-        where: 'owner_id = ?',
-        whereArgs: <Object>[ownerId],
+      await repo.upsertAccount(
+        MoneyBoxAccount(
+          ownerId: account.ownerId,
+          tier: account.tier,
+          status: account.status,
+          lockStart: account.lockStart,
+          autoOpenDate: account.autoOpenDate,
+          maturityDate: account.maturityDate,
+          principalMinor: principalAfter,
+          projectedBonusMinor: projectedBonusAfter,
+          expectedAtMaturityMinor: expectedAfter,
+          autosavePercent: account.autosavePercent,
+          bonusEligible: account.bonusEligible,
+          createdAt: account.createdAt,
+          updatedAt: now,
+        ),
       );
 
-      await txn.insert('moneybox_ledger', <String, Object?>{
-        'owner_id': ownerId,
-        'entry_type': 'autosave_credit',
-        'amount_minor': amountMinor,
-        'principal_after_minor': principalAfter,
-        'projected_bonus_after_minor': projectedBonusAfter,
-        'expected_after_minor': expectedAfter,
-        'source_kind': sourceKind,
-        'reference_id': referenceId,
-        'idempotency_scope': scope,
-        'idempotency_key': '$idempotencyKey:moneybox_ledger',
-        'created_at': nowIso,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
+      await repo.appendLedger(
+        MoneyBoxLedgerEntry(
+          ownerId: ownerId,
+          entryType: 'autosave_credit',
+          amountMinor: amountMinor,
+          principalAfterMinor: principalAfter,
+          projectedBonusAfterMinor: projectedBonusAfter,
+          expectedAfterMinor: expectedAfter,
+          sourceKind: sourceKind,
+          referenceId: referenceId,
+          idempotencyScope: scope,
+          idempotencyKey: '$idempotencyKey:moneybox_ledger',
+          createdAt: now,
+        ),
+      );
 
       final result = <String, Object?>{
         'ok': true,
@@ -205,44 +229,34 @@ class MoneyBoxService {
     return percentOf(safePrincipal, pct);
   }
 
-  Future<void> _ensureAccountTx(Transaction txn, String ownerId) async {
-    final now = _nowUtc();
-    final nowIso = isoNowUtc(now);
-    final lockStart = nowIso;
-    final autoOpen = isoNowUtc(now.add(const Duration(days: 29)));
-    final maturity = isoNowUtc(now.add(const Duration(days: 30)));
-
-    await txn.insert('moneybox_accounts', <String, Object?>{
-      'owner_id': ownerId,
-      'tier': 1,
-      'lock_start': lockStart,
-      'auto_open_date': autoOpen,
-      'maturity_date': maturity,
-      'principal_minor': 0,
-      'projected_bonus_minor': 0,
-      'expected_at_maturity_minor': 0,
-      'autosave_percent': 0,
-      'bonus_eligible': 1,
-      'status': 'active',
-      'created_at': nowIso,
-      'updated_at': nowIso,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-  }
-
-  Future<Map<String, Object?>> _accountTx(
-    Transaction txn,
+  Future<MoneyBoxAccount> _ensureAccountTx(
+    DatabaseExecutor txn,
     String ownerId,
   ) async {
-    final rows = await txn.query(
-      'moneybox_accounts',
-      where: 'owner_id = ?',
-      whereArgs: <Object>[ownerId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      throw StateError('moneybox_account_not_found:$ownerId');
+    final repo = _moneyBoxRepositoryFor(txn);
+    final existing = await repo.getAccount(ownerId);
+    if (existing != null) {
+      return existing;
     }
-    return Map<String, Object?>.from(rows.first);
+
+    final now = _nowUtc();
+    final account = MoneyBoxAccount(
+      ownerId: ownerId,
+      tier: MoneyBoxTier.tier1,
+      status: 'active',
+      lockStart: now,
+      autoOpenDate: now.add(const Duration(days: 29)),
+      maturityDate: now.add(const Duration(days: 30)),
+      principalMinor: 0,
+      projectedBonusMinor: 0,
+      expectedAtMaturityMinor: 0,
+      autosavePercent: 0,
+      bonusEligible: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await repo.upsertAccount(account);
+    return (await repo.getAccount(ownerId))!;
   }
 
   void _requireIdempotency(String key) {
@@ -252,66 +266,39 @@ class MoneyBoxService {
   }
 
   Future<bool> _claimIdempotency(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    try {
-      await txn.insert('idempotency_keys', <String, Object?>{
-        'scope': scope,
-        'key': key,
-        'request_hash': null,
-        'status': 'claimed',
-        'result_hash': null,
-        'error_code': null,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
-      return true;
-    } on DatabaseException catch (e) {
-      if (e.isUniqueConstraintError()) {
-        return false;
-      }
-      rethrow;
-    }
+    final claim = await IdempotencyDao(txn).claim(scope: scope, key: key);
+    return claim.isNewClaim;
   }
 
   Future<String> _readHash(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final rows = await txn.query(
-      'idempotency_keys',
-      columns: <String>['result_hash'],
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return '';
-    }
-    return (rows.first['result_hash'] as String?) ?? '';
+    final record = await IdempotencyDao(txn).get(scope: scope, key: key);
+    return record?.resultHash ?? '';
   }
 
   Future<void> _finalize(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
     required Map<String, Object?> result,
   }) async {
     final hash = sha256.convert(utf8.encode(jsonEncode(result))).toString();
-    await txn.update(
-      'idempotency_keys',
-      <String, Object?>{
-        'status': 'success',
-        'result_hash': hash,
-        'error_code': null,
-        'updated_at': isoNowUtc(_nowUtc()),
-      },
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
+    await IdempotencyDao(
+      txn,
+    ).finalizeSuccess(scope: scope, key: key, resultHash: hash);
+  }
+
+  MoneyBoxRepository _moneyBoxRepositoryFor(DatabaseExecutor txnOrDb) {
+    return SqliteMoneyBoxRepository(
+      accountsDao: MoneyBoxAccountsDao(txnOrDb),
+      ledgerDao: MoneyBoxLedgerDao(txnOrDb),
     );
   }
 }

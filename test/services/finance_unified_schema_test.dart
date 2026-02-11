@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
+import 'package:hail_o_finance_core/domain/models/wallet.dart';
 import 'package:hail_o_finance_core/services/autosave_service.dart';
-import 'package:hail_o_finance_core/services/finance_database.dart';
 import 'package:hail_o_finance_core/services/moneybox_service.dart';
 import 'package:hail_o_finance_core/services/wallet_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';

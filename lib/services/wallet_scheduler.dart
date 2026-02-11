@@ -1,6 +1,8 @@
 import 'package:sqflite/sqflite.dart';
 
-import 'finance_database.dart';
+import '../data/sqlite/dao/wallets_dao.dart';
+import '../domain/models/wallet.dart';
+import '../domain/services/finance_utils.dart';
 import 'wallet_service.dart';
 
 class WalletScheduler {
@@ -28,20 +30,16 @@ class WalletScheduler {
       };
     }
 
-    final ownerRows = await db.query(
-      'wallets',
-      columns: <String>['owner_id', 'balance_minor'],
-      where: 'wallet_type = ? AND balance_minor > 0',
-      whereArgs: <Object>[WalletType.driverB.value],
-      orderBy: 'owner_id ASC',
-    );
+    final wallets = await WalletsDao(
+      db,
+    ).listByTypeWithPositiveBalance(WalletType.driverB);
 
     var movedWalletCount = 0;
     var movedTotalMinor = 0;
     final batchTag = _batchTag(lagos);
 
-    for (final row in ownerRows) {
-      final ownerId = (row['owner_id'] as String?) ?? '';
+    for (final wallet in wallets) {
+      final ownerId = wallet.ownerId;
       if (ownerId.isEmpty) {
         continue;
       }

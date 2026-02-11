@@ -7,7 +7,7 @@ import '../table_names.dart';
 class WalletLedgerDao {
   const WalletLedgerDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<int> append(WalletLedgerEntry entry) async {
     return db.insert(

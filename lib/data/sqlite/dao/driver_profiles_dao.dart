@@ -6,7 +6,7 @@ import '../table_names.dart';
 class DriverProfilesDao {
   const DriverProfilesDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> upsert(DriverProfile profile) async {
     await db.insert(

@@ -6,7 +6,7 @@ import '../table_names.dart';
 class UsersDao {
   const UsersDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> insert(User user) async {
     await db.insert(

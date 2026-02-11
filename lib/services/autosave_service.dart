@@ -3,7 +3,20 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
-import 'finance_database.dart';
+import '../data/repositories/moneybox_repository.dart';
+import '../data/repositories/sqlite_moneybox_repository.dart';
+import '../data/repositories/sqlite_wallet_repository.dart';
+import '../data/repositories/wallet_repository.dart';
+import '../data/sqlite/dao/idempotency_dao.dart';
+import '../data/sqlite/dao/moneybox_accounts_dao.dart';
+import '../data/sqlite/dao/moneybox_ledger_dao.dart';
+import '../data/sqlite/dao/wallet_ledger_dao.dart';
+import '../data/sqlite/dao/wallets_dao.dart';
+import '../domain/models/moneybox_account.dart';
+import '../domain/models/moneybox_ledger_entry.dart';
+import '../domain/models/wallet.dart';
+import '../domain/models/wallet_ledger_entry.dart';
+import '../domain/services/finance_utils.dart';
 import 'moneybox_service.dart';
 
 class AutosaveService {
@@ -54,74 +67,95 @@ class AutosaveService {
         };
       }
 
-      await _ensureMoneyBoxAccountTx(txn, ownerId);
-      final account = await _moneyBoxAccountTx(txn, ownerId);
+      final moneyboxRepo = _moneyBoxRepositoryFor(txn);
+      final walletRepo = _walletRepositoryFor(txn);
+      final account = await _ensureMoneyBoxAccountTx(txn, ownerId);
 
-      final autosavePercent = ((account['autosave_percent'] as int?) ?? 0)
-          .clamp(0, 30);
-      final tier = (account['tier'] as int?) ?? 1;
-      final principalBefore = (account['principal_minor'] as int?) ?? 0;
-
+      final autosavePercent = account.autosavePercent.clamp(0, 30);
       final savedMinor = autosavePercent >= 1
           ? percentOf(grossAmountMinor, autosavePercent)
           : 0;
       final remainderMinor = grossAmountMinor - savedMinor;
-      final nowIso = isoNowUtc(_nowUtc());
 
-      var principalAfter = principalBefore;
-      var projectedBonusAfter = (account['projected_bonus_minor'] as int?) ?? 0;
-      var expectedAfter = (account['expected_at_maturity_minor'] as int?) ?? 0;
+      var principalAfter = account.principalMinor;
+      var projectedBonusAfter = account.projectedBonusMinor;
+      var expectedAfter = account.expectedAtMaturityMinor;
+      final now = _nowUtc();
 
       if (savedMinor > 0) {
-        principalAfter = principalBefore + savedMinor;
+        principalAfter = account.principalMinor + savedMinor;
         projectedBonusAfter = moneyBoxService.projectedBonusFor(
           principalMinor: principalAfter,
-          tier: tier,
+          tier: account.tier.value,
         );
         expectedAfter = principalAfter + projectedBonusAfter;
 
-        await txn.update(
-          'moneybox_accounts',
-          <String, Object?>{
-            'principal_minor': principalAfter,
-            'projected_bonus_minor': projectedBonusAfter,
-            'expected_at_maturity_minor': expectedAfter,
-            'updated_at': nowIso,
-          },
-          where: 'owner_id = ?',
-          whereArgs: <Object>[ownerId],
+        await moneyboxRepo.upsertAccount(
+          MoneyBoxAccount(
+            ownerId: account.ownerId,
+            tier: account.tier,
+            status: account.status,
+            lockStart: account.lockStart,
+            autoOpenDate: account.autoOpenDate,
+            maturityDate: account.maturityDate,
+            principalMinor: principalAfter,
+            projectedBonusMinor: projectedBonusAfter,
+            expectedAtMaturityMinor: expectedAfter,
+            autosavePercent: account.autosavePercent,
+            bonusEligible: account.bonusEligible,
+            createdAt: account.createdAt,
+            updatedAt: now,
+          ),
         );
 
-        await txn.insert('moneybox_ledger', <String, Object?>{
-          'owner_id': ownerId,
-          'entry_type': 'autosave_credit',
-          'amount_minor': savedMinor,
-          'principal_after_minor': principalAfter,
-          'projected_bonus_after_minor': projectedBonusAfter,
-          'expected_after_minor': expectedAfter,
-          'source_kind': sourceKind,
-          'reference_id': referenceId,
-          'idempotency_scope': scope,
-          'idempotency_key': '$idempotencyKey:moneybox',
-          'created_at': nowIso,
-        }, conflictAlgorithm: ConflictAlgorithm.abort);
+        await moneyboxRepo.appendLedger(
+          MoneyBoxLedgerEntry(
+            ownerId: ownerId,
+            entryType: 'autosave_credit',
+            amountMinor: savedMinor,
+            principalAfterMinor: principalAfter,
+            projectedBonusAfterMinor: projectedBonusAfter,
+            expectedAfterMinor: expectedAfter,
+            sourceKind: sourceKind,
+            referenceId: referenceId,
+            idempotencyScope: scope,
+            idempotencyKey: '$idempotencyKey:moneybox',
+            createdAt: now,
+          ),
+        );
       }
 
-      var walletBalanceAfter = await _walletBalanceTx(
+      var destinationWallet = await _ensureWalletTx(
         txn,
         ownerId: ownerId,
         walletType: destinationWalletType,
       );
+
       if (remainderMinor > 0) {
-        walletBalanceAfter = await _postWalletCreditTx(
-          txn,
-          ownerId: ownerId,
-          walletType: destinationWalletType,
-          amountMinor: remainderMinor,
-          kind: confirmedCommissionCredit,
-          referenceId: referenceId,
-          idempotencyScope: scope,
-          idempotencyKey: '$idempotencyKey:wallet',
+        final walletAfter = destinationWallet.balanceMinor + remainderMinor;
+        destinationWallet = Wallet(
+          ownerId: destinationWallet.ownerId,
+          walletType: destinationWallet.walletType,
+          balanceMinor: walletAfter,
+          reservedMinor: destinationWallet.reservedMinor,
+          currency: destinationWallet.currency,
+          createdAt: destinationWallet.createdAt,
+          updatedAt: now,
+        );
+        await walletRepo.upsertWallet(destinationWallet);
+        await walletRepo.appendLedger(
+          WalletLedgerEntry(
+            ownerId: ownerId,
+            walletType: destinationWalletType,
+            direction: LedgerDirection.credit,
+            amountMinor: remainderMinor,
+            balanceAfterMinor: walletAfter,
+            kind: confirmedCommissionCredit,
+            referenceId: referenceId,
+            idempotencyScope: scope,
+            idempotencyKey: '$idempotencyKey:wallet',
+            createdAt: now,
+          ),
         );
       }
 
@@ -132,7 +166,7 @@ class AutosaveService {
         'saved_minor': savedMinor,
         'remainder_minor': remainderMinor,
         'autosave_percent': autosavePercent,
-        'wallet_balance_after_minor': walletBalanceAfter,
+        'wallet_balance_after_minor': destinationWallet.balanceMinor,
         'moneybox_principal_after_minor': principalAfter,
         'moneybox_projected_bonus_after_minor': projectedBonusAfter,
         'moneybox_expected_after_minor': expectedAfter,
@@ -143,116 +177,58 @@ class AutosaveService {
     });
   }
 
-  Future<void> _ensureMoneyBoxAccountTx(Transaction txn, String ownerId) async {
-    final now = _nowUtc();
-    final nowIso = isoNowUtc(now);
-    await txn.insert('moneybox_accounts', <String, Object?>{
-      'owner_id': ownerId,
-      'tier': 1,
-      'lock_start': nowIso,
-      'auto_open_date': isoNowUtc(now.add(const Duration(days: 29))),
-      'maturity_date': isoNowUtc(now.add(const Duration(days: 30))),
-      'principal_minor': 0,
-      'projected_bonus_minor': 0,
-      'expected_at_maturity_minor': 0,
-      'autosave_percent': 0,
-      'bonus_eligible': 1,
-      'status': 'active',
-      'created_at': nowIso,
-      'updated_at': nowIso,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-  }
-
-  Future<Map<String, Object?>> _moneyBoxAccountTx(
-    Transaction txn,
+  Future<MoneyBoxAccount> _ensureMoneyBoxAccountTx(
+    DatabaseExecutor txn,
     String ownerId,
   ) async {
-    final rows = await txn.query(
-      'moneybox_accounts',
-      where: 'owner_id = ?',
-      whereArgs: <Object>[ownerId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      throw StateError('moneybox_account_not_found:$ownerId');
+    final repo = _moneyBoxRepositoryFor(txn);
+    final existing = await repo.getAccount(ownerId);
+    if (existing != null) {
+      return existing;
     }
-    return Map<String, Object?>.from(rows.first);
-  }
-
-  Future<void> _ensureWalletTx(
-    Transaction txn, {
-    required String ownerId,
-    required WalletType walletType,
-  }) async {
-    final nowIso = isoNowUtc(_nowUtc());
-    await txn.insert('wallets', <String, Object?>{
-      'owner_id': ownerId,
-      'wallet_type': walletType.value,
-      'balance_minor': 0,
-      'reserved_minor': 0,
-      'currency': 'NGN',
-      'created_at': nowIso,
-      'updated_at': nowIso,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-  }
-
-  Future<int> _walletBalanceTx(
-    Transaction txn, {
-    required String ownerId,
-    required WalletType walletType,
-  }) async {
-    await _ensureWalletTx(txn, ownerId: ownerId, walletType: walletType);
-    final rows = await txn.query(
-      'wallets',
-      columns: <String>['balance_minor'],
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
-      limit: 1,
+    final now = _nowUtc();
+    final account = MoneyBoxAccount(
+      ownerId: ownerId,
+      tier: MoneyBoxTier.tier1,
+      status: 'active',
+      lockStart: now,
+      autoOpenDate: now.add(const Duration(days: 29)),
+      maturityDate: now.add(const Duration(days: 30)),
+      principalMinor: 0,
+      projectedBonusMinor: 0,
+      expectedAtMaturityMinor: 0,
+      autosavePercent: 0,
+      bonusEligible: true,
+      createdAt: now,
+      updatedAt: now,
     );
-    if (rows.isEmpty) {
-      return 0;
-    }
-    return (rows.first['balance_minor'] as int?) ?? 0;
+    await repo.upsertAccount(account);
+    return (await repo.getAccount(ownerId))!;
   }
 
-  Future<int> _postWalletCreditTx(
-    Transaction txn, {
+  Future<Wallet> _ensureWalletTx(
+    DatabaseExecutor txn, {
     required String ownerId,
     required WalletType walletType,
-    required int amountMinor,
-    required String kind,
-    required String referenceId,
-    required String idempotencyScope,
-    required String idempotencyKey,
   }) async {
-    final current = await _walletBalanceTx(
-      txn,
+    final repo = _walletRepositoryFor(txn);
+    final existing = await repo.getWallet(ownerId, walletType);
+    if (existing != null) {
+      return existing;
+    }
+
+    final now = _nowUtc();
+    final wallet = Wallet(
       ownerId: ownerId,
       walletType: walletType,
+      balanceMinor: 0,
+      reservedMinor: 0,
+      currency: 'NGN',
+      updatedAt: now,
+      createdAt: now,
     );
-    final next = current + amountMinor;
-    final nowIso = isoNowUtc(_nowUtc());
-
-    await txn.update(
-      'wallets',
-      <String, Object?>{'balance_minor': next, 'updated_at': nowIso},
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
-    );
-
-    await txn.insert('wallet_ledger', <String, Object?>{
-      'owner_id': ownerId,
-      'wallet_type': walletType.value,
-      'direction': 'credit',
-      'amount_minor': amountMinor,
-      'balance_after_minor': next,
-      'kind': kind,
-      'reference_id': referenceId,
-      'idempotency_scope': idempotencyScope,
-      'idempotency_key': idempotencyKey,
-      'created_at': nowIso,
-    }, conflictAlgorithm: ConflictAlgorithm.abort);
-    return next;
+    await repo.upsertWallet(wallet);
+    return wallet;
   }
 
   void _requireIdempotency(String key) {
@@ -262,66 +238,46 @@ class AutosaveService {
   }
 
   Future<bool> _claimIdempotency(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    try {
-      await txn.insert('idempotency_keys', <String, Object?>{
-        'scope': scope,
-        'key': key,
-        'request_hash': null,
-        'status': 'claimed',
-        'result_hash': null,
-        'error_code': null,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
-      return true;
-    } on DatabaseException catch (e) {
-      if (e.isUniqueConstraintError()) {
-        return false;
-      }
-      rethrow;
-    }
+    final claim = await IdempotencyDao(txn).claim(scope: scope, key: key);
+    return claim.isNewClaim;
   }
 
   Future<String> _readHash(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final rows = await txn.query(
-      'idempotency_keys',
-      columns: <String>['result_hash'],
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return '';
-    }
-    return (rows.first['result_hash'] as String?) ?? '';
+    final record = await IdempotencyDao(txn).get(scope: scope, key: key);
+    return record?.resultHash ?? '';
   }
 
   Future<void> _finalize(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
     required Map<String, Object?> result,
   }) async {
     final hash = sha256.convert(utf8.encode(jsonEncode(result))).toString();
-    await txn.update(
-      'idempotency_keys',
-      <String, Object?>{
-        'status': 'success',
-        'result_hash': hash,
-        'error_code': null,
-        'updated_at': isoNowUtc(_nowUtc()),
-      },
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
+    await IdempotencyDao(
+      txn,
+    ).finalizeSuccess(scope: scope, key: key, resultHash: hash);
+  }
+
+  MoneyBoxRepository _moneyBoxRepositoryFor(DatabaseExecutor txnOrDb) {
+    return SqliteMoneyBoxRepository(
+      accountsDao: MoneyBoxAccountsDao(txnOrDb),
+      ledgerDao: MoneyBoxLedgerDao(txnOrDb),
+    );
+  }
+
+  WalletRepository _walletRepositoryFor(DatabaseExecutor txnOrDb) {
+    return SqliteWalletRepository(
+      walletsDao: WalletsDao(txnOrDb),
+      walletLedgerDao: WalletLedgerDao(txnOrDb),
     );
   }
 }

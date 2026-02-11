@@ -6,7 +6,7 @@ import '../table_names.dart';
 class WalletsDao {
   const WalletsDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> upsert(Wallet wallet) async {
     await db.insert(
@@ -35,6 +35,18 @@ class WalletsDao {
       where: 'owner_id = ?',
       whereArgs: <Object>[ownerId],
       orderBy: 'created_at ASC',
+    );
+    return rows.map(Wallet.fromMap).toList(growable: false);
+  }
+
+  Future<List<Wallet>> listByTypeWithPositiveBalance(
+    WalletType walletType,
+  ) async {
+    final rows = await db.query(
+      TableNames.wallets,
+      where: 'wallet_type = ? AND balance_minor > 0',
+      whereArgs: <Object>[walletType.dbValue],
+      orderBy: 'owner_id ASC',
     );
     return rows.map(Wallet.fromMap).toList(growable: false);
   }

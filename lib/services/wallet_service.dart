@@ -3,7 +3,20 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
-import 'finance_database.dart';
+import '../data/repositories/sqlite_wallet_repository.dart';
+import '../data/repositories/wallet_repository.dart';
+import '../data/sqlite/dao/driver_profiles_dao.dart';
+import '../data/sqlite/dao/fleet_configs_dao.dart';
+import '../data/sqlite/dao/idempotency_dao.dart';
+import '../data/sqlite/dao/rides_dao.dart';
+import '../data/sqlite/dao/users_dao.dart';
+import '../data/sqlite/dao/wallet_ledger_dao.dart';
+import '../data/sqlite/dao/wallets_dao.dart';
+import '../domain/models/driver_profile.dart';
+import '../domain/models/user.dart';
+import '../domain/models/wallet.dart';
+import '../domain/models/wallet_ledger_entry.dart';
+import '../domain/services/finance_utils.dart';
 
 class WalletService {
   WalletService(this.db, {DateTime Function()? nowUtc})
@@ -21,7 +34,7 @@ class WalletService {
   }) async {
     await db.transaction((txn) async {
       await _ensureUserTx(txn, userId: userId, role: role);
-      if (role == 'driver') {
+      if (role == UserRole.driver.dbValue) {
         await _ensureDriverProfileTx(
           txn,
           driverId: userId,
@@ -38,13 +51,14 @@ class WalletService {
     final now = isoNowUtc(_nowUtc());
     final safe = allowancePercent.clamp(0, 100);
     await db.transaction((txn) async {
-      await _ensureUserTx(txn, userId: fleetOwnerId, role: 'fleet_owner');
-      await txn.insert('fleet_configs', <String, Object?>{
-        'fleet_owner_id': fleetOwnerId,
-        'allowance_percent': safe,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await _ensureUserTx(
+        txn,
+        userId: fleetOwnerId,
+        role: UserRole.fleetOwner.dbValue,
+      );
+      await FleetConfigsDao(
+        txn,
+      ).upsert(fleetOwnerId: fleetOwnerId, allowancePercent: safe, nowIso: now);
     });
   }
 
@@ -52,17 +66,10 @@ class WalletService {
     required String ownerId,
     required WalletType walletType,
   }) async {
-    final rows = await db.query(
-      'wallets',
-      columns: <String>['balance_minor'],
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return 0;
-    }
-    return (rows.first['balance_minor'] as int?) ?? 0;
+    final wallet = await _walletRepositoryFor(
+      db,
+    ).getWallet(ownerId, walletType);
+    return wallet?.balanceMinor ?? 0;
   }
 
   Future<Map<String, int>> getDriverWalletBalances(String driverId) async {
@@ -124,24 +131,21 @@ class WalletService {
         };
       }
 
-      await _ensureUserTx(txn, userId: riderId, role: 'rider');
-      await _ensureUserTx(txn, userId: driverId, role: 'driver');
+      await _ensureUserTx(txn, userId: riderId, role: UserRole.rider.dbValue);
+      await _ensureUserTx(txn, userId: driverId, role: UserRole.driver.dbValue);
       await _ensureDriverProfileTx(txn, driverId: driverId);
 
       final nowIso = isoNowUtc(now);
-      await txn.insert('rides', <String, Object?>{
-        'id': rideId,
-        'rider_id': riderId,
-        'driver_id': driverId,
-        'trip_scope': tripScope,
-        'status': 'awaiting_connection_fee',
-        'bidding_mode': 1,
-        'connection_fee_minor': fee,
-        'bid_accepted_at': nowIso,
-        'connection_fee_deadline_at': isoNowUtc(deadline),
-        'created_at': nowIso,
-        'updated_at': nowIso,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await RidesDao(txn).upsertAwaitingConnectionFee(
+        rideId: rideId,
+        riderId: riderId,
+        driverId: driverId,
+        tripScope: tripScope,
+        feeMinor: fee,
+        bidAcceptedAtIso: nowIso,
+        feeDeadlineAtIso: isoNowUtc(deadline),
+        nowIso: nowIso,
+      );
 
       final result = <String, Object?>{
         'ok': true,
@@ -184,13 +188,8 @@ class WalletService {
         };
       }
 
-      final rows = await txn.query(
-        'rides',
-        where: 'id = ?',
-        whereArgs: <Object>[rideId],
-        limit: 1,
-      );
-      if (rows.isEmpty) {
+      final ride = await RidesDao(txn).findById(rideId);
+      if (ride == null) {
         const result = <String, Object?>{
           'ok': false,
           'error': 'ride_not_found',
@@ -204,8 +203,7 @@ class WalletService {
         return result;
       }
 
-      final row = rows.first;
-      final status = (row['status'] as String?) ?? '';
+      final status = (ride['status'] as String?) ?? '';
       if (status == 'cancelled') {
         const result = <String, Object?>{
           'ok': false,
@@ -220,7 +218,7 @@ class WalletService {
         return result;
       }
 
-      if ((row['connection_fee_paid_at'] as String?) != null) {
+      if ((ride['connection_fee_paid_at'] as String?) != null) {
         const result = <String, Object?>{'ok': true, 'already_paid': true};
         await _finalizeIdempotency(
           txn,
@@ -231,20 +229,13 @@ class WalletService {
         return result;
       }
 
-      final deadlineRaw = (row['connection_fee_deadline_at'] as String?) ?? '';
+      final deadlineRaw = (ride['connection_fee_deadline_at'] as String?) ?? '';
       final deadline = DateTime.tryParse(deadlineRaw)?.toUtc();
       final now = _nowUtc();
       if (deadline == null || now.isAfter(deadline)) {
-        await txn.update(
-          'rides',
-          <String, Object?>{
-            'status': 'cancelled',
-            'cancelled_at': isoNowUtc(now),
-            'updated_at': isoNowUtc(now),
-          },
-          where: 'id = ?',
-          whereArgs: <Object>[rideId],
-        );
+        await RidesDao(
+          txn,
+        ).markCancelled(rideId: rideId, nowIso: isoNowUtc(now));
         const result = <String, Object?>{
           'ok': false,
           'error': 'connection_fee_timeout_auto_cancelled',
@@ -258,18 +249,9 @@ class WalletService {
         return result;
       }
 
-      final fee = (row['connection_fee_minor'] as int?) ?? 0;
+      final fee = (ride['connection_fee_minor'] as int?) ?? 0;
       final nowIso = isoNowUtc(now);
-      await txn.update(
-        'rides',
-        <String, Object?>{
-          'status': 'connection_fee_paid',
-          'connection_fee_paid_at': nowIso,
-          'updated_at': nowIso,
-        },
-        where: 'id = ?',
-        whereArgs: <Object>[rideId],
-      );
+      await RidesDao(txn).markConnectionFeePaid(rideId: rideId, nowIso: nowIso);
 
       if (fee > 0) {
         await _postWalletCreditTx(
@@ -316,12 +298,9 @@ class WalletService {
         return 0;
       }
 
-      final candidates = await txn.query(
-        'rides',
-        columns: <String>['id', 'connection_fee_deadline_at'],
-        where: 'status = ? AND connection_fee_paid_at IS NULL',
-        whereArgs: const <Object>['awaiting_connection_fee'],
-      );
+      final candidates = await RidesDao(
+        txn,
+      ).listAwaitingConnectionFeeWithoutPayment();
 
       var cancelled = 0;
       for (final row in candidates) {
@@ -332,16 +311,9 @@ class WalletService {
         if (rideId.isEmpty || deadline == null || !now.isAfter(deadline)) {
           continue;
         }
-        await txn.update(
-          'rides',
-          <String, Object?>{
-            'status': 'cancelled',
-            'cancelled_at': isoNowUtc(now),
-            'updated_at': isoNowUtc(now),
-          },
-          where: 'id = ?',
-          whereArgs: <Object>[rideId],
-        );
+        await RidesDao(
+          txn,
+        ).markCancelled(rideId: rideId, nowIso: isoNowUtc(now));
         cancelled += 1;
       }
 
@@ -387,7 +359,7 @@ class WalletService {
         };
       }
 
-      await _ensureUserTx(txn, userId: driverId, role: 'driver');
+      await _ensureUserTx(txn, userId: driverId, role: UserRole.driver.dbValue);
       await _ensureDriverProfileTx(
         txn,
         driverId: driverId,
@@ -398,19 +370,16 @@ class WalletService {
           ? fleetOwnerId!.trim()
           : await _driverFleetOwnerTx(txn, driverId);
 
-      if (effectiveFleetOwnerId != null) {
-        await _ensureUserTx(
-          txn,
-          userId: effectiveFleetOwnerId,
-          role: 'fleet_owner',
-        );
-      }
-
       final baseShare80 = percentOf(baseFareMinor, 80);
       final premiumToB = percentOf(premiumSeatMarkupMinor, 50);
 
       var driverAllowanceMinor = 0;
       if (effectiveFleetOwnerId != null) {
+        await _ensureUserTx(
+          txn,
+          userId: effectiveFleetOwnerId,
+          role: UserRole.fleetOwner.dbValue,
+        );
         if (baseShare80 > 0) {
           await _postWalletCreditTx(
             txn,
@@ -493,11 +462,11 @@ class WalletService {
       await _upsertDriverBlockFlagTx(txn, driverId, blocked);
       await _upsertDriverCashDebtTx(txn, driverId, walletC);
 
-      await _updateRideIfExistsTx(
-        txn,
+      await RidesDao(txn).updateFinanceIfExists(
         rideId: rideId,
         baseFareMinor: baseFareMinor,
         premiumSeatMarkupMinor: premiumSeatMarkupMinor,
+        nowIso: isoNowUtc(_nowUtc()),
       );
 
       final result = <String, Object?>{
@@ -586,152 +555,133 @@ class WalletService {
   }
 
   Future<void> _ensureUserTx(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String userId,
     required String role,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    final rows = await txn.query(
-      'users',
-      columns: <String>['created_at'],
-      where: 'id = ?',
-      whereArgs: <Object>[userId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      await txn.insert('users', <String, Object?>{
-        'id': userId,
-        'role': role,
-        'is_blocked': 0,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
+    final usersDao = UsersDao(txn);
+    final existing = await usersDao.findById(userId);
+    final now = _nowUtc();
+    final targetRole = UserRole.fromDbValue(role);
+
+    if (existing == null) {
+      await usersDao.insert(
+        User(id: userId, role: targetRole, createdAt: now, updatedAt: now),
+      );
       return;
     }
 
-    await txn.update(
-      'users',
-      <String, Object?>{'role': role, 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: <Object>[userId],
+    await usersDao.update(
+      User(
+        id: existing.id,
+        role: targetRole,
+        email: existing.email,
+        displayName: existing.displayName,
+        gender: existing.gender,
+        tribe: existing.tribe,
+        starRating: existing.starRating,
+        luggageCount: existing.luggageCount,
+        nextOfKinLocked: existing.nextOfKinLocked,
+        crossBorderDocLocked: existing.crossBorderDocLocked,
+        allowLocationOff: existing.allowLocationOff,
+        isBlocked: existing.isBlocked,
+        disclosureAccepted: existing.disclosureAccepted,
+        createdAt: existing.createdAt,
+        updatedAt: now,
+      ),
     );
   }
 
   Future<void> _ensureDriverProfileTx(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String driverId,
     String? fleetOwnerId,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    await txn.insert('driver_profiles', <String, Object?>{
-      'driver_id': driverId,
-      'fleet_owner_id': fleetOwnerId,
-      'cash_debt_minor': 0,
-      'safety_score': 0,
-      'status': 'active',
-      'created_at': now,
-      'updated_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-
-    if (fleetOwnerId?.trim().isNotEmpty == true) {
-      await txn.update(
-        'driver_profiles',
-        <String, Object?>{
-          'fleet_owner_id': fleetOwnerId!.trim(),
-          'updated_at': now,
-        },
-        where: 'driver_id = ?',
-        whereArgs: <Object>[driverId],
-      );
-    }
+    final dao = DriverProfilesDao(txn);
+    final existing = await dao.findByDriverId(driverId);
+    final now = _nowUtc();
+    await dao.upsert(
+      DriverProfile(
+        driverId: driverId,
+        fleetOwnerId: fleetOwnerId ?? existing?.fleetOwnerId,
+        cashDebtMinor: existing?.cashDebtMinor ?? 0,
+        safetyScore: existing?.safetyScore ?? 0,
+        status: existing?.status ?? 'active',
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      ),
+    );
   }
 
   Future<void> _upsertDriverBlockFlagTx(
-    Transaction txn,
+    DatabaseExecutor txn,
     String driverId,
     bool blocked,
   ) async {
-    final now = isoNowUtc(_nowUtc());
-    final current = await txn.query(
-      'users',
-      columns: <String>['id'],
-      where: 'id = ?',
-      whereArgs: <Object>[driverId],
-      limit: 1,
-    );
-    if (current.isEmpty) {
-      await txn.insert('users', <String, Object?>{
-        'id': driverId,
-        'role': 'driver',
-        'is_blocked': blocked ? 1 : 0,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
+    final usersDao = UsersDao(txn);
+    final existing = await usersDao.findById(driverId);
+    final now = _nowUtc();
+    if (existing == null) {
+      await usersDao.insert(
+        User(
+          id: driverId,
+          role: UserRole.driver,
+          isBlocked: blocked,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
       return;
     }
-    await txn.update(
-      'users',
-      <String, Object?>{'is_blocked': blocked ? 1 : 0, 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: <Object>[driverId],
+
+    await usersDao.update(
+      User(
+        id: existing.id,
+        role: existing.role,
+        email: existing.email,
+        displayName: existing.displayName,
+        gender: existing.gender,
+        tribe: existing.tribe,
+        starRating: existing.starRating,
+        luggageCount: existing.luggageCount,
+        nextOfKinLocked: existing.nextOfKinLocked,
+        crossBorderDocLocked: existing.crossBorderDocLocked,
+        allowLocationOff: existing.allowLocationOff,
+        isBlocked: blocked,
+        disclosureAccepted: existing.disclosureAccepted,
+        createdAt: existing.createdAt,
+        updatedAt: now,
+      ),
     );
   }
 
   Future<void> _upsertDriverCashDebtTx(
-    Transaction txn,
+    DatabaseExecutor txn,
     String driverId,
     int cashDebtMinor,
   ) async {
-    final now = isoNowUtc(_nowUtc());
-    await txn.update(
-      'driver_profiles',
-      <String, Object?>{'cash_debt_minor': cashDebtMinor, 'updated_at': now},
-      where: 'driver_id = ?',
-      whereArgs: <Object>[driverId],
+    final dao = DriverProfilesDao(txn);
+    final existing = await dao.findByDriverId(driverId);
+    final now = _nowUtc();
+    await dao.upsert(
+      DriverProfile(
+        driverId: driverId,
+        fleetOwnerId: existing?.fleetOwnerId,
+        cashDebtMinor: cashDebtMinor,
+        safetyScore: existing?.safetyScore ?? 0,
+        status: existing?.status ?? 'active',
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      ),
     );
   }
 
-  Future<void> _updateRideIfExistsTx(
-    Transaction txn, {
-    required String rideId,
-    required int baseFareMinor,
-    required int premiumSeatMarkupMinor,
-  }) async {
-    final rows = await txn.query(
-      'rides',
-      columns: <String>['id'],
-      where: 'id = ?',
-      whereArgs: <Object>[rideId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return;
-    }
-    await txn.update(
-      'rides',
-      <String, Object?>{
-        'status': 'finance_settled',
-        'base_fare_minor': baseFareMinor,
-        'premium_markup_minor': premiumSeatMarkupMinor,
-        'updated_at': isoNowUtc(_nowUtc()),
-      },
-      where: 'id = ?',
-      whereArgs: <Object>[rideId],
-    );
-  }
-
-  Future<String?> _driverFleetOwnerTx(Transaction txn, String driverId) async {
-    final rows = await txn.query(
-      'driver_profiles',
-      columns: <String>['fleet_owner_id'],
-      where: 'driver_id = ?',
-      whereArgs: <Object>[driverId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return null;
-    }
-    final value = (rows.first['fleet_owner_id'] as String?)?.trim();
+  Future<String?> _driverFleetOwnerTx(
+    DatabaseExecutor txn,
+    String driverId,
+  ) async {
+    final profile = await DriverProfilesDao(txn).findByDriverId(driverId);
+    final value = profile?.fleetOwnerId?.trim();
     if (value == null || value.isEmpty) {
       return null;
     }
@@ -739,60 +689,51 @@ class WalletService {
   }
 
   Future<int> _fleetAllowancePercentTx(
-    Transaction txn,
+    DatabaseExecutor txn,
     String fleetOwnerId,
   ) async {
-    final rows = await txn.query(
-      'fleet_configs',
-      columns: <String>['allowance_percent'],
-      where: 'fleet_owner_id = ?',
-      whereArgs: <Object>[fleetOwnerId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return 0;
-    }
-    return ((rows.first['allowance_percent'] as int?) ?? 0).clamp(0, 100);
+    return FleetConfigsDao(txn).getAllowancePercent(fleetOwnerId);
   }
 
-  Future<void> _ensureWalletTx(
-    Transaction txn, {
+  Future<Wallet> _ensureWalletTx(
+    DatabaseExecutor txn, {
     required String ownerId,
     required WalletType walletType,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    await txn.insert('wallets', <String, Object?>{
-      'owner_id': ownerId,
-      'wallet_type': walletType.value,
-      'balance_minor': 0,
-      'reserved_minor': 0,
-      'currency': 'NGN',
-      'created_at': now,
-      'updated_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final repo = _walletRepositoryFor(txn);
+    final existing = await repo.getWallet(ownerId, walletType);
+    if (existing != null) {
+      return existing;
+    }
+    final now = _nowUtc();
+    final wallet = Wallet(
+      ownerId: ownerId,
+      walletType: walletType,
+      balanceMinor: 0,
+      reservedMinor: 0,
+      currency: 'NGN',
+      updatedAt: now,
+      createdAt: now,
+    );
+    await repo.upsertWallet(wallet);
+    return wallet;
   }
 
   Future<int> _walletBalanceTx(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String ownerId,
     required WalletType walletType,
   }) async {
-    await _ensureWalletTx(txn, ownerId: ownerId, walletType: walletType);
-    final rows = await txn.query(
-      'wallets',
-      columns: <String>['balance_minor'],
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
-      limit: 1,
+    final wallet = await _ensureWalletTx(
+      txn,
+      ownerId: ownerId,
+      walletType: walletType,
     );
-    if (rows.isEmpty) {
-      return 0;
-    }
-    return (rows.first['balance_minor'] as int?) ?? 0;
+    return wallet.balanceMinor;
   }
 
   Future<int> _postWalletCreditTx(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String ownerId,
     required WalletType walletType,
     required int amountMinor,
@@ -805,38 +746,46 @@ class WalletService {
       return _walletBalanceTx(txn, ownerId: ownerId, walletType: walletType);
     }
 
-    final current = await _walletBalanceTx(
+    final repo = _walletRepositoryFor(txn);
+    final current = await _ensureWalletTx(
       txn,
       ownerId: ownerId,
       walletType: walletType,
     );
-    final next = current + amountMinor;
-    final now = isoNowUtc(_nowUtc());
+    final next = current.balanceMinor + amountMinor;
+    final now = _nowUtc();
 
-    await txn.update(
-      'wallets',
-      <String, Object?>{'balance_minor': next, 'updated_at': now},
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
+    await repo.upsertWallet(
+      Wallet(
+        ownerId: current.ownerId,
+        walletType: current.walletType,
+        balanceMinor: next,
+        reservedMinor: current.reservedMinor,
+        currency: current.currency,
+        updatedAt: now,
+        createdAt: current.createdAt,
+      ),
     );
 
-    await txn.insert('wallet_ledger', <String, Object?>{
-      'owner_id': ownerId,
-      'wallet_type': walletType.value,
-      'direction': 'credit',
-      'amount_minor': amountMinor,
-      'balance_after_minor': next,
-      'kind': kind,
-      'reference_id': referenceId,
-      'idempotency_scope': idempotencyScope,
-      'idempotency_key': idempotencyKey,
-      'created_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.abort);
+    await repo.appendLedger(
+      WalletLedgerEntry(
+        ownerId: ownerId,
+        walletType: walletType,
+        direction: LedgerDirection.credit,
+        amountMinor: amountMinor,
+        balanceAfterMinor: next,
+        kind: kind,
+        referenceId: referenceId,
+        idempotencyScope: idempotencyScope,
+        idempotencyKey: idempotencyKey,
+        createdAt: now,
+      ),
+    );
     return next;
   }
 
   Future<int> _postWalletDebitTx(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String ownerId,
     required WalletType walletType,
     required int amountMinor,
@@ -848,38 +797,46 @@ class WalletService {
     if (amountMinor <= 0) {
       return _walletBalanceTx(txn, ownerId: ownerId, walletType: walletType);
     }
-    final current = await _walletBalanceTx(
+    final repo = _walletRepositoryFor(txn);
+    final current = await _ensureWalletTx(
       txn,
       ownerId: ownerId,
       walletType: walletType,
     );
-    if (current < amountMinor) {
+    if (current.balanceMinor < amountMinor) {
       throw StateError(
-        'insufficient_funds_for_debit:$ownerId:${walletType.value}',
+        'insufficient_funds_for_debit:$ownerId:${walletType.dbValue}',
       );
     }
-    final next = current - amountMinor;
-    final now = isoNowUtc(_nowUtc());
+    final next = current.balanceMinor - amountMinor;
+    final now = _nowUtc();
 
-    await txn.update(
-      'wallets',
-      <String, Object?>{'balance_minor': next, 'updated_at': now},
-      where: 'owner_id = ? AND wallet_type = ?',
-      whereArgs: <Object>[ownerId, walletType.value],
+    await repo.upsertWallet(
+      Wallet(
+        ownerId: current.ownerId,
+        walletType: current.walletType,
+        balanceMinor: next,
+        reservedMinor: current.reservedMinor,
+        currency: current.currency,
+        updatedAt: now,
+        createdAt: current.createdAt,
+      ),
     );
 
-    await txn.insert('wallet_ledger', <String, Object?>{
-      'owner_id': ownerId,
-      'wallet_type': walletType.value,
-      'direction': 'debit',
-      'amount_minor': amountMinor,
-      'balance_after_minor': next,
-      'kind': kind,
-      'reference_id': referenceId,
-      'idempotency_scope': idempotencyScope,
-      'idempotency_key': idempotencyKey,
-      'created_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.abort);
+    await repo.appendLedger(
+      WalletLedgerEntry(
+        ownerId: ownerId,
+        walletType: walletType,
+        direction: LedgerDirection.debit,
+        amountMinor: amountMinor,
+        balanceAfterMinor: next,
+        kind: kind,
+        referenceId: referenceId,
+        idempotencyScope: idempotencyScope,
+        idempotencyKey: idempotencyKey,
+        createdAt: now,
+      ),
+    );
     return next;
   }
 
@@ -890,66 +847,39 @@ class WalletService {
   }
 
   Future<bool> _claimIdempotency(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final now = isoNowUtc(_nowUtc());
-    try {
-      await txn.insert('idempotency_keys', <String, Object?>{
-        'scope': scope,
-        'key': key,
-        'request_hash': null,
-        'status': 'claimed',
-        'result_hash': null,
-        'error_code': null,
-        'created_at': now,
-        'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.abort);
-      return true;
-    } on DatabaseException catch (e) {
-      if (e.isUniqueConstraintError()) {
-        return false;
-      }
-      rethrow;
-    }
+    final result = await IdempotencyDao(txn).claim(scope: scope, key: key);
+    return result.isNewClaim;
   }
 
   Future<String> _readIdempotencyHash(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
   }) async {
-    final rows = await txn.query(
-      'idempotency_keys',
-      columns: <String>['result_hash'],
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return '';
-    }
-    return (rows.first['result_hash'] as String?) ?? '';
+    final record = await IdempotencyDao(txn).get(scope: scope, key: key);
+    return record?.resultHash ?? '';
   }
 
   Future<void> _finalizeIdempotency(
-    Transaction txn, {
+    DatabaseExecutor txn, {
     required String scope,
     required String key,
     required Map<String, Object?> result,
   }) async {
     final hash = sha256.convert(utf8.encode(jsonEncode(result))).toString();
-    await txn.update(
-      'idempotency_keys',
-      <String, Object?>{
-        'status': 'success',
-        'result_hash': hash,
-        'error_code': null,
-        'updated_at': isoNowUtc(_nowUtc()),
-      },
-      where: 'scope = ? AND "key" = ?',
-      whereArgs: <Object>[scope, key],
+    await IdempotencyDao(
+      txn,
+    ).finalizeSuccess(scope: scope, key: key, resultHash: hash);
+  }
+
+  WalletRepository _walletRepositoryFor(DatabaseExecutor txnOrDb) {
+    return SqliteWalletRepository(
+      walletsDao: WalletsDao(txnOrDb),
+      walletLedgerDao: WalletLedgerDao(txnOrDb),
     );
   }
 
