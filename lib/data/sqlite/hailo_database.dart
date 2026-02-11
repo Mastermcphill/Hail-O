@@ -10,6 +10,11 @@ import 'migrations/m0004_fleet_configs.dart';
 import 'migrations/m0005_ride_settlement_payout_records.dart';
 import 'migrations/m0006_penalty_records.dart';
 import 'migrations/m0007_reversal_and_payout_guards.dart';
+import 'migrations/m0008_ride_events_orchestrator.dart';
+import 'migrations/m0009_ledger_indexes_and_invariants.dart';
+import 'migrations/m0010_pricing_snapshot_on_rides.dart';
+import 'migrations/m0011_disputes_workflow.dart';
+import 'migrations/m0012_documents_compliance_fields.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -25,6 +30,11 @@ class HailODatabase {
              M0005RideSettlementPayoutRecords(),
              M0006PenaltyRecords(),
              M0007ReversalAndPayoutGuards(),
+             M0008RideEventsOrchestrator(),
+             M0009LedgerIndexesAndInvariants(),
+             M0010PricingSnapshotOnRides(),
+             M0011DisputesWorkflow(),
+             M0012DocumentsComplianceFields(),
            ];
 
   final String databaseName;

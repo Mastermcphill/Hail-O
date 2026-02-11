@@ -17,8 +17,11 @@ class TableNames {
   static const String payouts = 'payouts';
   static const String payoutRecords = 'payout_records';
   static const String walletReversals = 'wallet_reversals';
+  static const String rideEvents = 'ride_events';
   static const String penalties = 'penalties';
   static const String penaltyRecords = 'penalty_records';
+  static const String disputes = 'disputes';
+  static const String disputeEvents = 'dispute_events';
   static const String referralCodes = 'referral_codes';
   static const String promoEvents = 'promo_events';
   static const String moneyboxAccounts = 'moneybox_accounts';

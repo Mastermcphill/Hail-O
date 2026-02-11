@@ -50,4 +50,12 @@ class WalletsDao {
     );
     return rows.map(Wallet.fromMap).toList(growable: false);
   }
+
+  Future<List<Wallet>> listAll() async {
+    final rows = await db.query(
+      TableNames.wallets,
+      orderBy: 'owner_id ASC, wallet_type ASC',
+    );
+    return rows.map(Wallet.fromMap).toList(growable: false);
+  }
 }
