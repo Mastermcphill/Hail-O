@@ -16,7 +16,7 @@ class SqliteWalletRepository implements WalletRepository {
 
   @override
   Future<int> appendLedger(WalletLedgerEntry entry) =>
-      _walletLedgerDao.append(entry);
+      _walletLedgerDao.append(entry, viaOrchestrator: true);
 
   @override
   Future<Wallet?> getWallet(String ownerId, WalletType walletType) {
@@ -36,5 +36,6 @@ class SqliteWalletRepository implements WalletRepository {
       _walletsDao.listByOwner(ownerId);
 
   @override
-  Future<void> upsertWallet(Wallet wallet) => _walletsDao.upsert(wallet);
+  Future<void> upsertWallet(Wallet wallet) =>
+      _walletsDao.upsert(wallet, viaOrchestrator: true);
 }

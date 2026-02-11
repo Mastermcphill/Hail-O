@@ -34,6 +34,7 @@ void main() {
         idempotencyKey: 'wallet_append_only_1',
         createdAt: now,
       ),
+      viaOrchestrator: true,
     );
 
     final moneyboxLedgerId = await moneyBoxLedgerDao.append(

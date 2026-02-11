@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/wallet_reversal_record.dart';
 import '../table_names.dart';
 
@@ -8,7 +9,15 @@ class WalletReversalsDao {
 
   final DatabaseExecutor db;
 
-  Future<void> insert(WalletReversalRecord record) async {
+  Future<void> insert(
+    WalletReversalRecord record, {
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'wallet_reversal_insert_requires_orchestrator',
+      );
+    }
     await db.insert(
       TableNames.walletReversals,
       record.toMap(),

@@ -28,19 +28,48 @@ class DocumentsDao {
     DateTime? nowUtc,
     String? requiredCountry,
   }) async {
-    final nowIso = (nowUtc ?? DateTime.now().toUtc()).toUtc().toIso8601String();
-    final where = StringBuffer(
-      'user_id = ? '
-      'AND doc_type IN (?, ?) '
-      "AND (verified = 1 OR status = 'verified') "
-      'AND (expires_at IS NULL OR expires_at > ?)',
-    );
-    final args = <Object>[
+    return hasValidDocumentForTypes(
       userId,
-      DocumentType.passport.dbValue,
-      DocumentType.ecowasId.dbValue,
-      nowIso,
-    ];
+      docTypes: <String>[
+        DocumentType.passport.dbValue,
+        DocumentType.ecowasId.dbValue,
+      ],
+      nowUtc: nowUtc,
+      requiredCountry: requiredCountry,
+      requireVerified: true,
+      requireNotExpired: true,
+    );
+  }
+
+  Future<bool> hasValidDocumentForTypes(
+    String userId, {
+    required List<String> docTypes,
+    DateTime? nowUtc,
+    String? requiredCountry,
+    bool requireVerified = true,
+    bool requireNotExpired = true,
+  }) async {
+    if (docTypes.isEmpty) {
+      return false;
+    }
+    final nowIso = (nowUtc ?? DateTime.now().toUtc()).toUtc().toIso8601String();
+    final where = StringBuffer('user_id = ?');
+    final args = <Object>[userId];
+
+    final docTypePlaceholders = List<String>.filled(
+      docTypes.length,
+      '?',
+    ).join(', ');
+    where.write(' AND doc_type IN ($docTypePlaceholders)');
+    args.addAll(docTypes);
+
+    if (requireVerified) {
+      where.write(" AND (verified = 1 OR status = 'verified')");
+    }
+    if (requireNotExpired) {
+      where.write(' AND (expires_at IS NULL OR expires_at > ?)');
+      args.add(nowIso);
+    }
     if (requiredCountry != null && requiredCountry.trim().isNotEmpty) {
       where.write(' AND (country IS NULL OR country = ?)');
       args.add(requiredCountry.trim().toUpperCase());

@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/dispute_event.dart';
 import '../table_names.dart';
 
@@ -8,7 +9,15 @@ class DisputeEventsDao {
 
   final DatabaseExecutor db;
 
-  Future<void> insert(DisputeEventRecord event) async {
+  Future<void> insert(
+    DisputeEventRecord event, {
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'dispute_event_insert_requires_orchestrator',
+      );
+    }
     await db.insert(
       TableNames.disputeEvents,
       event.toMap(),

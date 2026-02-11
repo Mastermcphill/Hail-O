@@ -15,6 +15,9 @@ import 'migrations/m0009_ledger_indexes_and_invariants.dart';
 import 'migrations/m0010_pricing_snapshot_on_rides.dart';
 import 'migrations/m0011_disputes_workflow.dart';
 import 'migrations/m0012_documents_compliance_fields.dart';
+import 'migrations/m0013_orchestrator_mutation_events.dart';
+import 'migrations/m0014_wallet_transfer_journal.dart';
+import 'migrations/m0015_policy_rules_tables.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -35,6 +38,9 @@ class HailODatabase {
              M0010PricingSnapshotOnRides(),
              M0011DisputesWorkflow(),
              M0012DocumentsComplianceFields(),
+             M0013OrchestratorMutationEvents(),
+             M0014WalletTransferJournal(),
+             M0015PolicyRulesTables(),
            ];
 
   final String databaseName;
