@@ -74,4 +74,77 @@ void main() {
       expect(rides.length, 1);
     },
   );
+
+  test(
+    'RideBookingService.bookAwaitingConnectionFeeRide enforces guard before upsert',
+    () async {
+      final now = DateTime.utc(2026, 3, 6, 9);
+      final db = await HailODatabase().open(databasePath: inMemoryDatabasePath);
+      addTearDown(db.close);
+      final service = RideBookingService(db);
+
+      await db.insert('users', <String, Object?>{
+        'id': 'rider_book_cf_1',
+        'role': 'rider',
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      });
+      await db.insert('users', <String, Object?>{
+        'id': 'driver_book_cf_1',
+        'role': 'driver',
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      });
+
+      expect(
+        () => service.bookAwaitingConnectionFeeRide(
+          rideId: 'ride_book_cf_1',
+          riderId: 'rider_book_cf_1',
+          driverId: 'driver_book_cf_1',
+          tripScope: TripScope.intraCity,
+          feeMinor: 5000,
+          bidAcceptedAt: now,
+          feeDeadlineAt: now.add(const Duration(minutes: 10)),
+          nowUtc: now,
+        ),
+        throwsA(
+          isA<BookingBlockedException>().having(
+            (e) => e.reason,
+            'reason',
+            BookingBlockedReason.nextOfKinRequired,
+          ),
+        ),
+      );
+
+      await db.insert('next_of_kin', <String, Object?>{
+        'user_id': 'rider_book_cf_1',
+        'full_name': 'Book CF Kin',
+        'phone': '+234000000222',
+        'relationship': 'family',
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      });
+
+      await service.bookAwaitingConnectionFeeRide(
+        rideId: 'ride_book_cf_1',
+        riderId: 'rider_book_cf_1',
+        driverId: 'driver_book_cf_1',
+        tripScope: TripScope.intraCity,
+        feeMinor: 5000,
+        bidAcceptedAt: now,
+        feeDeadlineAt: now.add(const Duration(minutes: 10)),
+        nowUtc: now,
+      );
+
+      final rides = await db.query(
+        'rides',
+        where: 'id = ?',
+        whereArgs: const <Object>['ride_book_cf_1'],
+        limit: 1,
+      );
+      expect(rides.length, 1);
+      expect(rides.first['status'], 'awaiting_connection_fee');
+      expect(rides.first['connection_fee_minor'], 5000);
+    },
+  );
 }
