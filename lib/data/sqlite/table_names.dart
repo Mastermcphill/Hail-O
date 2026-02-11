@@ -1,0 +1,33 @@
+class TableNames {
+  static const String schemaMigrations = 'schema_migrations';
+  static const String users = 'users';
+  static const String driverProfiles = 'driver_profiles';
+  static const String vehicles = 'vehicles';
+  static const String nextOfKin = 'next_of_kin';
+  static const String documents = 'documents';
+  static const String routes = 'routes';
+  static const String routeNodes = 'route_nodes';
+  static const String rides = 'rides';
+  static const String bidsOffers = 'bids_offers';
+  static const String seats = 'seats';
+  static const String manifests = 'manifests';
+  static const String wallets = 'wallets';
+  static const String walletLedger = 'wallet_ledger';
+  static const String escrowHolds = 'escrow_holds';
+  static const String payouts = 'payouts';
+  static const String penalties = 'penalties';
+  static const String referralCodes = 'referral_codes';
+  static const String promoEvents = 'promo_events';
+  static const String moneyboxAccounts = 'moneybox_accounts';
+  static const String moneyboxLedger = 'moneybox_ledger';
+  static const String idempotencyKeys = 'idempotency_keys';
+  static const String reconciliationRuns = 'reconciliation_runs';
+  static const String reconciliationAnomalies = 'reconciliation_anomalies';
+  static const String moneyboxLiquidationEvents = 'moneybox_liquidation_events';
+  static const String breakdownEvents = 'breakdown_events';
+  static const String safetyEvents = 'safety_events';
+  static const String tripLocationSamples = 'trip_location_samples';
+  static const String offlineRegions = 'offline_regions';
+  static const String offlineDownloadEvents = 'offline_download_events';
+  static const String routePolylines = 'route_polylines';
+}
