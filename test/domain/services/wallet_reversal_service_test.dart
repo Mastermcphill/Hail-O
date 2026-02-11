@@ -96,6 +96,11 @@ void main() {
     );
     expect(replayDifferentKey['ok'], true);
     expect(replayDifferentKey['replayed'], true);
+    expect(
+      replayDifferentKey['reversal_ledger_id'],
+      first['reversal_ledger_id'],
+    );
+    expect(replayDifferentKey['amount_minor'], first['amount_minor']);
 
     final walletRows = await db.query(
       'wallets',
@@ -117,4 +122,80 @@ void main() {
     expect(reversalRows.length, 1);
     expect(reversalRows.first['original_ledger_id'], originalLedgerId);
   });
+
+  test(
+    'wallet reversal with different idempotency keys is deterministic no-op after first run',
+    () async {
+      final now = DateTime.utc(2026, 3, 11, 11);
+      final nowIso = now.toIso8601String();
+      final db = await HailODatabase().open(databasePath: inMemoryDatabasePath);
+      addTearDown(db.close);
+      final service = WalletReversalService(db, nowUtc: () => now);
+
+      await db.insert('users', <String, Object?>{
+        'id': 'admin_reversal_2',
+        'role': 'admin',
+        'created_at': nowIso,
+        'updated_at': nowIso,
+      });
+      await db.insert('users', <String, Object?>{
+        'id': 'driver_reversal_2',
+        'role': 'driver',
+        'created_at': nowIso,
+        'updated_at': nowIso,
+      });
+      await db.insert('wallets', <String, Object?>{
+        'owner_id': 'driver_reversal_2',
+        'wallet_type': 'driver_a',
+        'balance_minor': 4000,
+        'reserved_minor': 0,
+        'currency': 'NGN',
+        'updated_at': nowIso,
+        'created_at': nowIso,
+      });
+      final originalLedgerId = await db
+          .insert('wallet_ledger', <String, Object?>{
+            'owner_id': 'driver_reversal_2',
+            'wallet_type': 'driver_a',
+            'direction': 'credit',
+            'amount_minor': 2000,
+            'balance_after_minor': 4000,
+            'kind': 'test_credit_2',
+            'reference_id': 'ride_reverse_2',
+            'idempotency_scope': 'seed_scope_2',
+            'idempotency_key': 'seed_key_2',
+            'created_at': nowIso,
+          });
+
+      final first = await service.reverseWalletLedgerEntry(
+        originalLedgerId: originalLedgerId,
+        requestedByUserId: 'admin_reversal_2',
+        requesterIsAdmin: true,
+        reason: 'duplicate_protection',
+        idempotencyKey: 'reverse_det_1',
+      );
+      expect(first['ok'], true);
+      expect(first['replayed'], false);
+
+      final second = await service.reverseWalletLedgerEntry(
+        originalLedgerId: originalLedgerId,
+        requestedByUserId: 'admin_reversal_2',
+        requesterIsAdmin: true,
+        reason: 'duplicate_protection',
+        idempotencyKey: 'reverse_det_2',
+      );
+      expect(second['ok'], true);
+      expect(second['replayed'], true);
+      expect(second['reversal_ledger_id'], first['reversal_ledger_id']);
+
+      final reversalRows = await db.query('wallet_reversals');
+      expect(reversalRows.length, 1);
+      final reversalLedgerRows = await db.query(
+        'wallet_ledger',
+        where: 'idempotency_scope = ?',
+        whereArgs: const <Object>['wallet_reversal'],
+      );
+      expect(reversalLedgerRows.length, 1);
+    },
+  );
 }
