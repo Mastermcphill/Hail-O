@@ -16,16 +16,24 @@ import '../domain/models/driver_profile.dart';
 import '../domain/models/user.dart';
 import '../domain/models/wallet.dart';
 import '../domain/models/wallet_ledger_entry.dart';
+import '../domain/services/cancel_ride_service.dart';
 import '../domain/services/finance_utils.dart';
 
 class WalletService {
-  WalletService(this.db, {DateTime Function()? nowUtc})
-    : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
+  WalletService(
+    this.db, {
+    DateTime Function()? nowUtc,
+    CancelRideService? cancelRideService,
+  }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
+       _cancelRideService = cancelRideService;
 
   final Database db;
   final DateTime Function() _nowUtc;
+  final CancelRideService? _cancelRideService;
 
   static const String _platformOwnerId = 'platform';
+  late final CancelRideService _resolvedCancelRideService =
+      _cancelRideService ?? CancelRideService(db, nowUtc: _nowUtc);
 
   Future<void> upsertUser({
     required String userId,
@@ -169,88 +177,94 @@ class WalletService {
   }) async {
     _requireIdempotency(idempotencyKey);
     const scope = 'connection_fee_pay';
-    return db.transaction((txn) async {
-      final claimed = await _claimIdempotency(
-        txn,
+    final claimed = await _claimIdempotency(
+      db,
+      scope: scope,
+      key: idempotencyKey,
+    );
+    if (!claimed) {
+      final hash = await _readIdempotencyHash(
+        db,
         scope: scope,
         key: idempotencyKey,
       );
-      if (!claimed) {
-        final hash = await _readIdempotencyHash(
-          txn,
-          scope: scope,
-          key: idempotencyKey,
-        );
-        return <String, Object?>{
-          'ok': true,
-          'replayed': true,
-          'result_hash': hash,
-        };
-      }
+      return <String, Object?>{
+        'ok': true,
+        'replayed': true,
+        'result_hash': hash,
+      };
+    }
 
-      final ride = await RidesDao(txn).findById(rideId);
-      if (ride == null) {
-        const result = <String, Object?>{
-          'ok': false,
-          'error': 'ride_not_found',
-        };
-        await _finalizeIdempotency(
-          txn,
-          scope: scope,
-          key: idempotencyKey,
-          result: result,
-        );
-        return result;
-      }
+    final ride = await RidesDao(db).findById(rideId);
+    if (ride == null) {
+      const result = <String, Object?>{'ok': false, 'error': 'ride_not_found'};
+      await _finalizeIdempotency(
+        db,
+        scope: scope,
+        key: idempotencyKey,
+        result: result,
+      );
+      return result;
+    }
 
-      final status = (ride['status'] as String?) ?? '';
-      if (status == 'cancelled') {
-        const result = <String, Object?>{
-          'ok': false,
-          'error': 'ride_cancelled',
-        };
-        await _finalizeIdempotency(
-          txn,
-          scope: scope,
-          key: idempotencyKey,
-          result: result,
-        );
-        return result;
-      }
+    final status = (ride['status'] as String?) ?? '';
+    if (status == 'cancelled') {
+      const result = <String, Object?>{'ok': false, 'error': 'ride_cancelled'};
+      await _finalizeIdempotency(
+        db,
+        scope: scope,
+        key: idempotencyKey,
+        result: result,
+      );
+      return result;
+    }
 
-      if ((ride['connection_fee_paid_at'] as String?) != null) {
-        const result = <String, Object?>{'ok': true, 'already_paid': true};
-        await _finalizeIdempotency(
-          txn,
-          scope: scope,
-          key: idempotencyKey,
-          result: result,
-        );
-        return result;
-      }
+    if ((ride['connection_fee_paid_at'] as String?) != null) {
+      const result = <String, Object?>{'ok': true, 'already_paid': true};
+      await _finalizeIdempotency(
+        db,
+        scope: scope,
+        key: idempotencyKey,
+        result: result,
+      );
+      return result;
+    }
 
-      final deadlineRaw = (ride['connection_fee_deadline_at'] as String?) ?? '';
-      final deadline = DateTime.tryParse(deadlineRaw)?.toUtc();
-      final now = _nowUtc();
-      if (deadline == null || now.isAfter(deadline)) {
-        await RidesDao(
-          txn,
-        ).markCancelled(rideId: rideId, nowIso: isoNowUtc(now));
-        const result = <String, Object?>{
-          'ok': false,
-          'error': 'connection_fee_timeout_auto_cancelled',
-        };
-        await _finalizeIdempotency(
-          txn,
-          scope: scope,
-          key: idempotencyKey,
-          result: result,
+    final deadlineRaw = (ride['connection_fee_deadline_at'] as String?) ?? '';
+    final deadline = DateTime.tryParse(deadlineRaw)?.toUtc();
+    final now = _nowUtc();
+    if (deadline == null || now.isAfter(deadline)) {
+      final riderId = ((ride['rider_id'] as String?) ?? '').trim();
+      final driverId = ((ride['driver_id'] as String?) ?? '').trim();
+      final payerUserId = riderId.isNotEmpty ? riderId : driverId;
+      if (payerUserId.isNotEmpty) {
+        await _resolvedCancelRideService.collectCancellationPenalty(
+          rideId: rideId,
+          payerUserId: payerUserId,
+          penaltyMinor: 0,
+          idempotencyKey: 'connection_fee_timeout:$rideId',
+          ruleCode: 'connection_fee_timeout_auto_cancelled',
+          rideType: (ride['trip_scope'] as String?)?.trim(),
+          totalFareMinor: (ride['total_fare_minor'] as num?)?.toInt() ?? 0,
+          cancelledAt: now,
         );
-        return result;
       }
+      const result = <String, Object?>{
+        'ok': false,
+        'error': 'connection_fee_timeout_auto_cancelled',
+      };
+      await _finalizeIdempotency(
+        db,
+        scope: scope,
+        key: idempotencyKey,
+        result: result,
+      );
+      return result;
+    }
 
-      final fee = (ride['connection_fee_minor'] as int?) ?? 0;
-      final nowIso = isoNowUtc(now);
+    final fee = (ride['connection_fee_minor'] as int?) ?? 0;
+    final nowIso = isoNowUtc(now);
+    await db.transaction((txn) async {
       await RidesDao(txn).markConnectionFeePaid(rideId: rideId, nowIso: nowIso);
 
       if (fee > 0) {
@@ -265,20 +279,20 @@ class WalletService {
           idempotencyKey: '$idempotencyKey:platform_connection_fee',
         );
       }
-
-      final result = <String, Object?>{
-        'ok': true,
-        'connection_fee_minor': fee,
-        'ride_id': rideId,
-      };
-      await _finalizeIdempotency(
-        txn,
-        scope: scope,
-        key: idempotencyKey,
-        result: result,
-      );
-      return result;
     });
+
+    final result = <String, Object?>{
+      'ok': true,
+      'connection_fee_minor': fee,
+      'ride_id': rideId,
+    };
+    await _finalizeIdempotency(
+      db,
+      scope: scope,
+      key: idempotencyKey,
+      result: result,
+    );
+    return result;
   }
 
   Future<int> autoCancelUnpaidConnectionFees({
@@ -288,43 +302,62 @@ class WalletService {
     _requireIdempotency(idempotencyKey);
     final now = nowUtc?.toUtc() ?? _nowUtc();
     const scope = 'connection_fee_auto_cancel';
-    return db.transaction((txn) async {
-      final claimed = await _claimIdempotency(
-        txn,
-        scope: scope,
-        key: idempotencyKey,
-      );
-      if (!claimed) {
-        return 0;
+    final claimed = await _claimIdempotency(
+      db,
+      scope: scope,
+      key: idempotencyKey,
+    );
+    if (!claimed) {
+      return 0;
+    }
+
+    final candidates = await RidesDao(
+      db,
+    ).listAwaitingConnectionFeeWithoutPayment();
+
+    var cancelled = 0;
+    for (final row in candidates) {
+      final rideId = (row['id'] as String?) ?? '';
+      final deadlineRaw = (row['connection_fee_deadline_at'] as String?) ?? '';
+      final deadline = DateTime.tryParse(deadlineRaw)?.toUtc();
+      if (rideId.isEmpty || deadline == null || !now.isAfter(deadline)) {
+        continue;
       }
 
-      final candidates = await RidesDao(
-        txn,
-      ).listAwaitingConnectionFeeWithoutPayment();
+      final ride = await RidesDao(db).findById(rideId);
+      if (ride == null) {
+        continue;
+      }
+      final riderId = ((ride['rider_id'] as String?) ?? '').trim();
+      final driverId = ((ride['driver_id'] as String?) ?? '').trim();
+      final payerUserId = riderId.isNotEmpty ? riderId : driverId;
+      if (payerUserId.isEmpty) {
+        continue;
+      }
 
-      var cancelled = 0;
-      for (final row in candidates) {
-        final rideId = (row['id'] as String?) ?? '';
-        final deadlineRaw =
-            (row['connection_fee_deadline_at'] as String?) ?? '';
-        final deadline = DateTime.tryParse(deadlineRaw)?.toUtc();
-        if (rideId.isEmpty || deadline == null || !now.isAfter(deadline)) {
-          continue;
-        }
-        await RidesDao(
-          txn,
-        ).markCancelled(rideId: rideId, nowIso: isoNowUtc(now));
+      final cancellation = await _resolvedCancelRideService
+          .collectCancellationPenalty(
+            rideId: rideId,
+            payerUserId: payerUserId,
+            penaltyMinor: 0,
+            idempotencyKey: 'connection_fee_auto_cancel:$rideId',
+            ruleCode: 'connection_fee_timeout_auto_cancelled',
+            rideType: (ride['trip_scope'] as String?)?.trim(),
+            totalFareMinor: (ride['total_fare_minor'] as num?)?.toInt() ?? 0,
+            cancelledAt: now,
+          );
+      if (cancellation.ok && !cancellation.replayed) {
         cancelled += 1;
       }
+    }
 
-      await _finalizeIdempotency(
-        txn,
-        scope: scope,
-        key: idempotencyKey,
-        result: <String, Object?>{'ok': true, 'cancelled': cancelled},
-      );
-      return cancelled;
-    });
+    await _finalizeIdempotency(
+      db,
+      scope: scope,
+      key: idempotencyKey,
+      result: <String, Object?>{'ok': true, 'cancelled': cancelled},
+    );
+    return cancelled;
   }
 
   Future<Map<String, Object?>> settleRideFinance({

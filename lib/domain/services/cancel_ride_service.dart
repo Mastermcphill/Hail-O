@@ -154,19 +154,6 @@ class CancelRideService {
       final result = await db.transaction((txn) async {
         final now = cancelledAt?.toUtc() ?? _nowUtc();
         final nowIso = isoNowUtc(now);
-        await RidesDao(txn).markCancelled(rideId: rideId, nowIso: nowIso);
-
-        var status = 'assessed';
-        if (penaltyMinor > 0) {
-          await _transferPenalty(
-            txn,
-            rideId: rideId,
-            payerUserId: payerUserId,
-            penaltyMinor: penaltyMinor,
-            idempotencyKey: idempotencyKey,
-          );
-          status = 'collected';
-        }
 
         await PenaltiesDao(txn).insert(
           PenaltyRecord(
@@ -180,6 +167,18 @@ class CancelRideService {
             idempotencyKey: idempotencyKey,
           ),
         );
+
+        var status = 'assessed';
+        if (penaltyMinor > 0) {
+          await _transferPenalty(
+            txn,
+            rideId: rideId,
+            payerUserId: payerUserId,
+            penaltyMinor: penaltyMinor,
+            idempotencyKey: idempotencyKey,
+          );
+          status = 'collected';
+        }
 
         await PenaltyRecordsDao(txn).insert(
           PenaltyAuditRecord(
@@ -200,6 +199,7 @@ class CancelRideService {
                 : null,
           ),
         );
+        await RidesDao(txn).markCancelled(rideId: rideId, nowIso: nowIso);
 
         return CancellationResult(
           ok: true,
