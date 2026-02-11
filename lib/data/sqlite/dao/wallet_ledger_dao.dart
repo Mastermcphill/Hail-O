@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/wallet.dart';
 import '../../../domain/models/wallet_ledger_entry.dart';
 import '../table_names.dart';
@@ -9,7 +10,15 @@ class WalletLedgerDao {
 
   final DatabaseExecutor db;
 
-  Future<int> append(WalletLedgerEntry entry) async {
+  Future<int> append(
+    WalletLedgerEntry entry, {
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'wallet_ledger_append_requires_orchestrator',
+      );
+    }
     return db.insert(
       TableNames.walletLedger,
       entry.toMap()..remove('id'),

@@ -277,6 +277,7 @@ class RideSettlementService {
             idempotencyKey: canonicalIdempotencyKey,
             createdAt: now,
           ),
+          viaOrchestrator: true,
         );
 
         await RidesDao(txn).updateFinanceIfExists(

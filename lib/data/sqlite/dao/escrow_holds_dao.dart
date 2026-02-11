@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../domain/models/escrow_hold.dart';
+import '../../../domain/errors/domain_errors.dart';
 import '../table_names.dart';
 
 class EscrowHoldsDao {
@@ -27,7 +28,13 @@ class EscrowHoldsDao {
     required String releasedAtIso,
     required String idempotencyScope,
     required String idempotencyKey,
+    required bool viaOrchestrator,
   }) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'escrow_release_requires_orchestrator',
+      );
+    }
     final updated = await db.update(
       TableNames.escrowHolds,
       <String, Object?>{

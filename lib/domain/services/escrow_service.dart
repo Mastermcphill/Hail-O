@@ -111,6 +111,7 @@ class EscrowService {
           releasedAtIso: _iso(now),
           idempotencyScope: _scopeGeofenceRelease,
           idempotencyKey: idempotencyKey,
+          viaOrchestrator: true,
         );
         return <String, Object?>{
           'ok': true,
@@ -201,6 +202,7 @@ class EscrowService {
           releasedAtIso: _iso(now),
           idempotencyScope: _scopeManualRelease,
           idempotencyKey: idempotencyKey,
+          viaOrchestrator: true,
         );
         return <String, Object?>{
           'ok': true,

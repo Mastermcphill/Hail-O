@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/wallet.dart';
 import '../table_names.dart';
 
@@ -8,7 +9,12 @@ class WalletsDao {
 
   final DatabaseExecutor db;
 
-  Future<void> upsert(Wallet wallet) async {
+  Future<void> upsert(Wallet wallet, {required bool viaOrchestrator}) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'wallet_upsert_requires_orchestrator',
+      );
+    }
     await db.insert(
       TableNames.wallets,
       wallet.toMap(),

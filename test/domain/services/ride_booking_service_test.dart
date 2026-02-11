@@ -43,8 +43,8 @@ void main() {
         updatedAt: now,
       );
 
-      expect(
-        () => service.bookRide(ride),
+      await expectLater(
+        service.bookRide(ride),
         throwsA(
           isA<BookingBlockedException>().having(
             (e) => e.reason,
@@ -96,8 +96,8 @@ void main() {
         'updated_at': now.toIso8601String(),
       });
 
-      expect(
-        () => service.bookAwaitingConnectionFeeRide(
+      await expectLater(
+        service.bookAwaitingConnectionFeeRide(
           rideId: 'ride_book_cf_1',
           riderId: 'rider_book_cf_1',
           driverId: 'driver_book_cf_1',

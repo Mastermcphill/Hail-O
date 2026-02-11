@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/payout_record.dart';
 import '../table_names.dart';
 
@@ -8,7 +9,15 @@ class PayoutRecordsDao {
 
   final DatabaseExecutor db;
 
-  Future<void> insert(PayoutRecord record) async {
+  Future<void> insert(
+    PayoutRecord record, {
+    required bool viaOrchestrator,
+  }) async {
+    if (!viaOrchestrator) {
+      throw const DomainInvariantError(
+        code: 'payout_insert_requires_orchestrator',
+      );
+    }
     await db.insert(
       TableNames.payoutRecords,
       record.toMap(),

@@ -158,7 +158,7 @@ class WalletReversalService {
           idempotencyKey: idempotencyKey,
           createdAt: now,
         );
-        await reversalsDao.insert(reversalRecord);
+        await reversalsDao.insert(reversalRecord, viaOrchestrator: true);
 
         return <String, Object?>{
           'ok': true,

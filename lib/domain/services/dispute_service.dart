@@ -75,7 +75,7 @@ class DisputeService {
           reason: reason,
           createdAt: now,
         );
-        await disputesDao.insert(dispute);
+        await disputesDao.insert(dispute, viaOrchestrator: true);
         await DisputeEventsDao(txn).insert(
           DisputeEventRecord(
             id: '$disputeId:opened',
@@ -87,6 +87,7 @@ class DisputeService {
             idempotencyKey: idempotencyKey,
             createdAt: now,
           ),
+          viaOrchestrator: true,
         );
         return <String, Object?>{
           'ok': true,
@@ -242,6 +243,7 @@ class DisputeService {
               idempotencyKey: '$idempotencyKey:refund_event',
               createdAt: now,
             ),
+            viaOrchestrator: true,
           );
         }
 
@@ -257,7 +259,7 @@ class DisputeService {
           resolutionNote: resolutionNote,
           refundMinorTotal: dispute.refundMinorTotal + refundMinor,
         );
-        await DisputesDao(txn).update(resolved);
+        await DisputesDao(txn).update(resolved, viaOrchestrator: true);
         await DisputeEventsDao(txn).insert(
           DisputeEventRecord(
             id: '$disputeId:resolved',
@@ -274,6 +276,7 @@ class DisputeService {
             idempotencyKey: '$idempotencyKey:resolve_event',
             createdAt: now,
           ),
+          viaOrchestrator: true,
         );
 
         return <String, Object?>{
@@ -352,7 +355,7 @@ class DisputeService {
         updatedAt: createdAt,
         createdAt: createdAt,
       );
-      await walletsDao.upsert(wallet);
+      await walletsDao.upsert(wallet, viaOrchestrator: true);
     }
 
     final next = wallet.balanceMinor + amountMinor;
@@ -366,6 +369,7 @@ class DisputeService {
         updatedAt: DateTime.parse(nowIso).toUtc(),
         createdAt: wallet.createdAt,
       ),
+      viaOrchestrator: true,
     );
     await walletLedgerDao.append(
       WalletLedgerEntry(
@@ -380,6 +384,7 @@ class DisputeService {
         idempotencyKey: idempotencyKey,
         createdAt: createdAt,
       ),
+      viaOrchestrator: true,
     );
     return next;
   }
