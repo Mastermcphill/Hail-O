@@ -16,18 +16,26 @@ import '../models/idempotency_record.dart';
 import '../models/wallet.dart';
 import '../models/wallet_ledger_entry.dart';
 import 'finance_utils.dart';
+import 'operation_journal_service.dart';
 import 'wallet_reversal_service.dart';
 
 class DisputeService {
-  DisputeService(this.db, {DateTime Function()? nowUtc})
-    : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
-      _idempotencyStore = IdempotencyDao(db),
-      _walletReversalService = WalletReversalService(db, nowUtc: nowUtc);
+  DisputeService(
+    this.db, {
+    DateTime Function()? nowUtc,
+    OperationJournalService? operationJournalService,
+  }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
+       _idempotencyStore = IdempotencyDao(db),
+       _walletReversalService = WalletReversalService(db, nowUtc: nowUtc),
+       _operationJournalService =
+           operationJournalService ??
+           OperationJournalService(db, nowUtc: nowUtc);
 
   final Database db;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
   final WalletReversalService _walletReversalService;
+  final OperationJournalService _operationJournalService;
 
   static const String _scopeDisputeOpen = 'dispute.open';
   static const String _scopeDisputeResolve = 'dispute.resolve';
@@ -53,6 +61,16 @@ class DisputeService {
     }
 
     try {
+      await _operationJournalService.begin(
+        opType: 'DISPUTE_OPEN',
+        entityType: 'dispute',
+        entityId: disputeId,
+        idempotencyScope: _scopeDisputeOpen,
+        idempotencyKey: idempotencyKey,
+        traceId: 'trace:$_scopeDisputeOpen:$idempotencyKey',
+        metadataJson:
+            '{"ride_id":"$rideId","opened_by":"$openedBy","reason":"$reason"}',
+      );
       final now = _nowUtc();
       final result = await db.transaction((txn) async {
         final disputesDao = DisputesDao(txn);
@@ -103,6 +121,10 @@ class DisputeService {
         key: idempotencyKey,
         resultHash: _hashResult(result),
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeDisputeOpen,
+        idempotencyKey: idempotencyKey,
+      );
       return result;
     } catch (e) {
       final code = e is DomainError ? e.code : 'dispute_open_exception';
@@ -110,6 +132,11 @@ class DisputeService {
         scope: _scopeDisputeOpen,
         key: idempotencyKey,
         errorCode: code,
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeDisputeOpen,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(e),
       );
       rethrow;
     }
@@ -143,6 +170,16 @@ class DisputeService {
     }
 
     try {
+      await _operationJournalService.begin(
+        opType: 'DISPUTE_RESOLVE',
+        entityType: 'dispute',
+        entityId: disputeId,
+        idempotencyScope: _scopeDisputeResolve,
+        idempotencyKey: idempotencyKey,
+        traceId: 'trace:$_scopeDisputeResolve:$idempotencyKey',
+        metadataJson:
+            '{"resolver_user_id":"$resolverUserId","refund_minor":$refundMinor}',
+      );
       final now = _nowUtc();
       final disputesDao = DisputesDao(db);
       final dispute = await disputesDao.findById(disputeId);
@@ -161,6 +198,10 @@ class DisputeService {
           scope: _scopeDisputeResolve,
           key: idempotencyKey,
           resultHash: _hashResult(replay),
+        );
+        await _operationJournalService.commit(
+          idempotencyScope: _scopeDisputeResolve,
+          idempotencyKey: idempotencyKey,
         );
         return replay;
       }
@@ -296,6 +337,10 @@ class DisputeService {
         key: idempotencyKey,
         resultHash: _hashResult(result),
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeDisputeResolve,
+        idempotencyKey: idempotencyKey,
+      );
       return result;
     } catch (e) {
       final code = e is DomainError ? e.code : 'dispute_resolve_exception';
@@ -303,6 +348,11 @@ class DisputeService {
         scope: _scopeDisputeResolve,
         key: idempotencyKey,
         errorCode: code,
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeDisputeResolve,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(e),
       );
       rethrow;
     }
@@ -400,5 +450,16 @@ class DisputeService {
 
   String _hashResult(Map<String, Object?> result) {
     return sha256.convert(utf8.encode(jsonEncode(result))).toString();
+  }
+
+  String _safeError(Object error) {
+    final text = error.toString().trim();
+    if (text.isEmpty) {
+      return 'dispute_unknown_error';
+    }
+    if (text.length > 500) {
+      return text.substring(0, 500);
+    }
+    return text;
   }
 }

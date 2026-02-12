@@ -43,6 +43,23 @@ void main() {
     expect(
       await _hasIndex(
         db,
+        table: 'operation_journal',
+        columns: const <String>['idempotency_scope', 'idempotency_key'],
+        requireUnique: true,
+      ),
+      true,
+    );
+    expect(
+      await _hasIndex(
+        db,
+        table: 'operation_journal',
+        columns: const <String>['status', 'updated_at'],
+      ),
+      true,
+    );
+    expect(
+      await _hasIndex(
+        db,
         table: 'escrow_events',
         columns: const <String>['idempotency_scope', 'idempotency_key'],
         requireUnique: true,
@@ -80,7 +97,7 @@ void main() {
       await _hasIndex(
         db,
         table: 'pricing_rules',
-        columns: const <String>['scope', 'effective_from'],
+        columns: const <String>['scope', 'enabled', 'effective_from'],
       ),
       true,
     );
@@ -88,7 +105,7 @@ void main() {
       await _hasIndex(
         db,
         table: 'penalty_rules',
-        columns: const <String>['scope', 'effective_from'],
+        columns: const <String>['scope', 'enabled', 'effective_from'],
       ),
       true,
     );
@@ -96,7 +113,12 @@ void main() {
       await _hasIndex(
         db,
         table: 'compliance_requirements',
-        columns: const <String>['scope', 'from_country', 'to_country'],
+        columns: const <String>[
+          'scope',
+          'from_country',
+          'to_country',
+          'enabled',
+        ],
       ),
       true,
     );

@@ -25,6 +25,7 @@ class TableNames {
   static const String penaltyRecords = 'penalty_records';
   static const String disputes = 'disputes';
   static const String disputeEvents = 'dispute_events';
+  static const String operationJournal = 'operation_journal';
   static const String pricingRules = 'pricing_rules';
   static const String penaltyRules = 'penalty_rules';
   static const String complianceRequirements = 'compliance_requirements';

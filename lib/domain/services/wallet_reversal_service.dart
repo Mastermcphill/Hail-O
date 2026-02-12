@@ -8,15 +8,23 @@ import '../../data/sqlite/dao/wallet_reversals_dao.dart';
 import '../models/idempotency_record.dart';
 import '../models/wallet_reversal_record.dart';
 import 'finance_utils.dart';
+import 'operation_journal_service.dart';
 
 class WalletReversalService {
-  WalletReversalService(this.db, {DateTime Function()? nowUtc})
-    : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
-      _idempotencyStore = IdempotencyDao(db);
+  WalletReversalService(
+    this.db, {
+    DateTime Function()? nowUtc,
+    OperationJournalService? operationJournalService,
+  }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
+       _idempotencyStore = IdempotencyDao(db),
+       _operationJournalService =
+           operationJournalService ??
+           OperationJournalService(db, nowUtc: nowUtc);
 
   final Database db;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
+  final OperationJournalService _operationJournalService;
 
   static const String _scopeWalletReversal = 'wallet_reversal';
 
@@ -49,6 +57,17 @@ class WalletReversalService {
     }
 
     try {
+      await _operationJournalService.begin(
+        opType: 'REVERSAL',
+        entityType: 'wallet',
+        entityId: originalLedgerId.toString(),
+        idempotencyScope: _scopeWalletReversal,
+        idempotencyKey: idempotencyKey,
+        traceId: 'trace:$_scopeWalletReversal:$idempotencyKey',
+        metadataJson:
+            '{"original_ledger_id":$originalLedgerId,"reason":"$reason","requested_by":"$requestedByUserId"}',
+      );
+
       final now = _nowUtc();
       final nowIso = isoNowUtc(now);
       final result = await db.transaction((txn) async {
@@ -189,12 +208,21 @@ class WalletReversalService {
         key: idempotencyKey,
         resultHash: hash,
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeWalletReversal,
+        idempotencyKey: idempotencyKey,
+      );
       return <String, Object?>{...result, 'result_hash': hash};
-    } catch (_) {
+    } catch (error) {
       await _idempotencyStore.finalizeFailure(
         scope: _scopeWalletReversal,
         key: idempotencyKey,
         errorCode: 'wallet_reversal_exception',
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeWalletReversal,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(error),
       );
       rethrow;
     }
@@ -255,5 +283,16 @@ class WalletReversalService {
       'balance_after_minor': row['balance_after_minor'],
       'direction': row['direction'],
     };
+  }
+
+  String _safeError(Object error) {
+    final text = error.toString().trim();
+    if (text.isEmpty) {
+      return 'wallet_reversal_unknown_error';
+    }
+    if (text.length > 500) {
+      return text.substring(0, 500);
+    }
+    return text;
   }
 }

@@ -18,6 +18,8 @@ import 'migrations/m0012_documents_compliance_fields.dart';
 import 'migrations/m0013_orchestrator_mutation_events.dart';
 import 'migrations/m0014_wallet_transfer_journal.dart';
 import 'migrations/m0015_policy_rules_tables.dart';
+import 'migrations/m0016_operation_journal.dart';
+import 'migrations/m0017_rule_rollouts.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -41,6 +43,8 @@ class HailODatabase {
              M0013OrchestratorMutationEvents(),
              M0014WalletTransferJournal(),
              M0015PolicyRulesTables(),
+             M0016OperationJournal(),
+             M0017RuleRollouts(),
            ];
 
   final String databaseName;
