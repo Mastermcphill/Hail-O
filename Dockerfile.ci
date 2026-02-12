@@ -35,4 +35,4 @@ COPY --chown=flutter:flutter . .
 RUN chmod +x /app/tool/ci.sh
 
 # Render worker command: run CI checks and exit with status code.
-CMD ["bash", "-lc", "/app/tool/ci.sh"]
+CMD ["bash", "tool/ci.sh"]
