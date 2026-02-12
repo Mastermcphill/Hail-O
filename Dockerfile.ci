@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
+    passwd \
     unzip \
     xz-utils \
     zip \
@@ -19,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${FLUTTER_VERSION}" https://github.com/flutter/flutter.git "${FLUTTER_HOME}" \
-    && adduser --disabled-password --gecos "" flutter \
+    && useradd -m -s /bin/bash flutter \
     && mkdir -p /app \
     && chown -R flutter:flutter "${FLUTTER_HOME}" /app
 
