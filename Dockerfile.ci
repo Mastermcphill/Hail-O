@@ -19,16 +19,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${FLUTTER_VERSION}" https://github.com/flutter/flutter.git "${FLUTTER_HOME}" \
-    && flutter --version \
+    && adduser --disabled-password --gecos "" flutter \
+    && mkdir -p /app \
+    && chown -R flutter:flutter "${FLUTTER_HOME}" /app
+
+USER flutter
+WORKDIR /app
+
+RUN flutter --version \
     && flutter precache --linux \
     && flutter config --no-analytics
 
-WORKDIR /app
-
-COPY pubspec.yaml pubspec.lock ./
+COPY --chown=flutter:flutter pubspec.yaml pubspec.lock ./
 RUN flutter pub get
 
-COPY . .
+COPY --chown=flutter:flutter . .
 
 RUN flutter pub get
 
