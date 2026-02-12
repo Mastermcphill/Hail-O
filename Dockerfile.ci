@@ -30,12 +30,8 @@ RUN flutter --version \
     && flutter precache --linux \
     && flutter config --no-analytics
 
-COPY --chown=flutter:flutter pubspec.yaml pubspec.lock ./
-RUN flutter pub get
-
 COPY --chown=flutter:flutter . .
-
-RUN flutter pub get
+RUN chmod +x /app/tool/ci.sh
 
 # Render worker command: run CI checks and exit with status code.
-CMD ["bash", "-lc", "flutter --version && flutter pub get && flutter analyze && flutter test"]
+CMD ["bash", "-lc", "/app/tool/ci.sh"]
