@@ -2,14 +2,6 @@ services:
   - type: worker
     name: hail-o-ci
     env: docker
-    dockerfilePath: ./Dockerfile.ci
+    dockerfilePath: Dockerfile.ci
     branch: main
     autoDeploy: true
-
-  - type: web
-    name: hail-o-web
-    env: docker
-    dockerfilePath: ./Dockerfile.web
-    branch: main
-    autoDeploy: true
-    healthCheckPath: /
