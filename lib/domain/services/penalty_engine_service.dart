@@ -4,6 +4,8 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../data/sqlite/dao/penalty_rules_dao.dart';
 import '../models/penalty_computation.dart';
+import 'rule_rollout_service.dart';
+import 'rule_validation_service.dart';
 
 enum RideType {
   intra('intra'),
@@ -22,17 +24,37 @@ class PenaltyEngineService {
     DatabaseExecutor db, {
     required DateTime asOfUtc,
     String scope = 'default',
+    String? subjectId,
+    RuleRolloutService rolloutService = const RuleRolloutService(),
+    RuleValidationService validationService = const RuleValidationService(),
   }) async {
-    final rule = await PenaltyRulesDao(
+    final rules = await PenaltyRulesDao(
       db,
-    ).findActiveRule(asOfUtc: asOfUtc, scope: scope);
-    if (rule == null) {
+    ).listActiveRules(asOfUtc: asOfUtc, scope: scope);
+    if (rules.isEmpty) {
       return const PenaltyEngineService();
     }
-    return PenaltyEngineService._(
-      policy: _PenaltyPolicy.fromJson(rule.parametersJson),
-      ruleVersion: rule.version,
-    );
+    for (final rule in rules) {
+      final validation = validationService.validatePenaltyRuleJson(
+        rule.parametersJson,
+      );
+      if (!validation.ok) {
+        continue;
+      }
+      if (subjectId != null &&
+          !rolloutService.isInRollout(
+            subjectId: subjectId,
+            percent: rule.rolloutPercent,
+            salt: rule.rolloutSalt,
+          )) {
+        continue;
+      }
+      return PenaltyEngineService._(
+        policy: _PenaltyPolicy.fromJson(rule.parametersJson),
+        ruleVersion: rule.version,
+      );
+    }
+    return const PenaltyEngineService();
   }
 
   const PenaltyEngineService._({

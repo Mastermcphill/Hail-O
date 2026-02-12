@@ -88,7 +88,19 @@ class CancelRideService {
     required DateTime cancelledAt,
     required String idempotencyKey,
   }) async {
-    final computation = _penaltyEngineService.computeCancellationPenaltyMinor(
+    PenaltyEngineService engine;
+    try {
+      engine = await PenaltyEngineService.fromDatabase(
+        db,
+        asOfUtc: cancelledAt,
+        scope: rideType.dbValue,
+        subjectId: rideId,
+      );
+    } catch (_) {
+      engine = _penaltyEngineService;
+    }
+
+    final computation = engine.computeCancellationPenaltyMinor(
       rideType: rideType,
       totalFareMinor: totalFareMinor,
       scheduledDeparture: scheduledDeparture,

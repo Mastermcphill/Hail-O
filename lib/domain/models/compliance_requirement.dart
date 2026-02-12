@@ -4,6 +4,7 @@ class ComplianceRequirement {
     required this.scope,
     required this.requiredDocsJson,
     required this.createdAt,
+    this.enabled = true,
     this.fromCountry,
     this.toCountry,
   });
@@ -14,6 +15,7 @@ class ComplianceRequirement {
   final String? toCountry;
   final String requiredDocsJson;
   final DateTime createdAt;
+  final bool enabled;
 
   Map<String, Object?> toMap() {
     return <String, Object?>{
@@ -23,6 +25,7 @@ class ComplianceRequirement {
       'to_country': toCountry,
       'required_docs_json': requiredDocsJson,
       'created_at': createdAt.toUtc().toIso8601String(),
+      'enabled': enabled ? 1 : 0,
     };
   }
 
@@ -34,6 +37,7 @@ class ComplianceRequirement {
       toCountry: map['to_country'] as String?,
       requiredDocsJson: map['required_docs_json'] as String,
       createdAt: DateTime.parse(map['created_at'] as String).toUtc(),
+      enabled: ((map['enabled'] as num?)?.toInt() ?? 1) == 1,
     );
   }
 }

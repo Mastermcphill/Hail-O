@@ -4,6 +4,8 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../data/sqlite/dao/pricing_rules_dao.dart';
 import '../models/pricing_quote.dart';
+import 'rule_rollout_service.dart';
+import 'rule_validation_service.dart';
 
 enum PricingVehicleClass {
   sedan('sedan'),
@@ -30,17 +32,39 @@ class PricingEngineService {
     DatabaseExecutor db, {
     required DateTime asOfUtc,
     String scope = 'default',
+    String? subjectId,
+    RuleRolloutService rolloutService = const RuleRolloutService(),
+    RuleValidationService validationService = const RuleValidationService(),
   }) async {
-    final rule = await PricingRulesDao(
+    final rules = await PricingRulesDao(
       db,
-    ).findActiveRule(asOfUtc: asOfUtc, scope: scope);
-    if (rule == null) {
+    ).listActiveRules(asOfUtc: asOfUtc, scope: scope);
+    if (rules.isEmpty) {
       return PricingEngineService();
     }
-    return PricingEngineService._(
-      ruleVersion: rule.version,
-      policy: _PricingPolicy.fromJson(rule.parametersJson),
-    );
+    for (final rule in rules) {
+      final validation = validationService.validatePricingRuleJson(
+        rule.parametersJson,
+      );
+      if (!validation.ok) {
+        continue;
+      }
+      if (subjectId != null &&
+          !rolloutService.isInRollout(
+            subjectId: subjectId,
+            percent: rule.rolloutPercent,
+            salt: rule.rolloutSalt,
+          )) {
+        continue;
+      }
+      return PricingEngineService._(
+        ruleVersion: rule.version,
+        policy: _PricingPolicy.fromJson(rule.parametersJson),
+      );
+    }
+    // No eligible/valid rule matched rollout. Fall back to deterministic default.
+    // This keeps booking deterministic while avoiding invalid/tampered rule rows.
+    return PricingEngineService();
   }
 
   const PricingEngineService._({

@@ -48,6 +48,7 @@ class ComplianceRequirementsDao {
     required String? toCountry,
   }) async {
     final whereClauses = <String>['scope = ?'];
+    whereClauses.add('enabled = 1');
     final whereArgs = <Object?>[scope];
     if (fromCountry == null) {
       whereClauses.add('from_country IS NULL');

@@ -18,6 +18,7 @@ import 'dispute_service.dart';
 import 'finance_utils.dart';
 import 'pricing_engine_service.dart';
 import 'ride_booking_service.dart';
+import 'operation_journal_service.dart';
 import 'ride_settlement_service.dart';
 
 class RideOrchestratorService {
@@ -29,6 +30,8 @@ class RideOrchestratorService {
     RideSettlementService? rideSettlementService,
     DisputeService? disputeService,
     PricingEngineService? pricingEngineService,
+    OperationJournalService? operationJournalService,
+    void Function(RideEventType eventType)? faultHookAfterEventInsert,
   }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
        _acceptRideService =
            acceptRideService ?? AcceptRideService(db, nowUtc: nowUtc),
@@ -39,7 +42,11 @@ class RideOrchestratorService {
        _disputeService = disputeService ?? DisputeService(db, nowUtc: nowUtc),
        _pricingEngineService =
            pricingEngineService ?? const PricingEngineService(),
-       _idempotencyStore = IdempotencyDao(db);
+       _idempotencyStore = IdempotencyDao(db),
+       _operationJournalService =
+           operationJournalService ??
+           OperationJournalService(db, nowUtc: nowUtc),
+       _faultHookAfterEventInsert = faultHookAfterEventInsert;
 
   final Database db;
   final DateTime Function() _nowUtc;
@@ -49,6 +56,8 @@ class RideOrchestratorService {
   final DisputeService _disputeService;
   final PricingEngineService _pricingEngineService;
   final IdempotencyStore _idempotencyStore;
+  final OperationJournalService _operationJournalService;
+  final void Function(RideEventType eventType)? _faultHookAfterEventInsert;
 
   static const String _scopeRideEvent = 'ride_event';
 
@@ -70,7 +79,9 @@ class RideOrchestratorService {
       key: idempotencyKey,
       requestHash: '$rideId|${eventType.dbValue}|${jsonEncode(payload)}',
     );
-    if (!claim.isNewClaim) {
+    final shouldRetryFailedClaim =
+        !claim.isNewClaim && claim.record.status == IdempotencyStatus.failed;
+    if (!claim.isNewClaim && !shouldRetryFailedClaim) {
       return _buildReplayResponse(
         claim.record,
         idempotencyKey: idempotencyKey,
@@ -78,6 +89,18 @@ class RideOrchestratorService {
         traceContext: traceContext,
       );
     }
+
+    final traceId =
+        traceContext?.traceId ?? 'trace:$_scopeRideEvent:$idempotencyKey';
+    await _operationJournalService.begin(
+      opType: _opTypeFor(eventType),
+      entityType: 'ride',
+      entityId: rideId,
+      idempotencyScope: _scopeRideEvent,
+      idempotencyKey: idempotencyKey,
+      traceId: traceId,
+      metadataJson: jsonEncode(payload),
+    );
 
     try {
       final result = await _applyEventInternal(
@@ -93,6 +116,10 @@ class RideOrchestratorService {
         key: idempotencyKey,
         resultHash: hash,
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeRideEvent,
+        idempotencyKey: idempotencyKey,
+      );
       final out = <String, Object?>{...result, 'result_hash': hash};
       if (includeDebug) {
         out['debug'] = _debugMap(traceContext, idempotencyKey, rideId);
@@ -104,6 +131,11 @@ class RideOrchestratorService {
         scope: _scopeRideEvent,
         key: idempotencyKey,
         errorCode: code,
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeRideEvent,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(e),
       );
       rethrow;
     }
@@ -126,6 +158,7 @@ class RideOrchestratorService {
           idempotencyKey: idempotencyKey,
           payload: payload,
         );
+        _faultHookAfterEventInsert?.call(eventType);
 
         switch (eventType) {
           case RideEventType.rideBooked:
@@ -182,6 +215,7 @@ class RideOrchestratorService {
         payload: payload,
       );
     });
+    _faultHookAfterEventInsert?.call(eventType);
 
     switch (eventType) {
       case RideEventType.rideCancelled:
@@ -227,18 +261,28 @@ class RideOrchestratorService {
     required Map<String, Object?> payload,
   }) async {
     final now = _nowUtc();
-    await RideEventsDao(executor).insert(
-      RideEvent(
-        id: 'ride_event:$rideId:${eventType.dbValue}:$idempotencyKey',
-        rideId: rideId,
-        eventType: eventType,
-        actorId: actorId,
+    try {
+      await RideEventsDao(executor).insert(
+        RideEvent(
+          id: 'ride_event:$rideId:${eventType.dbValue}:$idempotencyKey',
+          rideId: rideId,
+          eventType: eventType,
+          actorId: actorId,
+          idempotencyScope: _scopeRideEvent,
+          idempotencyKey: idempotencyKey,
+          payloadJson: jsonEncode(payload),
+          createdAt: now,
+        ),
+      );
+    } on DatabaseException {
+      final existing = await RideEventsDao(executor).findByIdempotency(
         idempotencyScope: _scopeRideEvent,
         idempotencyKey: idempotencyKey,
-        payloadJson: jsonEncode(payload),
-        createdAt: now,
-      ),
-    );
+      );
+      if (existing == null) {
+        rethrow;
+      }
+    }
   }
 
   Future<Map<String, Object?>> _bookRideOnExecutor(
@@ -259,7 +303,19 @@ class RideOrchestratorService {
     final vehicleClass = PricingVehicleClass.fromDbValue(
       (payload['vehicle_class'] as String?) ?? 'sedan',
     );
-    final quote = _pricingEngineService.quote(
+    PricingEngineService pricingEngine;
+    try {
+      pricingEngine = await PricingEngineService.fromDatabase(
+        executor,
+        asOfUtc: now,
+        scope: tripScope.dbValue,
+        subjectId: rideId,
+      );
+    } catch (_) {
+      pricingEngine = _pricingEngineService;
+    }
+
+    final quote = pricingEngine.quote(
       tripScope: tripScope.dbValue,
       distanceMeters: distanceMeters,
       durationSeconds: durationSeconds,
@@ -284,7 +340,7 @@ class RideOrchestratorService {
           (payload['connection_fee_minor'] as num?)?.toInt() ?? 0,
       connectionFeePaid: false,
       biddingMode: true,
-      pricingVersion: quote.ruleVersion,
+      pricingVersion: pricingEngine.ruleVersion,
       pricingBreakdownJson: quote.breakdownJson,
       quotedFareMinor: quote.fareMinor,
       createdAt: now,
@@ -297,7 +353,7 @@ class RideOrchestratorService {
       'event_type': RideEventType.rideBooked.dbValue,
       'ride_id': rideId,
       'quoted_fare_minor': quote.fareMinor,
-      'pricing_version': quote.ruleVersion,
+      'pricing_version': pricingEngine.ruleVersion,
       'status': 'pending',
     };
   }
@@ -437,6 +493,27 @@ class RideOrchestratorService {
         eventType == RideEventType.rideCompleted;
   }
 
+  String _opTypeFor(RideEventType eventType) {
+    switch (eventType) {
+      case RideEventType.rideBooked:
+        return 'BOOK';
+      case RideEventType.driverAccepted:
+        return 'ACCEPT';
+      case RideEventType.rideStarted:
+        return 'START';
+      case RideEventType.rideCompleted:
+        return 'COMPLETE';
+      case RideEventType.rideCancelled:
+        return 'CANCEL';
+      case RideEventType.settled:
+        return 'SETTLE';
+      case RideEventType.disputeOpened:
+        return 'DISPUTE_OPEN';
+      case RideEventType.disputeResolved:
+        return 'DISPUTE_RESOLVE';
+    }
+  }
+
   Future<Map<String, Object?>> _buildReplayResponse(
     IdempotencyRecord record, {
     required String idempotencyKey,
@@ -472,5 +549,16 @@ class RideOrchestratorService {
       'idempotency_key': idempotencyKey,
       'ride_id': rideId,
     };
+  }
+
+  String _safeError(Object error) {
+    final text = error.toString().trim();
+    if (text.isEmpty) {
+      return 'ride_orchestrator_unknown_error';
+    }
+    if (text.length > 500) {
+      return text.substring(0, 500);
+    }
+    return text;
   }
 }

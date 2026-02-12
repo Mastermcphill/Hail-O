@@ -15,6 +15,8 @@ import 'package:hail_o_finance_core/data/sqlite/migrations/m0012_documents_compl
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0013_orchestrator_mutation_events.dart';
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0014_wallet_transfer_journal.dart';
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0015_policy_rules_tables.dart';
+import 'package:hail_o_finance_core/data/sqlite/migrations/m0016_operation_journal.dart';
+import 'package:hail_o_finance_core/data/sqlite/migrations/m0017_rule_rollouts.dart';
 import 'package:sqflite/sqflite.dart';
 
 List<Migration> allMigrations() {
@@ -34,6 +36,8 @@ List<Migration> allMigrations() {
     M0013OrchestratorMutationEvents(),
     M0014WalletTransferJournal(),
     M0015PolicyRulesTables(),
+    M0016OperationJournal(),
+    M0017RuleRollouts(),
   ];
 }
 

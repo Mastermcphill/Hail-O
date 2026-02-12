@@ -7,6 +7,7 @@ import '../../data/sqlite/dao/escrow_holds_dao.dart';
 import '../../data/sqlite/dao/idempotency_dao.dart';
 import '../models/latlng.dart';
 import 'geo_distance.dart';
+import 'operation_journal_service.dart';
 import 'ride_settlement_service.dart';
 
 class EscrowService {
@@ -15,17 +16,22 @@ class EscrowService {
     GeoDistance? geoDistance,
     RideSettlementService? rideSettlementService,
     DateTime Function()? nowUtc,
+    OperationJournalService? operationJournalService,
   }) : _geoDistance = geoDistance ?? GeoDistance(),
        _rideSettlementService =
            rideSettlementService ?? RideSettlementService(db, nowUtc: nowUtc),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
-       _idempotencyStore = IdempotencyDao(db);
+       _idempotencyStore = IdempotencyDao(db),
+       _operationJournalService =
+           operationJournalService ??
+           OperationJournalService(db, nowUtc: nowUtc);
 
   final Database db;
   final GeoDistance _geoDistance;
   final RideSettlementService _rideSettlementService;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
+  final OperationJournalService _operationJournalService;
 
   static const String _scopeGeofenceRelease = 'escrow.release.geofence';
   static const String _scopeManualRelease = 'escrow.release.manual';
@@ -69,6 +75,17 @@ class EscrowService {
     }
 
     try {
+      await _operationJournalService.begin(
+        opType: 'SETTLE',
+        entityType: 'escrow',
+        entityId: escrowId,
+        idempotencyScope: _scopeGeofenceRelease,
+        idempotencyKey: idempotencyKey,
+        traceId: 'trace:$_scopeGeofenceRelease:$idempotencyKey',
+        metadataJson:
+            '{"release_mode":"geofence","escrow_id":"$escrowId","geofence_radius_m":$geofenceRadiusMeters}',
+      );
+
       final distance = _geoDistance.haversineMeters(
         driverPosition,
         riderDestination,
@@ -144,12 +161,21 @@ class EscrowService {
         key: idempotencyKey,
         resultHash: _hash(result),
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeGeofenceRelease,
+        idempotencyKey: idempotencyKey,
+      );
       return result;
-    } catch (_) {
+    } catch (error) {
       await _idempotencyStore.finalizeFailure(
         scope: _scopeGeofenceRelease,
         key: idempotencyKey,
         errorCode: 'escrow_geofence_release_exception',
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeGeofenceRelease,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(error),
       );
       rethrow;
     }
@@ -174,6 +200,17 @@ class EscrowService {
     }
 
     try {
+      await _operationJournalService.begin(
+        opType: 'SETTLE',
+        entityType: 'escrow',
+        entityId: escrowId,
+        idempotencyScope: _scopeManualRelease,
+        idempotencyKey: idempotencyKey,
+        traceId: 'trace:$_scopeManualRelease:$idempotencyKey',
+        metadataJson:
+            '{"release_mode":"manual_override","escrow_id":"$escrowId","rider_id":"$riderId"}',
+      );
+
       final now = _nowUtc();
       var result = await db.transaction((txn) async {
         final escrowDao = EscrowHoldsDao(txn);
@@ -235,12 +272,21 @@ class EscrowService {
         key: idempotencyKey,
         resultHash: _hash(result),
       );
+      await _operationJournalService.commit(
+        idempotencyScope: _scopeManualRelease,
+        idempotencyKey: idempotencyKey,
+      );
       return result;
-    } catch (_) {
+    } catch (error) {
       await _idempotencyStore.finalizeFailure(
         scope: _scopeManualRelease,
         key: idempotencyKey,
         errorCode: 'escrow_manual_release_exception',
+      );
+      await _operationJournalService.fail(
+        idempotencyScope: _scopeManualRelease,
+        idempotencyKey: idempotencyKey,
+        errorMessage: _safeError(error),
       );
       rethrow;
     }
@@ -261,5 +307,16 @@ class EscrowService {
 
   String _hash(Map<String, Object?> result) {
     return sha256.convert(utf8.encode(jsonEncode(result))).toString();
+  }
+
+  String _safeError(Object error) {
+    final text = error.toString().trim();
+    if (text.isEmpty) {
+      return 'escrow_release_unknown_error';
+    }
+    if (text.length > 500) {
+      return text.substring(0, 500);
+    }
+    return text;
   }
 }
