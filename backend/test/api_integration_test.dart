@@ -26,6 +26,7 @@ void main() {
       db: db,
       tokenService: TokenService(secret: 'backend-test-secret'),
       dbMode: 'sqlite',
+      environment: 'test',
       dbHealthCheck: () async => true,
       buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
       authCredentialsStore: SqliteAuthCredentialsStore(db),

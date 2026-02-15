@@ -15,6 +15,7 @@ import 'modules/rides/postgres_ride_request_metadata_store.dart';
 import 'modules/rides/ride_request_metadata_store.dart';
 import 'modules/rides/sqlite_operational_record_store.dart';
 import 'modules/rides/sqlite_ride_request_metadata_store.dart';
+import 'server/middleware/cors_policy_middleware.dart';
 import 'server/app_server.dart';
 
 Future<void> main() async {
@@ -62,6 +63,10 @@ Future<void> main() async {
   }
 
   final tokenService = TokenService.fromEnvironment();
+  final environment = (Platform.environment['ENV'] ?? 'development').trim();
+  final allowedOrigins = parseAllowedOrigins(
+    Platform.environment['ALLOWED_ORIGINS'],
+  );
   final buildInfo = <String, Object?>{
     'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'local',
     'runtime': 'dart_vm',
@@ -71,6 +76,8 @@ Future<void> main() async {
     db: db,
     tokenService: tokenService,
     dbMode: config.dbMode.name,
+    environment: environment,
+    allowedOrigins: allowedOrigins,
     dbHealthCheck: dbHealthCheck,
     buildInfo: buildInfo,
     authCredentialsStore: authCredentialsStore,
