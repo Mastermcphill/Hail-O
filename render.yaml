@@ -3,6 +3,7 @@ services:
   - type: worker
     name: hail-o-ci
     env: docker
+    rootDir: .
     dockerfilePath: Dockerfile.ci
     branch: main
     autoDeploy: true
@@ -12,6 +13,7 @@ services:
     name: hail-o-api
     env: docker
     plan: free
+    rootDir: .
     dockerfilePath: backend/Dockerfile
     branch: main
     autoDeploy: true
@@ -35,6 +37,7 @@ services:
     name: hail-o-api-staging
     env: docker
     plan: free
+    rootDir: .
     dockerfilePath: backend/Dockerfile
     branch: main
     autoDeploy: true
