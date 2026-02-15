@@ -9,7 +9,6 @@ services:
     name: hail-o-api
     env: docker
     dockerfilePath: backend/Dockerfile
-    dockerCommand: bash -lc "dart run bin/migrate.dart && dart run bin/server.dart"
     branch: main
     autoDeploy: true
     healthCheckPath: /api/healthz
@@ -26,7 +25,6 @@ services:
     name: hail-o-api-staging
     env: docker
     dockerfilePath: backend/Dockerfile
-    dockerCommand: bash -lc "dart run bin/migrate.dart && dart run bin/server.dart"
     branch: main
     autoDeploy: true
     healthCheckPath: /api/healthz
