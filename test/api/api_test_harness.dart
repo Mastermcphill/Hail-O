@@ -5,6 +5,7 @@ import 'package:shelf/shelf.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../backend/infra/token_service.dart';
+import '../../backend/infra/request_metrics.dart';
 import '../../backend/server/app_server.dart';
 
 class ApiTestHarness {
@@ -22,6 +23,8 @@ class ApiTestHarness {
       db: db,
       tokenService: tokenService,
       dbMode: 'sqlite',
+      environment: 'test',
+      requestMetrics: RequestMetrics(),
       dbHealthCheck: () async => true,
       buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
     ).buildHandler();
