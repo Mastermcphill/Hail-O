@@ -1,18 +1,25 @@
 services:
+  # CI worker (kept as-is, explicit plan for determinism)
   - type: worker
     name: hail-o-ci
     env: docker
+    plan: free
     dockerfilePath: Dockerfile.ci
     branch: main
     autoDeploy: true
+
+  # Production API
   - type: web
     name: hail-o-api
     env: docker
+    plan: free
     dockerfilePath: backend/Dockerfile
     branch: main
     autoDeploy: true
     healthCheckPath: /api/healthz
     envVars:
+      - key: ENV
+        value: production
       - key: BACKEND_DB_MODE
         value: postgres
       - key: DATABASE_URL
@@ -21,9 +28,12 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
+
+  # Staging API (separate DB)
   - type: web
     name: hail-o-api-staging
     env: docker
+    plan: free
     dockerfilePath: backend/Dockerfile
     branch: main
     autoDeploy: true
@@ -41,10 +51,13 @@ services:
         generateValue: true
 
 databases:
+  # Production DB (keep paid if you want; change to "free" if billing blocks provisioning)
   - name: hail-o-db
     databaseName: hailo
     user: hailo
-    plan: free
+    plan: basic-256mb
+
+  # Staging DB (free to ensure it provisions without billing friction)
   - name: hail-o-db-staging
     databaseName: hailo_staging
     user: hailo_staging
