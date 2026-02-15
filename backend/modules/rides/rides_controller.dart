@@ -22,6 +22,7 @@ class RidesController {
     final router = Router();
     router.post('/request', _requestRide);
     router.post('/<rideId>/accept', _acceptRide);
+    router.post('/<rideId>/start', _startRide);
     router.post('/<rideId>/cancel', _cancelRide);
     router.post('/<rideId>/complete', _completeRide);
     router.get('/<rideId>', _getRideSnapshot);
@@ -100,6 +101,21 @@ class RidesController {
     return jsonResponse(200, result);
   }
 
+  Future<Response> _startRide(Request request, String rideId) async {
+    _requireRole(request, const <String>{'driver', 'admin'});
+    final actorId = request.requestContext.userId ?? '';
+    if (actorId.isEmpty) {
+      throw const UnauthorizedActionError(code: 'missing_user_context');
+    }
+
+    final result = await _rideApiFlowService.startRide(
+      rideId: rideId,
+      actorUserId: actorId,
+      idempotencyKey: request.requestContext.idempotencyKey ?? '',
+    );
+    return jsonResponse(200, result);
+  }
+
   Future<Response> _completeRide(Request request, String rideId) async {
     _requireRole(request, const <String>{'driver', 'admin'});
     final body = await readJsonBody(request);
@@ -120,7 +136,12 @@ class RidesController {
     _requireAuthenticated(request);
     final snapshot = await _rideSnapshotService.getRideSnapshot(rideId);
     if (snapshot['ok'] != true) {
-      return jsonResponse(404, snapshot);
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'ride_not_found',
+        message: (snapshot['error'] as String?) ?? 'ride_not_found',
+      );
     }
     return jsonResponse(200, snapshot);
   }

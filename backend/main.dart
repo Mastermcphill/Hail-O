@@ -20,25 +20,27 @@ import 'server/middleware/cors_policy_middleware.dart';
 import 'server/app_server.dart';
 
 Future<void> main() async {
+  final env = Platform.environment;
   final config = BackendRuntimeConfig.fromEnvironment();
   final db = await DbProvider.instance.open(databasePath: config.sqlitePath);
   final requestMetrics = RequestMetrics();
-  final environment = (Platform.environment['ENV'] ?? 'development').trim();
+  final environment = (env['ENV'] ?? 'development').trim();
   final dbQueryTimeoutMs =
-      int.tryParse(
-        (Platform.environment['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim(),
-      ) ??
-      10000;
+      int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
   final requestIdleTimeoutSeconds =
-      int.tryParse(
-        (Platform.environment['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim(),
-      ) ??
-      30;
+      int.tryParse((env['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim()) ?? 30;
+  final rateLimitEnabled =
+      (env['RATE_LIMIT_ENABLED'] ?? 'true').trim().toLowerCase() != 'false';
+  final rateLimitWindowSeconds =
+      int.tryParse((env['RATE_LIMIT_WINDOW_SECONDS'] ?? '60').trim()) ?? 60;
+  final rateLimitMaxRequestsPerIp =
+      int.tryParse((env['RATE_LIMIT_MAX_REQUESTS_PER_IP'] ?? '60').trim()) ??
+      60;
+  final rateLimitMaxRequestsPerUser =
+      int.tryParse((env['RATE_LIMIT_MAX_REQUESTS_PER_USER'] ?? '120').trim()) ??
+      120;
   final metricsPublic =
-      (Platform.environment['METRICS_PUBLIC'] ?? 'false')
-          .trim()
-          .toLowerCase() ==
-      'true';
+      (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
   final migrationHeadVersion = BackendPostgresMigrator.migrationHeadVersion();
   PostgresProvider? postgresProvider;
   AuthCredentialsStore authCredentialsStore = SqliteAuthCredentialsStore(db);
@@ -86,14 +88,27 @@ Future<void> main() async {
   }
 
   final tokenService = TokenService.fromEnvironment();
-  final allowedOrigins = parseAllowedOrigins(
-    Platform.environment['ALLOWED_ORIGINS'],
-  );
+  final allowedOrigins = parseAllowedOrigins(env['ALLOWED_ORIGINS']);
   final buildInfo = <String, Object?>{
-    'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'local',
+    'commit': env['RENDER_GIT_COMMIT'] ?? 'local',
     'runtime': 'dart_vm',
     'db_schema': config.dbSchema,
     'migration_head': migrationHeadVersion,
+  };
+  final runtimeConfigSnapshot = <String, Object?>{
+    'environment': environment,
+    'db_mode': config.dbMode.name,
+    'db_schema': config.dbSchema,
+    'cors_enabled': allowedOrigins.isNotEmpty,
+    'allowed_origins_count': allowedOrigins.length,
+    'rate_limit_enabled': rateLimitEnabled,
+    'rate_limit_window_seconds': rateLimitWindowSeconds,
+    'rate_limit_max_requests_per_ip': rateLimitMaxRequestsPerIp,
+    'rate_limit_max_requests_per_user': rateLimitMaxRequestsPerUser,
+    'metrics_public': metricsPublic,
+    'metrics_protected': !metricsPublic,
+    'db_query_timeout_ms': dbQueryTimeoutMs,
+    'request_idle_timeout_seconds': requestIdleTimeoutSeconds,
   };
   final handler = AppServer(
     db: db,
@@ -105,6 +120,11 @@ Future<void> main() async {
     allowedOrigins: allowedOrigins,
     dbHealthCheck: dbHealthCheck,
     buildInfo: buildInfo,
+    rateLimitEnabled: rateLimitEnabled,
+    rateLimitWindow: Duration(seconds: rateLimitWindowSeconds),
+    maxRequestsPerIp: rateLimitMaxRequestsPerIp,
+    maxRequestsPerUser: rateLimitMaxRequestsPerUser,
+    runtimeConfigSnapshot: runtimeConfigSnapshot,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,

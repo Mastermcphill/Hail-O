@@ -26,6 +26,11 @@ class AppServer {
     required this.requestMetrics,
     this.allowedOrigins = const <String>{},
     this.metricsPublic = false,
+    this.rateLimitEnabled = true,
+    this.rateLimitWindow = const Duration(minutes: 1),
+    this.maxRequestsPerIp = 60,
+    this.maxRequestsPerUser = 120,
+    this.runtimeConfigSnapshot = const <String, Object?>{},
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
@@ -40,6 +45,11 @@ class AppServer {
   final RequestMetrics requestMetrics;
   final Set<String> allowedOrigins;
   final bool metricsPublic;
+  final bool rateLimitEnabled;
+  final Duration rateLimitWindow;
+  final int maxRequestsPerIp;
+  final int maxRequestsPerUser;
+  final Map<String, Object?> runtimeConfigSnapshot;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
@@ -56,6 +66,7 @@ class AppServer {
       buildInfo: buildInfo,
       requestMetrics: requestMetrics,
       metricsPublic: metricsPublic,
+      runtimeConfigSnapshot: runtimeConfigSnapshot,
     );
     final authPublicPaths = <String>{
       'auth/register',
@@ -79,7 +90,18 @@ class AppServer {
         .addMiddleware(
           authMiddleware(tokenService, publicPaths: authPublicPaths),
         )
-        .addMiddleware(rateLimitMiddleware())
-        .addHandler(router);
+        .addHandler(
+          rateLimitEnabled
+              ? Pipeline()
+                    .addMiddleware(
+                      rateLimitMiddleware(
+                        window: rateLimitWindow,
+                        maxRequestsPerIp: maxRequestsPerIp,
+                        maxRequestsPerUser: maxRequestsPerUser,
+                      ),
+                    )
+                    .addHandler(router)
+              : router,
+        );
   }
 }

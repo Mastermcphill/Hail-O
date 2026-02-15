@@ -4,6 +4,7 @@ import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../lib/domain/services/auth_service.dart';
 import '../../lib/domain/services/dispute_service.dart';
+import '../../lib/domain/services/escrow_service.dart';
 import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
@@ -28,6 +29,7 @@ Handler buildApiRouter({
   required Future<bool> Function() dbHealthCheck,
   required Map<String, Object?> buildInfo,
   required RequestMetrics requestMetrics,
+  required Map<String, Object?> runtimeConfigSnapshot,
   bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
@@ -47,12 +49,14 @@ Handler buildApiRouter({
   );
   final settlementController = SettlementController(
     rideSettlementService: RideSettlementService(db),
+    escrowService: EscrowService(db),
   );
   final disputesController = DisputesController(
     disputeService: DisputeService(db),
   );
   final adminController = AdminController(
     walletReversalService: WalletReversalService(db),
+    runtimeConfigSnapshot: runtimeConfigSnapshot,
   );
   final driversController = DriversController();
 
@@ -87,14 +91,11 @@ Response _metricsHandler(
   if (!metricsPublic) {
     final role = (request.requestContext.role ?? '').trim().toLowerCase();
     if (role != 'admin') {
-      return jsonResponse(
+      return jsonErrorResponse(
+        request,
         403,
-        <String, Object?>{
-          'code': 'admin_only',
-          'message': 'Admin role required',
-          'trace_id': request.requestContext.traceId,
-        },
-        headers: const <String, String>{'x-error-code': 'admin_only'},
+        code: 'admin_only',
+        message: 'Admin role required',
       );
     }
   }

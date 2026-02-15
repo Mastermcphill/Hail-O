@@ -203,6 +203,28 @@ class RideApiFlowService {
         });
   }
 
+  Future<Map<String, Object?>> startRide({
+    required String rideId,
+    required String actorUserId,
+    required String idempotencyKey,
+  }) async {
+    final started = await _rideOrchestratorService.applyEvent(
+      eventType: RideEventType.rideStarted,
+      rideId: rideId,
+      idempotencyKey: idempotencyKey,
+      actorId: actorUserId,
+      payload: const <String, Object?>{},
+    );
+    await _logOperation(
+      operationType: 'ride_start',
+      entityId: rideId,
+      actorUserId: actorUserId,
+      idempotencyKey: idempotencyKey,
+      payload: const <String, Object?>{},
+    );
+    return started;
+  }
+
   Future<Map<String, Object?>> cancelRide({
     required String rideId,
     required String actorUserId,

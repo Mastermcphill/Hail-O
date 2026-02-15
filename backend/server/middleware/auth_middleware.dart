@@ -24,14 +24,11 @@ Middleware authMiddleware(
       final authorization = request.headers['authorization']?.trim() ?? '';
       if (!authorization.startsWith('Bearer ')) {
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             401,
-            <String, Object?>{
-              'code': 'unauthorized',
-              'message': 'Missing bearer token',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: const <String, String>{'x-error-code': 'unauthorized'},
+            code: 'unauthorized',
+            message: 'Missing bearer token',
           ),
         );
       }
@@ -39,14 +36,11 @@ Middleware authMiddleware(
       final token = authorization.substring('Bearer '.length).trim();
       if (token.isEmpty) {
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             401,
-            <String, Object?>{
-              'code': 'unauthorized',
-              'message': 'Missing bearer token',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: const <String, String>{'x-error-code': 'unauthorized'},
+            code: 'unauthorized',
+            message: 'Missing bearer token',
           ),
         );
       }
@@ -61,14 +55,11 @@ Middleware authMiddleware(
         return innerHandler(authed);
       } on JWTException {
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             401,
-            <String, Object?>{
-              'code': 'invalid_token',
-              'message': 'Bearer token is invalid or expired',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: const <String, String>{'x-error-code': 'invalid_token'},
+            code: 'invalid_token',
+            message: 'Bearer token is invalid or expired',
           ),
         );
       }

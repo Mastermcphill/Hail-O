@@ -35,6 +35,13 @@ class TokenService {
 
   final String _secret;
   final Duration _tokenTtl;
+  static const Set<String> _allowedRoles = <String>{
+    'rider',
+    'driver',
+    'admin',
+    'fleet_owner',
+    'system',
+  };
 
   String issueToken({
     required String userId,
@@ -58,9 +65,12 @@ class TokenService {
     }
 
     final userId = (payload['user_id'] as String?)?.trim() ?? '';
-    final role = (payload['role'] as String?)?.trim() ?? '';
+    final role = (payload['role'] as String?)?.trim().toLowerCase() ?? '';
     if (userId.isEmpty || role.isEmpty) {
       throw JWTException('missing_auth_claims');
+    }
+    if (!_allowedRoles.contains(role)) {
+      throw JWTException('invalid_role_claim');
     }
 
     final issuedAtRaw = payload['issued_at'] as String?;

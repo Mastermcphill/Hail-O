@@ -1,6 +1,5 @@
 import 'package:shelf/shelf.dart';
 
-import '../../infra/request_context.dart';
 import '../http_utils.dart';
 
 Set<String> parseAllowedOrigins(String? value) {
@@ -37,16 +36,11 @@ Middleware corsPolicyMiddleware({
 
       if (origin != null && origin.isNotEmpty) {
         if (!allowedOrigins.contains(origin)) {
-          return jsonResponse(
+          return jsonErrorResponse(
+            request,
             403,
-            <String, Object?>{
-              'code': 'cors_origin_denied',
-              'message': 'Origin is not allowed',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: const <String, String>{
-              'x-error-code': 'cors_origin_denied',
-            },
+            code: 'cors_origin_denied',
+            message: 'Origin is not allowed',
           );
         }
 
@@ -75,14 +69,11 @@ Middleware corsPolicyMiddleware({
       }
 
       if (isPreflight) {
-        return jsonResponse(
+        return jsonErrorResponse(
+          request,
           403,
-          <String, Object?>{
-            'code': 'cors_origin_denied',
-            'message': 'Origin is required',
-            'trace_id': request.requestContext.traceId,
-          },
-          headers: const <String, String>{'x-error-code': 'cors_origin_denied'},
+          code: 'cors_origin_denied',
+          message: 'Origin is required',
         );
       }
 

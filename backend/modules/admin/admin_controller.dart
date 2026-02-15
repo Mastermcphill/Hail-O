@@ -7,15 +7,30 @@ import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 
 class AdminController {
-  AdminController({required WalletReversalService walletReversalService})
-    : _walletReversalService = walletReversalService;
+  AdminController({
+    required WalletReversalService walletReversalService,
+    required Map<String, Object?> runtimeConfigSnapshot,
+  }) : _walletReversalService = walletReversalService,
+       _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
+         runtimeConfigSnapshot,
+       );
 
   final WalletReversalService _walletReversalService;
+  final Map<String, Object?> _runtimeConfigSnapshot;
 
   Router get router {
     final router = Router();
+    router.get('/config', _runtimeConfig);
     router.post('/reversal', _reverseTransaction);
     return router;
+  }
+
+  Future<Response> _runtimeConfig(Request request) async {
+    _requireAdmin(request);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'config': _runtimeConfigSnapshot,
+    });
   }
 
   Future<Response> _reverseTransaction(Request request) async {

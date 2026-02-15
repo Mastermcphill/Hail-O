@@ -2,7 +2,6 @@ import 'package:shelf/shelf.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/ride_booking_guard_service.dart';
-import '../../infra/request_context.dart';
 import '../http_utils.dart';
 
 Middleware errorMiddleware() {
@@ -49,14 +48,10 @@ Response _errorResponse(
   String code,
   String? message,
 ) {
-  final traceId = request.requestContext.traceId;
-  return jsonResponse(
+  return jsonErrorResponse(
+    request,
     statusCode,
-    <String, Object?>{
-      'code': code,
-      'message': message ?? code,
-      'trace_id': traceId,
-    },
-    headers: <String, String>{'x-error-code': code},
+    code: code,
+    message: message ?? code,
   );
 }

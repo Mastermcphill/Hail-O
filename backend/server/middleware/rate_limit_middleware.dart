@@ -55,17 +55,12 @@ Middleware rateLimitMiddleware({
       final ipKey = _extractClientIp(request);
       if (!consume(ipBuckets, ipKey, currentUtc, maxRequestsPerIp)) {
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             429,
-            <String, Object?>{
-              'code': 'rate_limited',
-              'message': 'Too many requests for this IP',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: <String, String>{
-              'retry-after': '${window.inSeconds}',
-              'x-error-code': 'rate_limited',
-            },
+            code: 'rate_limited',
+            message: 'Too many requests for this IP',
+            headers: <String, String>{'retry-after': '${window.inSeconds}'},
           ),
         );
       }
@@ -74,17 +69,12 @@ Middleware rateLimitMiddleware({
       if (userId.isNotEmpty &&
           !consume(userBuckets, userId, currentUtc, maxRequestsPerUser)) {
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             429,
-            <String, Object?>{
-              'code': 'rate_limited',
-              'message': 'Too many requests for this user',
-              'trace_id': request.requestContext.traceId,
-            },
-            headers: <String, String>{
-              'retry-after': '${window.inSeconds}',
-              'x-error-code': 'rate_limited',
-            },
+            code: 'rate_limited',
+            message: 'Too many requests for this user',
+            headers: <String, String>{'retry-after': '${window.inSeconds}'},
           ),
         );
       }

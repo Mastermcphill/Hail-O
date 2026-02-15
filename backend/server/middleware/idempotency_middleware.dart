@@ -22,19 +22,12 @@ Middleware idempotencyMiddleware({
       final idempotencyKey =
           request.headers[_headerIdempotencyKey]?.trim() ?? '';
       if (idempotencyKey.isEmpty) {
-        final traceId = request.requestContext.traceId;
         return Future<Response>.value(
-          jsonResponse(
+          jsonErrorResponse(
+            request,
             400,
-            <String, Object?>{
-              'code': 'missing_idempotency_key',
-              'message':
-                  'Idempotency-Key header is required for write requests',
-              'trace_id': traceId,
-            },
-            headers: const <String, String>{
-              'x-error-code': 'missing_idempotency_key',
-            },
+            code: 'missing_idempotency_key',
+            message: 'Idempotency-Key header is required for write requests',
           ),
         );
       }
