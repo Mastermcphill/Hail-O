@@ -50,9 +50,13 @@ Response _errorResponse(
   String? message,
 ) {
   final traceId = request.requestContext.traceId;
-  return jsonResponse(statusCode, <String, Object?>{
-    'code': code,
-    'message': message ?? code,
-    'trace_id': traceId,
-  });
+  return jsonResponse(
+    statusCode,
+    <String, Object?>{
+      'code': code,
+      'message': message ?? code,
+      'trace_id': traceId,
+    },
+    headers: <String, String>{'x-error-code': code},
+  );
 }

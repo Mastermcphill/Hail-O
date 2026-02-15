@@ -5,6 +5,7 @@ import 'package:shelf/shelf_io.dart' as io;
 import 'infra/db_provider.dart';
 import 'infra/migrator.dart';
 import 'infra/postgres_provider.dart';
+import 'infra/request_metrics.dart';
 import 'infra/runtime_config.dart';
 import 'infra/token_service.dart';
 import 'modules/auth/auth_credentials_store.dart';
@@ -21,6 +22,14 @@ import 'server/app_server.dart';
 Future<void> main() async {
   final config = BackendRuntimeConfig.fromEnvironment();
   final db = await DbProvider.instance.open(databasePath: config.sqlitePath);
+  final requestMetrics = RequestMetrics();
+  final environment = (Platform.environment['ENV'] ?? 'development').trim();
+  final metricsPublic =
+      (Platform.environment['METRICS_PUBLIC'] ?? 'false')
+          .trim()
+          .toLowerCase() ==
+      'true';
+  final migrationHeadVersion = BackendPostgresMigrator.migrationHeadVersion();
   PostgresProvider? postgresProvider;
   AuthCredentialsStore authCredentialsStore = SqliteAuthCredentialsStore(db);
   RideRequestMetadataStore rideRequestMetadataStore =
@@ -63,7 +72,6 @@ Future<void> main() async {
   }
 
   final tokenService = TokenService.fromEnvironment();
-  final environment = (Platform.environment['ENV'] ?? 'development').trim();
   final allowedOrigins = parseAllowedOrigins(
     Platform.environment['ALLOWED_ORIGINS'],
   );
@@ -71,12 +79,15 @@ Future<void> main() async {
     'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'local',
     'runtime': 'dart_vm',
     'db_schema': config.dbSchema,
+    'migration_head': migrationHeadVersion,
   };
   final handler = AppServer(
     db: db,
     tokenService: tokenService,
     dbMode: config.dbMode.name,
     environment: environment,
+    requestMetrics: requestMetrics,
+    metricsPublic: metricsPublic,
     allowedOrigins: allowedOrigins,
     dbHealthCheck: dbHealthCheck,
     buildInfo: buildInfo,
@@ -86,6 +97,9 @@ Future<void> main() async {
   ).buildHandler();
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
+  stdout.writeln(
+    'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic',
+  );
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   stdout.writeln(
     'Hail-O backend listening on http://${server.address.host}:${server.port}',

@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
 import '../../lib/data/sqlite/hailo_database.dart';
+import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/sqlite_auth_credentials_store.dart';
 import '../modules/rides/sqlite_operational_record_store.dart';
@@ -27,6 +28,7 @@ void main() {
       tokenService: TokenService(secret: 'backend-test-secret'),
       dbMode: 'sqlite',
       environment: 'test',
+      requestMetrics: RequestMetrics(),
       dbHealthCheck: () async => true,
       buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
       authCredentialsStore: SqliteAuthCredentialsStore(db),

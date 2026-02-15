@@ -24,22 +24,30 @@ Middleware authMiddleware(
       final authorization = request.headers['authorization']?.trim() ?? '';
       if (!authorization.startsWith('Bearer ')) {
         return Future<Response>.value(
-          jsonResponse(401, <String, Object?>{
-            'code': 'unauthorized',
-            'message': 'Missing bearer token',
-            'trace_id': request.requestContext.traceId,
-          }),
+          jsonResponse(
+            401,
+            <String, Object?>{
+              'code': 'unauthorized',
+              'message': 'Missing bearer token',
+              'trace_id': request.requestContext.traceId,
+            },
+            headers: const <String, String>{'x-error-code': 'unauthorized'},
+          ),
         );
       }
 
       final token = authorization.substring('Bearer '.length).trim();
       if (token.isEmpty) {
         return Future<Response>.value(
-          jsonResponse(401, <String, Object?>{
-            'code': 'unauthorized',
-            'message': 'Missing bearer token',
-            'trace_id': request.requestContext.traceId,
-          }),
+          jsonResponse(
+            401,
+            <String, Object?>{
+              'code': 'unauthorized',
+              'message': 'Missing bearer token',
+              'trace_id': request.requestContext.traceId,
+            },
+            headers: const <String, String>{'x-error-code': 'unauthorized'},
+          ),
         );
       }
 
@@ -53,11 +61,15 @@ Middleware authMiddleware(
         return innerHandler(authed);
       } on JWTException {
         return Future<Response>.value(
-          jsonResponse(401, <String, Object?>{
-            'code': 'invalid_token',
-            'message': 'Bearer token is invalid or expired',
-            'trace_id': request.requestContext.traceId,
-          }),
+          jsonResponse(
+            401,
+            <String, Object?>{
+              'code': 'invalid_token',
+              'message': 'Bearer token is invalid or expired',
+              'trace_id': request.requestContext.traceId,
+            },
+            headers: const <String, String>{'x-error-code': 'invalid_token'},
+          ),
         );
       }
     };

@@ -211,6 +211,27 @@ class BackendPostgresMigrator {
     return 'backend/migrations';
   }
 
+  static int migrationHeadVersion({String? migrationsDirectory}) {
+    final directoryPath = migrationsDirectory ?? _resolveMigrationsDirectory();
+    final directory = Directory(directoryPath);
+    if (!directory.existsSync()) {
+      return 0;
+    }
+    var head = 0;
+    for (final entity in directory.listSync()) {
+      if (entity is! File || !entity.path.toLowerCase().endsWith('.sql')) {
+        continue;
+      }
+      final name = entity.uri.pathSegments.last;
+      final prefix = name.split('_').first;
+      final version = int.tryParse(prefix) ?? 0;
+      if (version > head) {
+        head = version;
+      }
+    }
+    return head;
+  }
+
   int _versionFromMigrationName(String migrationName) {
     final prefix = migrationName.split('_').first;
     final parsed = int.tryParse(prefix);

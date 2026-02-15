@@ -8,6 +8,8 @@ import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
+import '../infra/request_context.dart';
+import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
@@ -25,6 +27,8 @@ Handler buildApiRouter({
   required String dbMode,
   required Future<bool> Function() dbHealthCheck,
   required Map<String, Object?> buildInfo,
+  required RequestMetrics requestMetrics,
+  bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
@@ -61,6 +65,10 @@ Handler buildApiRouter({
       '/api/healthz',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
+    ..get(
+      '/metrics',
+      (request) => _metricsHandler(request, requestMetrics, metricsPublic),
+    )
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
@@ -69,6 +77,28 @@ Handler buildApiRouter({
     ..mount('/admin/', adminController.router.call);
 
   return router.call;
+}
+
+Response _metricsHandler(
+  Request request,
+  RequestMetrics requestMetrics,
+  bool metricsPublic,
+) {
+  if (!metricsPublic) {
+    final role = (request.requestContext.role ?? '').trim().toLowerCase();
+    if (role != 'admin') {
+      return jsonResponse(
+        403,
+        <String, Object?>{
+          'code': 'admin_only',
+          'message': 'Admin role required',
+          'trace_id': request.requestContext.traceId,
+        },
+        headers: const <String, String>{'x-error-code': 'admin_only'},
+      );
+    }
+  }
+  return jsonResponse(200, requestMetrics.snapshot());
 }
 
 Future<Response> _healthHandler(

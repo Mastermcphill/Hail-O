@@ -37,11 +37,17 @@ Middleware corsPolicyMiddleware({
 
       if (origin != null && origin.isNotEmpty) {
         if (!allowedOrigins.contains(origin)) {
-          return jsonResponse(403, <String, Object?>{
-            'code': 'cors_origin_denied',
-            'message': 'Origin is not allowed',
-            'trace_id': request.requestContext.traceId,
-          });
+          return jsonResponse(
+            403,
+            <String, Object?>{
+              'code': 'cors_origin_denied',
+              'message': 'Origin is not allowed',
+              'trace_id': request.requestContext.traceId,
+            },
+            headers: const <String, String>{
+              'x-error-code': 'cors_origin_denied',
+            },
+          );
         }
 
         if (isPreflight) {
@@ -69,11 +75,15 @@ Middleware corsPolicyMiddleware({
       }
 
       if (isPreflight) {
-        return jsonResponse(403, <String, Object?>{
-          'code': 'cors_origin_denied',
-          'message': 'Origin is required',
-          'trace_id': request.requestContext.traceId,
-        });
+        return jsonResponse(
+          403,
+          <String, Object?>{
+            'code': 'cors_origin_denied',
+            'message': 'Origin is required',
+            'trace_id': request.requestContext.traceId,
+          },
+          headers: const <String, String>{'x-error-code': 'cors_origin_denied'},
+        );
       }
 
       return innerHandler(request);

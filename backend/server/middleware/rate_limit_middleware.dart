@@ -62,7 +62,10 @@ Middleware rateLimitMiddleware({
               'message': 'Too many requests for this IP',
               'trace_id': request.requestContext.traceId,
             },
-            headers: <String, String>{'retry-after': '${window.inSeconds}'},
+            headers: <String, String>{
+              'retry-after': '${window.inSeconds}',
+              'x-error-code': 'rate_limited',
+            },
           ),
         );
       }
@@ -78,7 +81,10 @@ Middleware rateLimitMiddleware({
               'message': 'Too many requests for this user',
               'trace_id': request.requestContext.traceId,
             },
-            headers: <String, String>{'retry-after': '${window.inSeconds}'},
+            headers: <String, String>{
+              'retry-after': '${window.inSeconds}',
+              'x-error-code': 'rate_limited',
+            },
           ),
         );
       }
