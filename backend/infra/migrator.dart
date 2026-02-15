@@ -100,15 +100,13 @@ class BackendPostgresMigrator {
   final MigrationDatabase _migrationDatabase;
   final String migrationsDirectory;
   final String dbSchema;
+  static const int _migrationLockKey = 746381905112337451;
   static final RegExp _schemaPattern = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
 
   String get _quotedSchema => '"${dbSchema.replaceAll('"', '""')}"';
   String get _qualifiedMigrationsTable => '$_quotedSchema.schema_migrations';
 
   Future<void> runPendingMigrations() async {
-    await _ensureSchemaExists(_migrationDatabase);
-    await _ensureMigrationsTable(_migrationDatabase);
-
     final directory = Directory(migrationsDirectory);
     if (!await directory.exists()) {
       return;
@@ -126,15 +124,19 @@ class BackendPostgresMigrator {
       (a, b) => a.uri.pathSegments.last.compareTo(b.uri.pathSegments.last),
     );
 
-    for (final file in entries) {
-      final name = file.uri.pathSegments.last;
-      final version = _versionFromMigrationName(name);
-      final alreadyApplied = await _isApplied(_migrationDatabase, version);
-      if (alreadyApplied) {
-        continue;
-      }
-      final sql = await file.readAsString();
-      await _migrationDatabase.transaction((txn) async {
+    await _migrationDatabase.transaction((txn) async {
+      await _acquireMigrationLock(txn);
+      await _ensureSchemaExists(txn);
+      await _ensureMigrationsTable(txn);
+
+      for (final file in entries) {
+        final name = file.uri.pathSegments.last;
+        final version = _versionFromMigrationName(name);
+        final alreadyApplied = await _isApplied(txn, version);
+        if (alreadyApplied) {
+          continue;
+        }
+        final sql = await file.readAsString();
         for (final statement in _splitStatements(sql)) {
           await txn.execute(statement);
         }
@@ -148,8 +150,15 @@ class BackendPostgresMigrator {
             'name': name,
           },
         );
-      });
-    }
+      }
+    });
+  }
+
+  Future<void> _acquireMigrationLock(MigrationDatabase database) async {
+    await database.query(
+      'SELECT pg_advisory_xact_lock(@lock_key)',
+      substitutionValues: <String, Object?>{'lock_key': _migrationLockKey},
+    );
   }
 
   Future<void> _ensureSchemaExists(MigrationDatabase database) {

@@ -32,6 +32,7 @@ void main() {
       '002_second.sql',
     });
     expect(fakeDb.executedMigrationStatements.length, 2);
+    expect(fakeDb.advisoryLockCalls, 1);
 
     await migrator.runPendingMigrations();
     expect(fakeDb.appliedMigrationsBySchema['hailo_prod'], <String>{
@@ -39,6 +40,7 @@ void main() {
       '002_second.sql',
     });
     expect(fakeDb.executedMigrationStatements.length, 2);
+    expect(fakeDb.advisoryLockCalls, 2);
   });
 
   test('migrator scopes schema_migrations by DB schema', () async {
@@ -93,6 +95,7 @@ void main() {
       ),
       isEmpty,
     );
+    expect(fakeDb.advisoryLockCalls, 2);
   });
 }
 
@@ -102,6 +105,7 @@ class _SchemaAwareFakeMigrationDatabase implements MigrationDatabase {
       <String, Set<String>>{};
   final List<String> executedMigrationStatements = <String>[];
   final List<String> allStatements = <String>[];
+  int advisoryLockCalls = 0;
 
   @override
   Future<void> execute(
@@ -144,6 +148,12 @@ class _SchemaAwareFakeMigrationDatabase implements MigrationDatabase {
         ];
       }
       return <List<Object?>>[];
+    }
+    if (trimmed.contains('SELECT pg_advisory_xact_lock')) {
+      advisoryLockCalls += 1;
+      return <List<Object?>>[
+        <Object?>[1],
+      ];
     }
     return <List<Object?>>[];
   }
