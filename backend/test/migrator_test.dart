@@ -42,6 +42,7 @@ void main() {
 }
 
 class _FakeMigrationDatabase implements MigrationDatabase {
+  final Set<int> appliedVersions = <int>{};
   final Set<String> appliedMigrations = <String>{};
   final List<String> executedMigrationStatements = <String>[];
 
@@ -51,11 +52,16 @@ class _FakeMigrationDatabase implements MigrationDatabase {
     Map<String, Object?> substitutionValues = const <String, Object?>{},
   }) async {
     if (statement.contains('INSERT INTO schema_migrations')) {
+      final version = substitutionValues['version'] as int;
       final name = substitutionValues['name'] as String;
+      appliedVersions.add(version);
       appliedMigrations.add(name);
       return;
     }
     if (statement.contains('CREATE TABLE IF NOT EXISTS schema_migrations')) {
+      return;
+    }
+    if (statement.contains('ALTER TABLE schema_migrations')) {
       return;
     }
     executedMigrationStatements.add(statement.trim());
@@ -67,8 +73,8 @@ class _FakeMigrationDatabase implements MigrationDatabase {
     Map<String, Object?> substitutionValues = const <String, Object?>{},
   }) async {
     if (statement.contains('SELECT 1 FROM schema_migrations')) {
-      final name = substitutionValues['name'] as String;
-      if (appliedMigrations.contains(name)) {
+      final version = substitutionValues['version'] as int;
+      if (appliedVersions.contains(version)) {
         return <List<Object?>>[
           <Object?>[1],
         ];

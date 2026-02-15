@@ -120,7 +120,8 @@ class BackendPostgresMigrator {
 
     for (final file in entries) {
       final name = file.uri.pathSegments.last;
-      final alreadyApplied = await _isApplied(_migrationDatabase, name);
+      final version = _versionFromMigrationName(name);
+      final alreadyApplied = await _isApplied(_migrationDatabase, version);
       if (alreadyApplied) {
         continue;
       }
@@ -131,10 +132,13 @@ class BackendPostgresMigrator {
         }
         await txn.execute(
           '''
-          INSERT INTO schema_migrations(name, applied_at)
-          VALUES (@name, NOW())
+          INSERT INTO schema_migrations(version, name, applied_at)
+          VALUES (@version, @name, NOW())
           ''',
-          substitutionValues: <String, Object?>{'name': name},
+          substitutionValues: <String, Object?>{
+            'version': version,
+            'name': name,
+          },
         );
       });
     }
@@ -143,16 +147,26 @@ class BackendPostgresMigrator {
   Future<void> _ensureMigrationsTable(MigrationDatabase database) async {
     await database.execute('''
       CREATE TABLE IF NOT EXISTS schema_migrations (
-        name TEXT PRIMARY KEY,
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     ''');
+    await database.execute(
+      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS version INTEGER',
+    );
+    await database.execute(
+      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS name TEXT',
+    );
+    await database.execute(
+      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+    );
   }
 
-  Future<bool> _isApplied(MigrationDatabase database, String name) async {
+  Future<bool> _isApplied(MigrationDatabase database, int version) async {
     final result = await database.query(
-      'SELECT 1 FROM schema_migrations WHERE name = @name LIMIT 1',
-      substitutionValues: <String, Object?>{'name': name},
+      'SELECT 1 FROM schema_migrations WHERE version = @version LIMIT 1',
+      substitutionValues: <String, Object?>{'version': version},
     );
     return result.isNotEmpty;
   }
@@ -174,5 +188,16 @@ class BackendPostgresMigrator {
       }
     }
     return 'backend/migrations';
+  }
+
+  int _versionFromMigrationName(String migrationName) {
+    final prefix = migrationName.split('_').first;
+    final parsed = int.tryParse(prefix);
+    if (parsed == null) {
+      throw FormatException(
+        'Migration filename must start with a numeric version prefix: $migrationName',
+      );
+    }
+    return parsed;
   }
 }
