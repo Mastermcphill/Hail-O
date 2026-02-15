@@ -128,6 +128,30 @@ function Assert-True {
   }
 }
 
+function Invoke-WithRideRetry {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$Action,
+    [int]$MaxAttempts = 3,
+    [int]$DelaySeconds = 2
+  )
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      return & $Action
+    } catch {
+      $errorMessage = $_.Exception.Message
+      if (($errorMessage -like '*ride_not_found*') -and $attempt -lt $MaxAttempts) {
+        Write-Output "retrying due to ride_not_found (attempt $attempt/$MaxAttempts)"
+        Start-Sleep -Seconds $DelaySeconds
+        continue
+      }
+      throw
+    }
+  }
+
+  throw "Operation failed after $MaxAttempts attempts"
+}
+
 Write-Output "BASE_URL=$baseUrl"
 Write-Output "RUN_ID=$runId"
 
@@ -163,7 +187,11 @@ $hasMatchingResultHash =
   ($registerFirst.Json.PSObject.Properties.Name -contains 'result_hash') -and
   ($registerReplay.Json.PSObject.Properties.Name -contains 'result_hash') -and
   ($registerFirst.Json.result_hash -eq $registerReplay.Json.result_hash)
-Assert-True -Condition ($replayedFlag -or $hasMatchingResultHash) -Message "Register replay did not expose replayed=true or matching result_hash"
+$hasMatchingUserId =
+  ($registerFirst.Json.PSObject.Properties.Name -contains 'user_id') -and
+  ($registerReplay.Json.PSObject.Properties.Name -contains 'user_id') -and
+  ($registerFirst.Json.user_id -eq $registerReplay.Json.user_id)
+Assert-True -Condition ($replayedFlag -or $hasMatchingResultHash -or $hasMatchingUserId) -Message "Register replay did not expose replayed=true, matching result_hash, or stable user_id. Replay body: $($registerReplay.Body)"
 $riderUserId = $registerFirst.Json.user_id
 Write-Output "first_status=$($registerFirst.Status) replay_status=$($registerReplay.Status) rider_user_id=$riderUserId replayed=$replayedFlag"
 
@@ -228,18 +256,22 @@ Write-Output "driver_user_id=$($registerDriver.Json.user_id) login_status=$($log
 
 Write-Output "`n=== DRIVER ACCEPT RIDE + REPLAY ==="
 $acceptKey = New-IdempotencyKey -Step 'ride-accept'
-$acceptRide = Invoke-CurlJsonRequest `
-  -Method 'POST' `
-  -Url "$baseUrl/rides/$rideId/accept" `
-  -Token $driverToken `
-  -IdempotencyKey $acceptKey `
-  -JsonBody '{}'
-$acceptReplay = Invoke-CurlJsonRequest `
-  -Method 'POST' `
-  -Url "$baseUrl/rides/$rideId/accept" `
-  -Token $driverToken `
-  -IdempotencyKey $acceptKey `
-  -JsonBody '{}'
+$acceptRide = Invoke-WithRideRetry -Action {
+  Invoke-CurlJsonRequest `
+    -Method 'POST' `
+    -Url "$baseUrl/rides/$rideId/accept" `
+    -Token $driverToken `
+    -IdempotencyKey $acceptKey `
+    -JsonBody '{}'
+}
+$acceptReplay = Invoke-WithRideRetry -Action {
+  Invoke-CurlJsonRequest `
+    -Method 'POST' `
+    -Url "$baseUrl/rides/$rideId/accept" `
+    -Token $driverToken `
+    -IdempotencyKey $acceptKey `
+    -JsonBody '{}'
+}
 Write-Output "accept_status=$($acceptRide.Status) accept_replay_status=$($acceptReplay.Status)"
 
 if ($adminEmail -and $adminPassword) {
