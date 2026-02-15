@@ -3,7 +3,7 @@ services:
   - type: worker
     name: hail-o-ci
     env: docker
-    plan: free
+    plan: starter
     dockerfilePath: Dockerfile.ci
     branch: main
     autoDeploy: true
