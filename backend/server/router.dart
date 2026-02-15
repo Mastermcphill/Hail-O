@@ -24,6 +24,7 @@ Handler buildApiRouter({
   required TokenService tokenService,
   required String dbMode,
   required Future<bool> Function() dbHealthCheck,
+  required Map<String, Object?> buildInfo,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
@@ -54,11 +55,11 @@ Handler buildApiRouter({
   final router = Router()
     ..get(
       '/health',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck),
+      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..get(
       '/api/healthz',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck),
+      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
@@ -74,6 +75,7 @@ Future<Response> _healthHandler(
   Request request,
   String dbMode,
   Future<bool> Function() dbHealthCheck,
+  Map<String, Object?> buildInfo,
 ) async {
   final dbOk = await dbHealthCheck();
   return jsonResponse(dbOk ? 200 : 503, <String, Object?>{
@@ -81,5 +83,6 @@ Future<Response> _healthHandler(
     'service': 'hail-o-backend',
     'db_mode': dbMode,
     'db_ok': dbOk,
+    'build': buildInfo,
   });
 }

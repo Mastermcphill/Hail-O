@@ -10,17 +10,18 @@ class PostgresAuthCredentialsStore extends AuthCredentialsStore {
 
   @override
   Future<ExternalAuthCredentialRecord?> findByEmail(String email) async {
-    final connection = await _postgresProvider.open();
-    final result = await connection.query(
-      '''
-      SELECT user_id, email, password_hash, password_algo, role, created_at, updated_at
-      FROM auth_credentials
-      WHERE email = @email
-      LIMIT 1
-      ''',
-      substitutionValues: <String, Object?>{
-        'email': email.toLowerCase().trim(),
-      },
+    final result = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT user_id, email, password_hash, password_algo, role, created_at, updated_at
+        FROM auth_credentials
+        WHERE email = @email
+        LIMIT 1
+        ''',
+        substitutionValues: <String, Object?>{
+          'email': email.toLowerCase().trim(),
+        },
+      ),
     );
     if (result.isEmpty) {
       return null;
@@ -39,45 +40,46 @@ class PostgresAuthCredentialsStore extends AuthCredentialsStore {
 
   @override
   Future<void> upsertCredential(ExternalAuthCredentialRecord record) async {
-    final connection = await _postgresProvider.open();
-    await connection.query(
-      '''
-      INSERT INTO auth_credentials(
-        user_id,
-        email,
-        password_hash,
-        password_algo,
-        role,
-        created_at,
-        updated_at
-      )
-      VALUES(
-        @user_id,
-        @email,
-        @password_hash,
-        @password_algo,
-        @role,
-        @created_at,
-        @updated_at
-      )
-      ON CONFLICT (email)
-      DO UPDATE
-      SET
-        user_id = EXCLUDED.user_id,
-        password_hash = EXCLUDED.password_hash,
-        password_algo = EXCLUDED.password_algo,
-        role = EXCLUDED.role,
-        updated_at = EXCLUDED.updated_at
-      ''',
-      substitutionValues: <String, Object?>{
-        'user_id': record.userId,
-        'email': record.email.toLowerCase().trim(),
-        'password_hash': record.passwordHash,
-        'password_algo': record.passwordAlgo,
-        'role': record.role,
-        'created_at': record.createdAt.toUtc(),
-        'updated_at': record.updatedAt.toUtc(),
-      },
-    );
+    await _postgresProvider.withConnection((connection) async {
+      await connection.query(
+        '''
+        INSERT INTO auth_credentials(
+          user_id,
+          email,
+          password_hash,
+          password_algo,
+          role,
+          created_at,
+          updated_at
+        )
+        VALUES(
+          @user_id,
+          @email,
+          @password_hash,
+          @password_algo,
+          @role,
+          @created_at,
+          @updated_at
+        )
+        ON CONFLICT (email)
+        DO UPDATE
+        SET
+          user_id = EXCLUDED.user_id,
+          password_hash = EXCLUDED.password_hash,
+          password_algo = EXCLUDED.password_algo,
+          role = EXCLUDED.role,
+          updated_at = EXCLUDED.updated_at
+        ''',
+        substitutionValues: <String, Object?>{
+          'user_id': record.userId,
+          'email': record.email.toLowerCase().trim(),
+          'password_hash': record.passwordHash,
+          'password_algo': record.passwordAlgo,
+          'role': record.role,
+          'created_at': record.createdAt.toUtc(),
+          'updated_at': record.updatedAt.toUtc(),
+        },
+      );
+    });
   }
 }

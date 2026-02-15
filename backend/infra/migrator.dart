@@ -4,20 +4,102 @@ import 'package:postgres/postgres.dart';
 
 import 'postgres_provider.dart';
 
+abstract class MigrationDatabase {
+  Future<void> execute(
+    String statement, {
+    Map<String, Object?> substitutionValues,
+  });
+
+  Future<List<List<Object?>>> query(
+    String statement, {
+    Map<String, Object?> substitutionValues,
+  });
+
+  Future<T> transaction<T>(Future<T> Function(MigrationDatabase txn) action);
+}
+
+class ProviderMigrationDatabase implements MigrationDatabase {
+  ProviderMigrationDatabase(this._provider);
+
+  final PostgresProvider _provider;
+
+  @override
+  Future<void> execute(
+    String statement, {
+    Map<String, Object?> substitutionValues = const <String, Object?>{},
+  }) {
+    return _provider.withConnection((connection) {
+      return connection.execute(
+        statement,
+        substitutionValues: substitutionValues,
+      );
+    });
+  }
+
+  @override
+  Future<List<List<Object?>>> query(
+    String statement, {
+    Map<String, Object?> substitutionValues = const <String, Object?>{},
+  }) {
+    return _provider.withConnection((connection) {
+      return connection.query(
+        statement,
+        substitutionValues: substitutionValues,
+      );
+    });
+  }
+
+  @override
+  Future<T> transaction<T>(Future<T> Function(MigrationDatabase txn) action) {
+    return _provider.withTxn((ctx) {
+      return action(_ExecutionContextMigrationDatabase(ctx));
+    });
+  }
+}
+
+class _ExecutionContextMigrationDatabase implements MigrationDatabase {
+  const _ExecutionContextMigrationDatabase(this._ctx);
+
+  final PostgreSQLExecutionContext _ctx;
+
+  @override
+  Future<void> execute(
+    String statement, {
+    Map<String, Object?> substitutionValues = const <String, Object?>{},
+  }) {
+    return _ctx.execute(statement, substitutionValues: substitutionValues);
+  }
+
+  @override
+  Future<List<List<Object?>>> query(
+    String statement, {
+    Map<String, Object?> substitutionValues = const <String, Object?>{},
+  }) {
+    return _ctx.query(statement, substitutionValues: substitutionValues);
+  }
+
+  @override
+  Future<T> transaction<T>(Future<T> Function(MigrationDatabase txn) action) {
+    return action(this);
+  }
+}
+
 class BackendPostgresMigrator {
   BackendPostgresMigrator({
-    required PostgresProvider postgresProvider,
+    PostgresProvider? postgresProvider,
+    MigrationDatabase? migrationDatabase,
     String? migrationsDirectory,
-  }) : _postgresProvider = postgresProvider,
+  }) : assert(postgresProvider != null || migrationDatabase != null),
+       _migrationDatabase =
+           migrationDatabase ?? ProviderMigrationDatabase(postgresProvider!),
        migrationsDirectory =
            migrationsDirectory ?? _resolveMigrationsDirectory();
 
-  final PostgresProvider _postgresProvider;
+  final MigrationDatabase _migrationDatabase;
   final String migrationsDirectory;
 
   Future<void> runPendingMigrations() async {
-    final connection = await _postgresProvider.open();
-    await _ensureMigrationsTable(connection);
+    await _ensureMigrationsTable(_migrationDatabase);
 
     final directory = Directory(migrationsDirectory);
     if (!await directory.exists()) {
@@ -38,16 +120,16 @@ class BackendPostgresMigrator {
 
     for (final file in entries) {
       final name = file.uri.pathSegments.last;
-      final alreadyApplied = await _isApplied(connection, name);
+      final alreadyApplied = await _isApplied(_migrationDatabase, name);
       if (alreadyApplied) {
         continue;
       }
       final sql = await file.readAsString();
-      await connection.transaction((ctx) async {
+      await _migrationDatabase.transaction((txn) async {
         for (final statement in _splitStatements(sql)) {
-          await ctx.execute(statement);
+          await txn.execute(statement);
         }
-        await ctx.execute(
+        await txn.execute(
           '''
           INSERT INTO schema_migrations(name, applied_at)
           VALUES (@name, NOW())
@@ -58,8 +140,8 @@ class BackendPostgresMigrator {
     }
   }
 
-  Future<void> _ensureMigrationsTable(PostgreSQLConnection connection) async {
-    await connection.execute('''
+  Future<void> _ensureMigrationsTable(MigrationDatabase database) async {
+    await database.execute('''
       CREATE TABLE IF NOT EXISTS schema_migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -67,8 +149,8 @@ class BackendPostgresMigrator {
     ''');
   }
 
-  Future<bool> _isApplied(PostgreSQLConnection connection, String name) async {
-    final result = await connection.query(
+  Future<bool> _isApplied(MigrationDatabase database, String name) async {
+    final result = await database.query(
       'SELECT 1 FROM schema_migrations WHERE name = @name LIMIT 1',
       substitutionValues: <String, Object?>{'name': name},
     );

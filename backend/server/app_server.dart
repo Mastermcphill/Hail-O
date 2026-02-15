@@ -17,6 +17,7 @@ class AppServer {
     required this.tokenService,
     required this.dbMode,
     required this.dbHealthCheck,
+    required this.buildInfo,
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
@@ -26,6 +27,7 @@ class AppServer {
   final TokenService tokenService;
   final String dbMode;
   final Future<bool> Function() dbHealthCheck;
+  final Map<String, Object?> buildInfo;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
@@ -39,6 +41,7 @@ class AppServer {
       operationalRecordStore: operationalRecordStore,
       dbMode: dbMode,
       dbHealthCheck: dbHealthCheck,
+      buildInfo: buildInfo,
     );
     return Pipeline()
         .addMiddleware(errorMiddleware())

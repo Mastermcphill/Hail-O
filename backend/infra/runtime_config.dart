@@ -16,7 +16,10 @@ class BackendRuntimeConfig {
   bool get usePostgres => dbMode == BackendDbMode.postgres;
 
   static BackendRuntimeConfig fromEnvironment() {
-    final env = Platform.environment;
+    return fromEnvironmentMap(Platform.environment);
+  }
+
+  static BackendRuntimeConfig fromEnvironmentMap(Map<String, String> env) {
     final configuredMode = env['BACKEND_DB_MODE']?.trim().toLowerCase();
     final databaseUrl = env['DATABASE_URL']?.trim();
     final sqlitePath = env['DB_PATH']?.trim();

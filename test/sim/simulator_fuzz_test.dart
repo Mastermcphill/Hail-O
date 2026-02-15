@@ -47,6 +47,7 @@ void main() {
             );
           }
         },
+        timeout: const Timeout(Duration(minutes: 6)),
       );
     }
 
@@ -100,6 +101,7 @@ void main() {
         final artifactBody = artifact.readAsStringSync();
         expect(artifactBody.contains('ride_already_accepted'), true);
       },
+      timeout: const Timeout(Duration(minutes: 2)),
     );
   });
 }

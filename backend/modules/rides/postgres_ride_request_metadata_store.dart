@@ -10,15 +10,16 @@ class PostgresRideRequestMetadataStore extends RideRequestMetadataStore {
 
   @override
   Future<RideRequestMetadata?> findByRideId(String rideId) async {
-    final connection = await _postgresProvider.open();
-    final result = await connection.query(
-      '''
-      SELECT ride_id, scheduled_departure_at, created_at, updated_at
-      FROM ride_request_metadata
-      WHERE ride_id = @ride_id
-      LIMIT 1
-      ''',
-      substitutionValues: <String, Object?>{'ride_id': rideId},
+    final result = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT ride_id, scheduled_departure_at, created_at, updated_at
+        FROM ride_request_metadata
+        WHERE ride_id = @ride_id
+        LIMIT 1
+        ''',
+        substitutionValues: <String, Object?>{'ride_id': rideId},
+      ),
     );
     if (result.isEmpty) {
       return null;
@@ -38,44 +39,45 @@ class PostgresRideRequestMetadataStore extends RideRequestMetadataStore {
 
   @override
   Future<void> upsert(RideRequestMetadata metadata) async {
-    final connection = await _postgresProvider.open();
-    await connection.query(
-      '''
-      INSERT INTO ride_request_metadata(
-        ride_id,
-        rider_id,
-        scheduled_departure_at,
-        quote_json,
-        request_json,
-        created_at,
-        updated_at
-      )
-      VALUES(
-        @ride_id,
-        @rider_id,
-        @scheduled_departure_at,
-        @quote_json,
-        @request_json,
-        @created_at,
-        @updated_at
-      )
-      ON CONFLICT (ride_id)
-      DO UPDATE
-      SET
-        scheduled_departure_at = EXCLUDED.scheduled_departure_at,
-        quote_json = EXCLUDED.quote_json,
-        request_json = EXCLUDED.request_json,
-        updated_at = EXCLUDED.updated_at
-      ''',
-      substitutionValues: <String, Object?>{
-        'ride_id': metadata.rideId,
-        'rider_id': '',
-        'scheduled_departure_at': metadata.scheduledDepartureAt.toUtc(),
-        'quote_json': '{}',
-        'request_json': '{}',
-        'created_at': metadata.createdAt.toUtc(),
-        'updated_at': metadata.updatedAt.toUtc(),
-      },
-    );
+    await _postgresProvider.withConnection((connection) async {
+      await connection.query(
+        '''
+        INSERT INTO ride_request_metadata(
+          ride_id,
+          rider_id,
+          scheduled_departure_at,
+          quote_json,
+          request_json,
+          created_at,
+          updated_at
+        )
+        VALUES(
+          @ride_id,
+          @rider_id,
+          @scheduled_departure_at,
+          @quote_json,
+          @request_json,
+          @created_at,
+          @updated_at
+        )
+        ON CONFLICT (ride_id)
+        DO UPDATE
+        SET
+          scheduled_departure_at = EXCLUDED.scheduled_departure_at,
+          quote_json = EXCLUDED.quote_json,
+          request_json = EXCLUDED.request_json,
+          updated_at = EXCLUDED.updated_at
+        ''',
+        substitutionValues: <String, Object?>{
+          'ride_id': metadata.rideId,
+          'rider_id': '',
+          'scheduled_departure_at': metadata.scheduledDepartureAt.toUtc(),
+          'quote_json': '{}',
+          'request_json': '{}',
+          'created_at': metadata.createdAt.toUtc(),
+          'updated_at': metadata.updatedAt.toUtc(),
+        },
+      );
+    });
   }
 }

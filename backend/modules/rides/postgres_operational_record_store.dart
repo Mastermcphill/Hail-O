@@ -16,35 +16,36 @@ class PostgresOperationalRecordStore extends OperationalRecordStore {
     required String idempotencyKey,
     Map<String, Object?> payload = const <String, Object?>{},
   }) async {
-    final connection = await _postgresProvider.open();
-    await connection.query(
-      '''
-      INSERT INTO operational_records(
-        operation_type,
-        entity_id,
-        actor_user_id,
-        idempotency_key,
-        payload_json,
-        created_at
-      )
-      VALUES(
-        @operation_type,
-        @entity_id,
-        @actor_user_id,
-        @idempotency_key,
-        @payload_json,
-        NOW()
-      )
-      ON CONFLICT (operation_type, entity_id, idempotency_key)
-      DO NOTHING
-      ''',
-      substitutionValues: <String, Object?>{
-        'operation_type': operationType,
-        'entity_id': entityId,
-        'actor_user_id': actorUserId,
-        'idempotency_key': idempotencyKey,
-        'payload_json': jsonEncode(payload),
-      },
-    );
+    await _postgresProvider.withConnection((connection) async {
+      await connection.query(
+        '''
+        INSERT INTO operational_records(
+          operation_type,
+          entity_id,
+          actor_user_id,
+          idempotency_key,
+          payload_json,
+          created_at
+        )
+        VALUES(
+          @operation_type,
+          @entity_id,
+          @actor_user_id,
+          @idempotency_key,
+          @payload_json,
+          NOW()
+        )
+        ON CONFLICT (operation_type, entity_id, idempotency_key)
+        DO NOTHING
+        ''',
+        substitutionValues: <String, Object?>{
+          'operation_type': operationType,
+          'entity_id': entityId,
+          'actor_user_id': actorUserId,
+          'idempotency_key': idempotencyKey,
+          'payload_json': jsonEncode(payload),
+        },
+      );
+    });
   }
 }

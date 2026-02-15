@@ -11,6 +11,7 @@ dependencies:
   crypto: ^3.0.6
   dart_jsonwebtoken: ^3.2.0
   path: ^1.9.1
+  pool: ^1.5.2
   postgres: ^2.6.4
   shelf: ^1.4.2
   shelf_cors_headers: ^0.1.5

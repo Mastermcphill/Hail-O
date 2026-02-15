@@ -35,7 +35,6 @@ Future<void> main() async {
       );
     }
     postgresProvider = PostgresProvider(databaseUrl);
-    await postgresProvider.open();
     await BackendPostgresMigrator(
       postgresProvider: postgresProvider,
     ).runPendingMigrations();
@@ -49,8 +48,9 @@ Future<void> main() async {
   Future<bool> dbHealthCheck() async {
     try {
       if (config.usePostgres) {
-        final connection = await postgresProvider!.open();
-        final rows = await connection.query('SELECT 1');
+        final rows = await postgresProvider!.withConnection(
+          (connection) => connection.query('SELECT 1'),
+        );
         return rows.isNotEmpty;
       }
       final rows = await db.rawQuery('SELECT 1');
@@ -61,11 +61,16 @@ Future<void> main() async {
   }
 
   final tokenService = TokenService.fromEnvironment();
+  final buildInfo = <String, Object?>{
+    'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'local',
+    'runtime': 'dart_vm',
+  };
   final handler = AppServer(
     db: db,
     tokenService: tokenService,
     dbMode: config.dbMode.name,
     dbHealthCheck: dbHealthCheck,
+    buildInfo: buildInfo,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,

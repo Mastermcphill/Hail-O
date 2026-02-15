@@ -23,6 +23,7 @@ class ApiTestHarness {
       tokenService: tokenService,
       dbMode: 'sqlite',
       dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
     ).buildHandler();
     return ApiTestHarness._(db: db, handler: handler);
   }
