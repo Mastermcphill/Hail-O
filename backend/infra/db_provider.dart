@@ -1,7 +1,8 @@
 import 'dart:io';
 
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../../lib/data/sqlite/hailo_database.dart';
 
 class DbProvider {
   DbProvider._();

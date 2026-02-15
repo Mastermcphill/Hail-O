@@ -7,8 +7,10 @@ import 'postgres_provider.dart';
 class BackendPostgresMigrator {
   BackendPostgresMigrator({
     required PostgresProvider postgresProvider,
-    this.migrationsDirectory = 'backend/migrations',
-  }) : _postgresProvider = postgresProvider;
+    String? migrationsDirectory,
+  }) : _postgresProvider = postgresProvider,
+       migrationsDirectory =
+           migrationsDirectory ?? _resolveMigrationsDirectory();
 
   final PostgresProvider _postgresProvider;
   final String migrationsDirectory;
@@ -80,5 +82,15 @@ class BackendPostgresMigrator {
         yield statement;
       }
     }
+  }
+
+  static String _resolveMigrationsDirectory() {
+    const candidates = <String>['backend/migrations', 'migrations'];
+    for (final candidate in candidates) {
+      if (Directory(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+    return 'backend/migrations';
   }
 }

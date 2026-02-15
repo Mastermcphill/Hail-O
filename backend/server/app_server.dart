@@ -1,6 +1,6 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_cors_headers/shelf_cors_headers.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
@@ -15,6 +15,8 @@ class AppServer {
   const AppServer({
     required this.db,
     required this.tokenService,
+    required this.dbMode,
+    required this.dbHealthCheck,
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
@@ -22,6 +24,8 @@ class AppServer {
 
   final Database db;
   final TokenService tokenService;
+  final String dbMode;
+  final Future<bool> Function() dbHealthCheck;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
@@ -33,6 +37,8 @@ class AppServer {
       authCredentialsStore: authCredentialsStore,
       rideRequestMetadataStore: rideRequestMetadataStore,
       operationalRecordStore: operationalRecordStore,
+      dbMode: dbMode,
+      dbHealthCheck: dbHealthCheck,
     );
     return Pipeline()
         .addMiddleware(errorMiddleware())

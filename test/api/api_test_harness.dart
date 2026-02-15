@@ -21,6 +21,8 @@ class ApiTestHarness {
     final handler = AppServer(
       db: db,
       tokenService: tokenService,
+      dbMode: 'sqlite',
+      dbHealthCheck: () async => true,
     ).buildHandler();
     return ApiTestHarness._(db: db, handler: handler);
   }

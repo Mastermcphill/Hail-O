@@ -38,6 +38,14 @@ class PostgresProvider {
     return connection;
   }
 
+  Future<T> withTxn<T>(
+    Future<T> Function(PostgreSQLExecutionContext ctx) action,
+  ) async {
+    final connection = await open();
+    final result = await connection.transaction((ctx) => action(ctx));
+    return result as T;
+  }
+
   Future<void> close() async {
     final connection = _connection;
     if (connection != null && !connection.isClosed) {

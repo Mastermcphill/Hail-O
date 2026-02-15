@@ -46,10 +46,26 @@ Future<void> main() async {
     operationalRecordStore = PostgresOperationalRecordStore(postgresProvider);
   }
 
+  Future<bool> dbHealthCheck() async {
+    try {
+      if (config.usePostgres) {
+        final connection = await postgresProvider!.open();
+        final rows = await connection.query('SELECT 1');
+        return rows.isNotEmpty;
+      }
+      final rows = await db.rawQuery('SELECT 1');
+      return rows.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   final tokenService = TokenService.fromEnvironment();
   final handler = AppServer(
     db: db,
     tokenService: tokenService,
+    dbMode: config.dbMode.name,
+    dbHealthCheck: dbHealthCheck,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,

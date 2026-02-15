@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/domain/models/ride_request_metadata.dart';
+import '../../../lib/domain/models/ride_request_metadata.dart';
 
 import '../../infra/postgres_provider.dart';
 import 'ride_request_metadata_store.dart';
@@ -24,9 +24,13 @@ class PostgresRideRequestMetadataStore extends RideRequestMetadataStore {
       return null;
     }
     final row = result.first;
+    final scheduledAt = row[1];
+    if (scheduledAt is! DateTime) {
+      return null;
+    }
     return RideRequestMetadata(
       rideId: row[0] as String,
-      scheduledDepartureAt: (row[1] as DateTime).toUtc(),
+      scheduledDepartureAt: scheduledAt.toUtc(),
       createdAt: (row[2] as DateTime).toUtc(),
       updatedAt: (row[3] as DateTime).toUtc(),
     );
@@ -39,13 +43,19 @@ class PostgresRideRequestMetadataStore extends RideRequestMetadataStore {
       '''
       INSERT INTO ride_request_metadata(
         ride_id,
+        rider_id,
         scheduled_departure_at,
+        quote_json,
+        request_json,
         created_at,
         updated_at
       )
       VALUES(
         @ride_id,
+        @rider_id,
         @scheduled_departure_at,
+        @quote_json,
+        @request_json,
         @created_at,
         @updated_at
       )
@@ -53,11 +63,16 @@ class PostgresRideRequestMetadataStore extends RideRequestMetadataStore {
       DO UPDATE
       SET
         scheduled_departure_at = EXCLUDED.scheduled_departure_at,
+        quote_json = EXCLUDED.quote_json,
+        request_json = EXCLUDED.request_json,
         updated_at = EXCLUDED.updated_at
       ''',
       substitutionValues: <String, Object?>{
         'ride_id': metadata.rideId,
+        'rider_id': '',
         'scheduled_departure_at': metadata.scheduledDepartureAt.toUtc(),
+        'quote_json': '{}',
+        'request_json': '{}',
         'created_at': metadata.createdAt.toUtc(),
         'updated_at': metadata.updatedAt.toUtc(),
       },

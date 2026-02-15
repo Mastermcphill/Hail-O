@@ -1,13 +1,13 @@
-import 'package:hail_o_finance_core/domain/services/auth_service.dart';
-import 'package:hail_o_finance_core/domain/services/dispute_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_api_flow_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_settlement_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_snapshot_service.dart';
-import 'package:hail_o_finance_core/domain/services/wallet_reversal_service.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
+import '../../lib/domain/services/auth_service.dart';
+import '../../lib/domain/services/dispute_service.dart';
+import '../../lib/domain/services/ride_api_flow_service.dart';
+import '../../lib/domain/services/ride_settlement_service.dart';
+import '../../lib/domain/services/ride_snapshot_service.dart';
+import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
@@ -22,6 +22,8 @@ import 'http_utils.dart';
 Handler buildApiRouter({
   required Database db,
   required TokenService tokenService,
+  required String dbMode,
+  required Future<bool> Function() dbHealthCheck,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
@@ -50,8 +52,14 @@ Handler buildApiRouter({
   final driversController = DriversController();
 
   final router = Router()
-    ..get('/health', _healthHandler)
-    ..get('/api/healthz', _healthHandler)
+    ..get(
+      '/health',
+      (request) => _healthHandler(request, dbMode, dbHealthCheck),
+    )
+    ..get(
+      '/api/healthz',
+      (request) => _healthHandler(request, dbMode, dbHealthCheck),
+    )
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
@@ -62,9 +70,16 @@ Handler buildApiRouter({
   return router.call;
 }
 
-Response _healthHandler(Request request) {
-  return jsonResponse(200, <String, Object?>{
-    'ok': true,
+Future<Response> _healthHandler(
+  Request request,
+  String dbMode,
+  Future<bool> Function() dbHealthCheck,
+) async {
+  final dbOk = await dbHealthCheck();
+  return jsonResponse(dbOk ? 200 : 503, <String, Object?>{
+    'ok': dbOk,
     'service': 'hail-o-backend',
+    'db_mode': dbMode,
+    'db_ok': dbOk,
   });
 }

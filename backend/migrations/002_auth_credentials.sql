@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS auth_credentials (
   user_id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   password_algo TEXT NOT NULL DEFAULT 'bcrypt',
   role TEXT NOT NULL,
@@ -8,4 +9,8 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_credentials_user_id ON auth_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_credentials_email
+ON auth_credentials(email);
+
+CREATE INDEX IF NOT EXISTS idx_auth_credentials_created_at
+ON auth_credentials(created_at DESC);
