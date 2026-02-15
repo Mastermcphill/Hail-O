@@ -11,6 +11,7 @@ Middleware authMiddleware(
     'auth/register',
     'auth/login',
     'health',
+    'api/healthz',
   },
 }) {
   return (Handler innerHandler) {

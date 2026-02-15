@@ -10,14 +10,14 @@ class DbProvider {
 
   Database? _database;
 
-  Future<Database> open() async {
+  Future<Database> open({String? databasePath}) async {
     if (_database != null) {
       return _database!;
     }
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
-    final dbPath = Platform.environment['DB_PATH']?.trim();
+    final dbPath = databasePath ?? Platform.environment['DB_PATH']?.trim();
     _database = await HailODatabase().open(
       databasePath: (dbPath == null || dbPath.isEmpty) ? null : dbPath,
     );

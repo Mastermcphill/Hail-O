@@ -27,16 +27,48 @@ class RegisterNextOfKinInput {
   final String? relationship;
 }
 
+class ExternalAuthCredentialRecord {
+  const ExternalAuthCredentialRecord({
+    required this.userId,
+    required this.email,
+    required this.passwordHash,
+    required this.role,
+    required this.createdAt,
+    required this.updatedAt,
+    this.passwordAlgo = 'bcrypt',
+  });
+
+  final String userId;
+  final String email;
+  final String passwordHash;
+  final String passwordAlgo;
+  final String role;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+abstract class AuthCredentialsExternalStore {
+  Future<void> upsertCredential(ExternalAuthCredentialRecord record);
+
+  Future<ExternalAuthCredentialRecord?> findByEmail(String email);
+}
+
 class AuthService {
-  AuthService(this.db, {DateTime Function()? nowUtc, Uuid? uuid})
-    : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
-      _uuid = uuid ?? const Uuid(),
-      _idempotencyStore = IdempotencyDao(db);
+  AuthService(
+    this.db, {
+    DateTime Function()? nowUtc,
+    Uuid? uuid,
+    AuthCredentialsExternalStore? externalStore,
+  }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
+       _uuid = uuid ?? const Uuid(),
+       _idempotencyStore = IdempotencyDao(db),
+       _externalStore = externalStore;
 
   final Database db;
   final DateTime Function() _nowUtc;
   final Uuid _uuid;
   final IdempotencyStore _idempotencyStore;
+  final AuthCredentialsExternalStore? _externalStore;
 
   static const String _scopeRegister = 'api.auth.register';
 
@@ -69,18 +101,26 @@ class AuthService {
         final existing = await AuthCredentialsDao(
           db,
         ).findByEmail(normalizedEmail);
-        if (existing == null) {
-          throw const DomainInvariantError(
-            code: 'register_replay_credential_missing',
-          );
+        if (existing != null) {
+          return <String, Object?>{
+            'ok': true,
+            'replayed': true,
+            'user_id': existing.userId,
+            'email': existing.email,
+            'result_hash': claim.record.resultHash,
+          };
         }
-        return <String, Object?>{
-          'ok': true,
-          'replayed': true,
-          'user_id': existing.userId,
-          'email': existing.email,
-          'result_hash': claim.record.resultHash,
-        };
+        final external = await _externalStore?.findByEmail(normalizedEmail);
+        if (external != null) {
+          return <String, Object?>{
+            'ok': true,
+            'replayed': true,
+            'user_id': external.userId,
+            'email': external.email,
+            'result_hash': claim.record.resultHash,
+          };
+        }
+        throw const DomainInvariantError(code: 'register_replay_missing_user');
       }
       throw DomainInvariantError(
         code: claim.record.errorCode ?? 'register_previous_failure',
@@ -139,6 +179,18 @@ class AuthService {
       });
 
       final hash = sha256.convert(utf8.encode(jsonEncode(result))).toString();
+      if (_externalStore != null) {
+        await _externalStore.upsertCredential(
+          ExternalAuthCredentialRecord(
+            userId: userId,
+            email: normalizedEmail,
+            passwordHash: hashed,
+            role: role.dbValue,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+      }
       await _idempotencyStore.finalizeSuccess(
         scope: _scopeRegister,
         key: idempotencyKey,
@@ -163,6 +215,22 @@ class AuthService {
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty || password.isEmpty) {
       throw const UnauthorizedActionError(code: 'invalid_credentials');
+    }
+
+    if (_externalStore != null) {
+      final external = await _externalStore.findByEmail(normalizedEmail);
+      if (external != null && BCrypt.checkpw(password, external.passwordHash)) {
+        final user = await UsersDao(db).findById(external.userId);
+        if (user != null && user.isBlocked) {
+          throw const UnauthorizedActionError(code: 'user_blocked');
+        }
+        return <String, Object?>{
+          'ok': true,
+          'user_id': external.userId,
+          'role': external.role,
+          'email': external.email,
+        };
+      }
     }
 
     final credential = await AuthCredentialsDao(

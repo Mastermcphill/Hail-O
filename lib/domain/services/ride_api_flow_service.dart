@@ -30,6 +30,22 @@ enum ApiTripScope {
   TripScope toTripScope() => TripScope.fromDbValue(dbValue);
 }
 
+abstract class RideRequestMetadataExternalStore {
+  Future<void> upsert(RideRequestMetadata metadata);
+
+  Future<RideRequestMetadata?> findByRideId(String rideId);
+}
+
+abstract class OperationalRecordExternalStore {
+  Future<void> logWrite({
+    required String operationType,
+    required String entityId,
+    required String actorUserId,
+    required String idempotencyKey,
+    Map<String, Object?> payload,
+  });
+}
+
 class RideApiFlowService {
   RideApiFlowService(
     this.db, {
@@ -37,6 +53,8 @@ class RideApiFlowService {
     AcceptRideService? acceptRideService,
     CancelRideService? cancelRideService,
     RideSettlementService? rideSettlementService,
+    RideRequestMetadataExternalStore? externalMetadataStore,
+    OperationalRecordExternalStore? externalOperationalStore,
     Uuid? uuid,
     DateTime Function()? nowUtc,
   }) : _rideOrchestratorService =
@@ -45,6 +63,8 @@ class RideApiFlowService {
        _cancelRideService = cancelRideService ?? CancelRideService(db),
        _rideSettlementService =
            rideSettlementService ?? RideSettlementService(db),
+       _externalMetadataStore = externalMetadataStore,
+       _externalOperationalStore = externalOperationalStore,
        _uuid = uuid ?? const Uuid(),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
 
@@ -53,6 +73,8 @@ class RideApiFlowService {
   final AcceptRideService _acceptRideService;
   final CancelRideService _cancelRideService;
   final RideSettlementService _rideSettlementService;
+  final RideRequestMetadataExternalStore? _externalMetadataStore;
+  final OperationalRecordExternalStore? _externalOperationalStore;
   final Uuid _uuid;
   final DateTime Function() _nowUtc;
 
@@ -127,6 +149,27 @@ class RideApiFlowService {
         viaOrchestrator: true,
       );
     });
+    if (_externalMetadataStore != null) {
+      await _externalMetadataStore.upsert(
+        RideRequestMetadata(
+          rideId: resolvedRideId,
+          scheduledDepartureAt: scheduledDepartureAtUtc.toUtc(),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+    await _logOperation(
+      operationType: 'ride_request',
+      entityId: resolvedRideId,
+      actorUserId: riderUserId,
+      idempotencyKey: idempotencyKey ?? 'ride_request:$resolvedRideId',
+      payload: <String, Object?>{
+        'trip_scope': tripScope.dbValue,
+        'distance_meters': distanceMeters,
+        'duration_seconds': durationSeconds,
+      },
+    );
 
     return <String, Object?>{
       'ok': true,
@@ -142,11 +185,22 @@ class RideApiFlowService {
     required String driverId,
     required String idempotencyKey,
   }) {
-    return _acceptRideService.acceptRide(
-      rideId: rideId,
-      driverId: driverId,
-      idempotencyKey: idempotencyKey,
-    );
+    return _acceptRideService
+        .acceptRide(
+          rideId: rideId,
+          driverId: driverId,
+          idempotencyKey: idempotencyKey,
+        )
+        .then((result) async {
+          await _logOperation(
+            operationType: 'ride_accept',
+            entityId: rideId,
+            actorUserId: driverId,
+            idempotencyKey: idempotencyKey,
+            payload: const <String, Object?>{},
+          );
+          return result;
+        });
   }
 
   Future<Map<String, Object?>> cancelRide({
@@ -162,6 +216,8 @@ class RideApiFlowService {
     final scheduledDeparture = await RideRequestMetadataDao(
       db,
     ).findByRideId(rideId);
+    final externalScheduledDeparture = await _externalMetadataStore
+        ?.findByRideId(rideId);
     final cancelledAt = _nowUtc();
     final fallbackDeparture = DateTime.parse(
       (rideRow['created_at'] as String?) ?? cancelledAt.toIso8601String(),
@@ -187,7 +243,9 @@ class RideApiFlowService {
       rideType: rideType,
       totalFareMinor: totalFareMinor,
       scheduledDeparture:
-          scheduledDeparture?.scheduledDepartureAt ?? fallbackDeparture,
+          externalScheduledDeparture?.scheduledDepartureAt ??
+          scheduledDeparture?.scheduledDepartureAt ??
+          fallbackDeparture,
       cancelledAt: cancelledAt,
     );
 
@@ -200,6 +258,16 @@ class RideApiFlowService {
       rideType: rideType.dbValue,
       totalFareMinor: totalFareMinor,
       cancelledAt: cancelledAt,
+    );
+    await _logOperation(
+      operationType: 'ride_cancel',
+      entityId: rideId,
+      actorUserId: actorUserId,
+      idempotencyKey: idempotencyKey,
+      payload: <String, Object?>{
+        'penalty_minor': computation.penaltyMinor,
+        'rule_code': computation.ruleCode,
+      },
     );
     return result.toMap();
   }
@@ -238,6 +306,16 @@ class RideApiFlowService {
       idempotencyKey: 'settlement:${hold.id}',
       trigger: trigger,
     );
+    await _logOperation(
+      operationType: 'ride_complete_and_settle',
+      entityId: rideId,
+      actorUserId: (completed['driver_id'] as String?) ?? 'system',
+      idempotencyKey: idempotencyKey,
+      payload: <String, Object?>{
+        'escrow_id': hold.id,
+        'trigger': trigger.dbValue,
+      },
+    );
     return <String, Object?>{
       'ok': completed['ok'] == true && settlement.ok,
       'ride_id': rideId,
@@ -256,5 +334,24 @@ class RideApiFlowService {
       return RideType.international;
     }
     return RideType.intra;
+  }
+
+  Future<void> _logOperation({
+    required String operationType,
+    required String entityId,
+    required String actorUserId,
+    required String idempotencyKey,
+    required Map<String, Object?> payload,
+  }) async {
+    if (_externalOperationalStore == null) {
+      return;
+    }
+    await _externalOperationalStore.logWrite(
+      operationType: operationType,
+      entityId: entityId,
+      actorUserId: actorUserId,
+      idempotencyKey: idempotencyKey,
+      payload: payload,
+    );
   }
 }

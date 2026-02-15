@@ -5,3 +5,23 @@ services:
     dockerfilePath: Dockerfile.ci
     branch: main
     autoDeploy: true
+  - type: web
+    name: hail-o-api
+    env: docker
+    dockerfilePath: backend/Dockerfile
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: BACKEND_DB_MODE
+        value: postgres
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hail-o-api-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: hail-o-api-db
+    plan: free

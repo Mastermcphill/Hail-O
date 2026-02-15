@@ -9,10 +9,12 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import '../infra/token_service.dart';
+import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/drivers/drivers_controller.dart';
+import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
 import 'http_utils.dart';
@@ -20,13 +22,20 @@ import 'http_utils.dart';
 Handler buildApiRouter({
   required Database db,
   required TokenService tokenService,
+  AuthCredentialsStore? authCredentialsStore,
+  RideRequestMetadataStore? rideRequestMetadataStore,
+  OperationalRecordStore? operationalRecordStore,
 }) {
   final authController = AuthController(
-    authService: AuthService(db),
+    authService: AuthService(db, externalStore: authCredentialsStore),
     tokenService: tokenService,
   );
   final ridesController = RidesController(
-    rideApiFlowService: RideApiFlowService(db),
+    rideApiFlowService: RideApiFlowService(
+      db,
+      externalMetadataStore: rideRequestMetadataStore,
+      externalOperationalStore: operationalRecordStore,
+    ),
     rideSnapshotService: RideSnapshotService(db),
   );
   final settlementController = SettlementController(
@@ -42,6 +51,7 @@ Handler buildApiRouter({
 
   final router = Router()
     ..get('/health', _healthHandler)
+    ..get('/api/healthz', _healthHandler)
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
