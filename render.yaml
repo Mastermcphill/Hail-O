@@ -30,7 +30,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
 
-  # Staging API (shared DB, isolated schema)
+  # Staging API (separate DB)
   - type: web
     name: hail-o-api-staging
     env: docker
@@ -48,14 +48,20 @@ services:
         value: hailo_staging
       - key: DATABASE_URL
         fromDatabase:
-          name: hail-o-db
+          name: hail-o-db-staging
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
 
 databases:
-  # Shared DB for production + staging schemas.
+  # Production DB
   - name: hail-o-db
     databaseName: hailo
     user: hailo
+    plan: free
+
+  # Staging DB
+  - name: hail-o-db-staging
+    databaseName: hailo_staging
+    user: hailo_staging
     plan: free
