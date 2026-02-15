@@ -4,7 +4,6 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../lib/data/sqlite/hailo_database.dart';
 import '../infra/request_metrics.dart';
