@@ -1,4 +1,7 @@
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$ProgressPreference = 'SilentlyContinue'
+
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $envName = if ($env:ENV) { $env:ENV } else { 'staging' }
@@ -20,6 +23,7 @@ $riderEmail = "smoke.rider.$runId@hailo.dev"
 $driverEmail = "smoke.driver.$runId@hailo.dev"
 $adminEmail = $env:HAILO_ADMIN_EMAIL
 $adminPassword = $env:HAILO_ADMIN_PASSWORD
+$reversalLedgerId = $env:HAILO_REVERSAL_LEDGER_ID
 $nowUtc = [DateTime]::UtcNow.ToString('o')
 
 function New-IdempotencyKey {
@@ -27,109 +31,159 @@ function New-IdempotencyKey {
   return "smoke-$runId-$Step"
 }
 
-function Invoke-JsonRequest {
+function Invoke-CurlJsonRequest {
   param(
     [Parameter(Mandatory = $true)][string]$Method,
     [Parameter(Mandatory = $true)][string]$Url,
-    [Parameter(Mandatory = $true)][string]$JsonBody,
+    [string]$JsonBody,
     [string]$Token,
-    [string]$IdempotencyKey
+    [string]$IdempotencyKey,
+    [string]$TraceId,
+    [int[]]$AllowedStatus = @(200, 201)
   )
 
-  $tmpPath = [System.IO.Path]::GetTempFileName()
+  $headerPath = [System.IO.Path]::GetTempFileName()
+  $bodyPath = [System.IO.Path]::GetTempFileName()
+  $payloadPath = if ($JsonBody) { [System.IO.Path]::GetTempFileName() } else { $null }
+
   try {
-    [System.IO.File]::WriteAllText($tmpPath, $JsonBody, $utf8NoBom)
     $curlArgs = @(
       '-sS',
+      '--fail-with-body',
       '-X', $Method,
       $Url,
-      '-H', 'Content-Type: application/json'
+      '-H', 'Accept: application/json',
+      '-D', $headerPath,
+      '-o', $bodyPath
     )
+
+    if ($JsonBody) {
+      [System.IO.File]::WriteAllText($payloadPath, $JsonBody, $utf8NoBom)
+      $curlArgs += @('-H', 'Content-Type: application/json', '--data-binary', "@$payloadPath")
+    }
     if ($Token) {
       $curlArgs += @('-H', "Authorization: Bearer $Token")
     }
     if ($IdempotencyKey) {
       $curlArgs += @('-H', "Idempotency-Key: $IdempotencyKey")
     }
-    $curlArgs += @('--data-binary', "@$tmpPath", '-w', "`nHTTP_STATUS:%{http_code}")
-    $raw = (& curl.exe @curlArgs)
-    $parsed = [regex]::Match($raw, '(?s)^(.*)\s*HTTP_STATUS:(\d{3})\s*$')
-    if (-not $parsed.Success) {
-      throw "Unable to parse HTTP status. Raw response: $raw"
+    if ($TraceId) {
+      $curlArgs += @('-H', "X-Trace-Id: $TraceId")
     }
-    $body = $parsed.Groups[1].Value
-    $status = $parsed.Groups[2].Value
-    $json = $null
+
+    & curl.exe @curlArgs
+    if ($LASTEXITCODE -ne 0) {
+      $rawFailureBody = if (Test-Path $bodyPath) { Get-Content $bodyPath -Raw } else { '' }
+      throw "curl failed with exit code $LASTEXITCODE for $Method $Url`n$rawFailureBody"
+    }
+
+    $headerLines = Get-Content $headerPath
+    $statusLine = $headerLines | Where-Object { $_ -match '^HTTP/\S+\s+\d{3}' } | Select-Object -Last 1
+    if (-not $statusLine) {
+      $rawBody = Get-Content $bodyPath -Raw
+      throw "Unable to parse HTTP status for $Method $Url`n$rawBody"
+    }
+
+    $status = [int]([regex]::Match($statusLine, '\s(\d{3})\s').Groups[1].Value)
+    if ($AllowedStatus -notcontains $status) {
+      $rawBody = Get-Content $bodyPath -Raw
+      throw "Unexpected HTTP status $status for $Method $Url. Expected one of: $($AllowedStatus -join ', ')`n$rawBody"
+    }
+
+    $headers = @{}
+    foreach ($line in $headerLines) {
+      if ($line -match '^[^:\s]+:\s*') {
+        $parts = $line.Split(':', 2)
+        $headers[$parts[0].Trim().ToLowerInvariant()] = $parts[1].Trim()
+      }
+    }
+
+    $rawBody = Get-Content $bodyPath -Raw
     try {
-      $json = $body | ConvertFrom-Json
+      $json = $rawBody | ConvertFrom-Json
     } catch {
-      $json = $null
+      throw "Expected JSON response for $Method $Url but got:`n$rawBody"
     }
+
     return @{
-      Status = [int]$status
-      Body = $body
+      Status = $status
+      Body = $rawBody
       Json = $json
+      Headers = $headers
     }
   } finally {
-    if (Test-Path $tmpPath) {
-      Remove-Item $tmpPath -Force
-    }
+    if (Test-Path $headerPath) { Remove-Item $headerPath -Force }
+    if (Test-Path $bodyPath) { Remove-Item $bodyPath -Force }
+    if ($payloadPath -and (Test-Path $payloadPath)) { Remove-Item $payloadPath -Force }
   }
 }
 
-function Assert-StatusIn {
+function Assert-True {
   param(
-    [Parameter(Mandatory = $true)][int]$Actual,
-    [Parameter(Mandatory = $true)][int[]]$Expected
+    [Parameter(Mandatory = $true)][bool]$Condition,
+    [Parameter(Mandatory = $true)][string]$Message
   )
-  if ($Expected -notcontains $Actual) {
-    throw "Unexpected HTTP status $Actual. Expected one of: $($Expected -join ', ')"
+  if (-not $Condition) {
+    throw $Message
   }
 }
 
 Write-Output "BASE_URL=$baseUrl"
 Write-Output "RUN_ID=$runId"
 
-Write-Output "`n=== HEALTH ==="
-curl.exe -sS -i "$baseUrl/health"
+Write-Output "`n=== HEALTH /api/healthz ==="
+$healthApi = Invoke-CurlJsonRequest -Method 'GET' -Url "$baseUrl/api/healthz" -AllowedStatus @(200)
+Assert-True -Condition ([bool]$healthApi.Json.ok) -Message "/api/healthz did not return ok=true"
+Assert-True -Condition ([bool]$healthApi.Json.db_ok) -Message "/api/healthz did not return db_ok=true"
+Write-Output "status=$($healthApi.Status) ok=$($healthApi.Json.ok) db_ok=$($healthApi.Json.db_ok)"
 
-Write-Output "`n=== RIDER REGISTER ==="
-$registerRider = Invoke-JsonRequest `
-  -Method 'POST' `
-  -Url "$baseUrl/auth/register" `
-    -JsonBody (@{
-      email = $riderEmail
-      password = $password
-      role = 'rider'
-      display_name = 'Smoke Rider'
-      next_of_kin = @{
-        full_name = 'Smoke NOK'
-        phone = '+2348010000000'
-        relationship = 'Sibling'
-      }
-    } | ConvertTo-Json -Compress) `
-  -IdempotencyKey (New-IdempotencyKey -Step 'rider-register')
-Assert-StatusIn -Actual $registerRider.Status -Expected @(200, 201)
-$riderUserId = if ($registerRider.Json) { $registerRider.Json.user_id } else { '' }
-Write-Output "status=$($registerRider.Status) rider_user_id=$riderUserId"
+Write-Output "`n=== HEALTH /health ==="
+$health = Invoke-CurlJsonRequest -Method 'GET' -Url "$baseUrl/health" -AllowedStatus @(200)
+Assert-True -Condition ([bool]$health.Json.ok) -Message "/health did not return ok=true"
+Assert-True -Condition ([bool]$health.Json.db_ok) -Message "/health did not return db_ok=true"
+Write-Output "status=$($health.Status) ok=$($health.Json.ok) db_ok=$($health.Json.db_ok)"
 
-Write-Output "`n=== RIDER LOGIN ==="
-$loginRider = Invoke-JsonRequest `
+Write-Output "`n=== RIDER REGISTER + IDEMPOTENCY REPLAY ==="
+$registerKey = New-IdempotencyKey -Step 'rider-register'
+$registerBody = @{
+  email = $riderEmail
+  password = $password
+  role = 'rider'
+  display_name = 'Smoke Rider'
+  next_of_kin = @{
+    full_name = 'Smoke NOK'
+    phone = '+2348010000000'
+    relationship = 'Sibling'
+  }
+} | ConvertTo-Json -Compress
+$registerFirst = Invoke-CurlJsonRequest -Method 'POST' -Url "$baseUrl/auth/register" -JsonBody $registerBody -IdempotencyKey $registerKey
+$registerReplay = Invoke-CurlJsonRequest -Method 'POST' -Url "$baseUrl/auth/register" -JsonBody $registerBody -IdempotencyKey $registerKey
+$replayedFlag = [bool]$registerReplay.Json.replayed
+$hasMatchingResultHash =
+  ($registerFirst.Json.PSObject.Properties.Name -contains 'result_hash') -and
+  ($registerReplay.Json.PSObject.Properties.Name -contains 'result_hash') -and
+  ($registerFirst.Json.result_hash -eq $registerReplay.Json.result_hash)
+Assert-True -Condition ($replayedFlag -or $hasMatchingResultHash) -Message "Register replay did not expose replayed=true or matching result_hash"
+$riderUserId = $registerFirst.Json.user_id
+Write-Output "first_status=$($registerFirst.Status) replay_status=$($registerReplay.Status) rider_user_id=$riderUserId replayed=$replayedFlag"
+
+Write-Output "`n=== RIDER LOGIN + TRACE PROPAGATION ==="
+$traceId = "smoke-$runId-trace-login"
+$loginRider = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/auth/login" `
-  -JsonBody (@{
-      email = $riderEmail
-      password = $password
-    } | ConvertTo-Json -Compress)
-Assert-StatusIn -Actual $loginRider.Status -Expected @(200)
-$riderToken = if ($loginRider.Json) { $loginRider.Json.token } else { '' }
-if (-not $riderToken) {
-  throw 'Missing rider token in login response'
-}
-Write-Output "status=$($loginRider.Status) rider_email=$riderEmail"
+  -JsonBody (@{ email = $riderEmail; password = $password } | ConvertTo-Json -Compress) `
+  -TraceId $traceId `
+  -AllowedStatus @(200)
+$returnedTraceHeader = if ($loginRider.Headers.ContainsKey('x-trace-id')) { $loginRider.Headers['x-trace-id'] } else { '' }
+$returnedTraceBody = if ($loginRider.Json.PSObject.Properties.Name -contains 'trace_id') { $loginRider.Json.trace_id } else { '' }
+Assert-True -Condition (($returnedTraceHeader -eq $traceId) -or ($returnedTraceBody -eq $traceId)) -Message "Trace id propagation failed. header='$returnedTraceHeader' body='$returnedTraceBody'"
+$riderToken = $loginRider.Json.token
+Assert-True -Condition ([string]::IsNullOrWhiteSpace($riderToken) -eq $false) -Message 'Missing rider token in login response'
+Write-Output "status=$($loginRider.Status) rider_email=$riderEmail trace=$returnedTraceHeader"
 
 Write-Output "`n=== RIDER REQUEST RIDE ==="
-$rideRequest = Invoke-JsonRequest `
+$rideRequest = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/rides/request" `
   -Token $riderToken `
@@ -145,15 +199,12 @@ $rideRequest = Invoke-JsonRequest `
       premium_markup_minor = 5000
       connection_fee_minor = 5000
     } | ConvertTo-Json -Compress)
-Assert-StatusIn -Actual $rideRequest.Status -Expected @(200, 201)
-$rideId = if ($rideRequest.Json) { $rideRequest.Json.ride_id } else { '' }
-if (-not $rideId) {
-  throw "Missing ride_id from request ride response: $($rideRequest.Body)"
-}
+$rideId = $rideRequest.Json.ride_id
+Assert-True -Condition ([string]::IsNullOrWhiteSpace($rideId) -eq $false) -Message "Missing ride_id from request ride response: $($rideRequest.Body)"
 Write-Output "status=$($rideRequest.Status) ride_id=$rideId"
 
 Write-Output "`n=== DRIVER REGISTER + LOGIN ==="
-$registerDriver = Invoke-JsonRequest `
+$registerDriver = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/auth/register" `
   -JsonBody (@{
@@ -163,59 +214,50 @@ $registerDriver = Invoke-JsonRequest `
       display_name = 'Smoke Driver'
     } | ConvertTo-Json -Compress) `
   -IdempotencyKey (New-IdempotencyKey -Step 'driver-register')
-Assert-StatusIn -Actual $registerDriver.Status -Expected @(200, 201)
-$driverUserId = if ($registerDriver.Json) { $registerDriver.Json.user_id } else { '' }
-$loginDriver = Invoke-JsonRequest `
+$loginDriver = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/auth/login" `
   -JsonBody (@{
       email = $driverEmail
       password = $password
-    } | ConvertTo-Json -Compress)
-Assert-StatusIn -Actual $loginDriver.Status -Expected @(200)
-$driverToken = if ($loginDriver.Json) { $loginDriver.Json.token } else { '' }
-if (-not $driverToken) {
-  throw 'Missing driver token in login response'
-}
-Write-Output "driver_user_id=$driverUserId login_status=$($loginDriver.Status)"
+    } | ConvertTo-Json -Compress) `
+  -AllowedStatus @(200)
+$driverToken = $loginDriver.Json.token
+Assert-True -Condition ([string]::IsNullOrWhiteSpace($driverToken) -eq $false) -Message 'Missing driver token in login response'
+Write-Output "driver_user_id=$($registerDriver.Json.user_id) login_status=$($loginDriver.Status)"
 
 Write-Output "`n=== DRIVER ACCEPT RIDE + REPLAY ==="
 $acceptKey = New-IdempotencyKey -Step 'ride-accept'
-$acceptRide = Invoke-JsonRequest `
+$acceptRide = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/rides/$rideId/accept" `
   -Token $driverToken `
   -IdempotencyKey $acceptKey `
   -JsonBody '{}'
-Assert-StatusIn -Actual $acceptRide.Status -Expected @(200)
-Write-Output "accept_status=$($acceptRide.Status) ride_id=$rideId"
-$acceptReplay = Invoke-JsonRequest `
+$acceptReplay = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/rides/$rideId/accept" `
   -Token $driverToken `
   -IdempotencyKey $acceptKey `
   -JsonBody '{}'
-Assert-StatusIn -Actual $acceptReplay.Status -Expected @(200)
-Write-Output "accept_replay_status=$($acceptReplay.Status)"
+Write-Output "accept_status=$($acceptRide.Status) accept_replay_status=$($acceptReplay.Status)"
 
 if ($adminEmail -and $adminPassword) {
   Write-Output "`n=== ADMIN LOGIN ==="
-  $adminLogin = Invoke-JsonRequest `
+  $adminLogin = Invoke-CurlJsonRequest `
     -Method 'POST' `
     -Url "$baseUrl/auth/login" `
     -JsonBody (@{
         email = $adminEmail
         password = $adminPassword
-      } | ConvertTo-Json -Compress)
-  Assert-StatusIn -Actual $adminLogin.Status -Expected @(200)
-  $adminToken = if ($adminLogin.Json) { $adminLogin.Json.token } else { '' }
-  if (-not $adminToken) {
-    throw 'Missing admin token in login response'
-  }
+      } | ConvertTo-Json -Compress) `
+    -AllowedStatus @(200)
+  $adminToken = $adminLogin.Json.token
+  Assert-True -Condition ([string]::IsNullOrWhiteSpace($adminToken) -eq $false) -Message 'Missing admin token in login response'
   Write-Output "admin_login_status=$($adminLogin.Status)"
 
   Write-Output "`n=== DISPUTE OPEN + RESOLVE ==="
-  $openDispute = Invoke-JsonRequest `
+  $openDispute = Invoke-CurlJsonRequest `
     -Method 'POST' `
     -Url "$baseUrl/disputes" `
     -Token $adminToken `
@@ -224,46 +266,47 @@ if ($adminEmail -and $adminPassword) {
         ride_id = $rideId
         reason = 'smoke_test'
       } | ConvertTo-Json -Compress)
-  Assert-StatusIn -Actual $openDispute.Status -Expected @(200, 201)
-  $disputeId = if ($openDispute.Json) { $openDispute.Json.dispute_id } else { '' }
+  $disputeId = $openDispute.Json.dispute_id
   Write-Output "dispute_open_status=$($openDispute.Status) dispute_id=$disputeId"
   if ($disputeId) {
-    $resolveKey = New-IdempotencyKey -Step 'dispute-resolve'
-    $resolveDispute = Invoke-JsonRequest `
+    $resolveDispute = Invoke-CurlJsonRequest `
       -Method 'POST' `
       -Url "$baseUrl/disputes/$disputeId/resolve" `
       -Token $adminToken `
-      -IdempotencyKey $resolveKey `
+      -IdempotencyKey (New-IdempotencyKey -Step 'dispute-resolve') `
       -JsonBody (@{
           refund_minor = 0
           resolution_note = 'smoke_resolve'
-        } | ConvertTo-Json -Compress)
-    Assert-StatusIn -Actual $resolveDispute.Status -Expected @(200)
+        } | ConvertTo-Json -Compress) `
+      -AllowedStatus @(200)
     Write-Output "dispute_resolve_status=$($resolveDispute.Status)"
   }
 
-  Write-Output "`n=== ADMIN REVERSAL + REPLAY CHECK ==="
-  $reversalKey = New-IdempotencyKey -Step 'admin-reversal'
-  $ledgerId = if ($env:HAILO_REVERSAL_LEDGER_ID) { [int]$env:HAILO_REVERSAL_LEDGER_ID } else { 999999999 }
-  $reversalBody = @{
-    original_ledger_id = $ledgerId
-    reason = 'smoke_reversal'
-  } | ConvertTo-Json -Compress
-  $reversalFirst = Invoke-JsonRequest `
-    -Method 'POST' `
-    -Url "$baseUrl/admin/reversal" `
-    -Token $adminToken `
-    -IdempotencyKey $reversalKey `
-    -JsonBody $reversalBody
-  $reversalReplay = Invoke-JsonRequest `
-    -Method 'POST' `
-    -Url "$baseUrl/admin/reversal" `
-    -Token $adminToken `
-    -IdempotencyKey $reversalKey `
-    -JsonBody $reversalBody
-  Write-Output "reversal_status_first=$($reversalFirst.Status) reversal_status_replay=$($reversalReplay.Status)"
-  if ($reversalFirst.Status -ne $reversalReplay.Status) {
-    throw 'Reversal replay status mismatch'
+  if ($reversalLedgerId) {
+    Write-Output "`n=== ADMIN REVERSAL + REPLAY CHECK ==="
+    $reversalKey = New-IdempotencyKey -Step 'admin-reversal'
+    $reversalBody = @{
+      original_ledger_id = [int]$reversalLedgerId
+      reason = 'smoke_reversal'
+    } | ConvertTo-Json -Compress
+    $reversalFirst = Invoke-CurlJsonRequest `
+      -Method 'POST' `
+      -Url "$baseUrl/admin/reversal" `
+      -Token $adminToken `
+      -IdempotencyKey $reversalKey `
+      -JsonBody $reversalBody `
+      -AllowedStatus @(200)
+    $reversalReplay = Invoke-CurlJsonRequest `
+      -Method 'POST' `
+      -Url "$baseUrl/admin/reversal" `
+      -Token $adminToken `
+      -IdempotencyKey $reversalKey `
+      -JsonBody $reversalBody `
+      -AllowedStatus @(200)
+    Write-Output "reversal_status_first=$($reversalFirst.Status) reversal_status_replay=$($reversalReplay.Status)"
+  } else {
+    Write-Output "`n=== ADMIN REVERSAL SKIPPED ==="
+    Write-Output 'Set HAILO_REVERSAL_LEDGER_ID to run reversal replay smoke.'
   }
 } else {
   Write-Output "`n=== ADMIN FLOW SKIPPED ==="

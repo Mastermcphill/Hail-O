@@ -8,7 +8,10 @@ Middleware traceMiddleware({Uuid? uuid}) {
 
   return (Handler innerHandler) {
     return (Request request) async {
-      final traceId = generator.v4();
+      final requestedTraceId = request.headers['x-trace-id']?.trim();
+      final traceId = (requestedTraceId != null && requestedTraceId.isNotEmpty)
+          ? requestedTraceId
+          : generator.v4();
       final existing = RequestContext.fromRequest(request);
       final tracedRequest = RequestContext.withContext(
         request,

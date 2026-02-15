@@ -58,6 +58,33 @@ void main() {
         jsonDecode(await response.readAsString()) as Map<String, dynamic>;
     expect(decoded['code'], 'unauthorized');
   });
+
+  test('trace middleware preserves caller supplied x-trace-id', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(db);
+    const traceId = 'smoke-trace-preserve-1';
+    final response = await handler(
+      shelf.Request(
+        'POST',
+        Uri.parse('http://localhost/auth/register'),
+        headers: const <String, String>{
+          'content-type': 'application/json',
+          'idempotency-key': 'trace-register-1',
+          'x-trace-id': traceId,
+        },
+        body: jsonEncode(<String, Object?>{
+          'email': 'trace.middleware@example.com',
+          'password': 'SuperSecret123',
+          'role': 'rider',
+        }),
+      ),
+    );
+
+    expect(response.statusCode, 201);
+    expect(response.headers['x-trace-id'], traceId);
+  });
 }
 
 Handler _buildHandler(Database db) {
