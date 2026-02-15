@@ -61,7 +61,7 @@ databases:
   - name: hail-o-db
     databaseName: hailo
     user: hailo
-    plan: free
+    plan: Basic-256mb
 
   # Staging DB
   - name: hail-o-db-staging
