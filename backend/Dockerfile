@@ -12,4 +12,4 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["dart", "run", "bin/server.dart"]
+CMD ["bash", "-lc", "dart run bin/migrate.dart && dart run bin/server.dart"]
