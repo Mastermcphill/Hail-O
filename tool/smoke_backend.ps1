@@ -1,11 +1,43 @@
 $ErrorActionPreference = 'Stop'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Invoke-CurlJson {
+  param(
+    [Parameter(Mandatory = $true)][string]$Method,
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][hashtable]$Headers,
+    [Parameter(Mandatory = $true)][string]$JsonBody,
+    [switch]$IncludeResponseHeaders
+  )
+
+  $tmpPath = [System.IO.Path]::GetTempFileName()
+  try {
+    [System.IO.File]::WriteAllText($tmpPath, $JsonBody, $utf8NoBom)
+    $curlArgs = @('-sS')
+    if ($IncludeResponseHeaders.IsPresent) {
+      $curlArgs += '-i'
+    }
+    $curlArgs += @(
+      '-X', $Method,
+      $Url
+    )
+    foreach ($headerKey in $Headers.Keys) {
+      $curlArgs += @('-H', "${headerKey}: $($Headers[$headerKey])")
+    }
+    $curlArgs += @('--data-binary', "@$tmpPath")
+    return (& curl.exe @curlArgs)
+  } finally {
+    if (Test-Path $tmpPath) {
+      Remove-Item $tmpPath -Force
+    }
+  }
+}
 
 $baseUrl = if ($env:HAILO_API_BASE_URL) { $env:HAILO_API_BASE_URL } else { 'https://hail-o-api.onrender.com' }
 $email = "smoke.$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())@hailo.dev"
 $password = if ($env:HAILO_SMOKE_PASSWORD) { $env:HAILO_SMOKE_PASSWORD } else { 'Passw0rd!' }
 $registerKey = "smoke-register-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-$rideKey = "smoke-ride-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-$scheduledAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+$rideLookupId = "smoke-non-existent-ride"
 
 Write-Output "BASE_URL=$baseUrl"
 Write-Output "EMAIL=$email"
@@ -21,11 +53,15 @@ $registerBody = @{
 } | ConvertTo-Json -Compress
 
 Write-Output "`n=== REGISTER ==="
-curl.exe -sS -i `
-  -X POST "$baseUrl/auth/register" `
-  -H "Content-Type: application/json" `
-  -H "Idempotency-Key: $registerKey" `
-  --data-raw "$registerBody"
+Invoke-CurlJson `
+  -Method 'POST' `
+  -Url "$baseUrl/auth/register" `
+  -Headers @{
+    'Content-Type' = 'application/json'
+    'Idempotency-Key' = $registerKey
+  } `
+  -JsonBody $registerBody `
+  -IncludeResponseHeaders
 
 $loginBody = @{
   email = $email
@@ -33,10 +69,13 @@ $loginBody = @{
 } | ConvertTo-Json -Compress
 
 Write-Output "`n=== LOGIN ==="
-$loginRaw = curl.exe -sS `
-  -X POST "$baseUrl/auth/login" `
-  -H "Content-Type: application/json" `
-  --data-raw "$loginBody"
+$loginRaw = Invoke-CurlJson `
+  -Method 'POST' `
+  -Url "$baseUrl/auth/login" `
+  -Headers @{
+    'Content-Type' = 'application/json'
+  } `
+  -JsonBody $loginBody
 Write-Output $loginRaw
 
 $login = $loginRaw | ConvertFrom-Json
@@ -44,22 +83,7 @@ if (-not $login.token) {
   throw "Missing token in login response"
 }
 
-$rideBody = @{
-  scheduled_departure_at = $scheduledAt
-  trip_scope = 'intra_city'
-  distance_meters = 12000
-  duration_seconds = 1800
-  luggage_count = 1
-  vehicle_class = 'sedan'
-  base_fare_minor = 100000
-  premium_markup_minor = 5000
-  connection_fee_minor = 5000
-} | ConvertTo-Json -Compress
-
-Write-Output "`n=== REQUEST RIDE ==="
+Write-Output "`n=== AUTHENTICATED CALL ==="
 curl.exe -sS -i `
-  -X POST "$baseUrl/rides/request" `
-  -H "Content-Type: application/json" `
-  -H "Authorization: Bearer $($login.token)" `
-  -H "Idempotency-Key: $rideKey" `
-  --data-raw "$rideBody"
+  "$baseUrl/rides/$rideLookupId" `
+  -H "Authorization: Bearer $($login.token)"
