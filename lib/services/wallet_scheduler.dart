@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../data/sqlite/dao/wallets_dao.dart';
 import '../domain/models/wallet.dart';

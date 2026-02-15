@@ -17,7 +17,9 @@ import 'package:hail_o_finance_core/data/sqlite/migrations/m0014_wallet_transfer
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0015_policy_rules_tables.dart';
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0016_operation_journal.dart';
 import 'package:hail_o_finance_core/data/sqlite/migrations/m0017_rule_rollouts.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/data/sqlite/migrations/m0018_auth_credentials.dart';
+import 'package:hail_o_finance_core/data/sqlite/migrations/m0019_ride_request_metadata.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 List<Migration> allMigrations() {
   return const <Migration>[
@@ -38,6 +40,8 @@ List<Migration> allMigrations() {
     M0015PolicyRulesTables(),
     M0016OperationJournal(),
     M0017RuleRollouts(),
+    M0018AuthCredentials(),
+    M0019RideRequestMetadata(),
   ];
 }
 

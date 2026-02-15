@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/idempotency_dao.dart';
 import '../../data/sqlite/dao/rides_dao.dart';

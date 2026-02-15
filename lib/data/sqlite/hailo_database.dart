@@ -1,5 +1,5 @@
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import 'migration.dart';
 import 'migration_runner.dart';
@@ -20,6 +20,8 @@ import 'migrations/m0014_wallet_transfer_journal.dart';
 import 'migrations/m0015_policy_rules_tables.dart';
 import 'migrations/m0016_operation_journal.dart';
 import 'migrations/m0017_rule_rollouts.dart';
+import 'migrations/m0018_auth_credentials.dart';
+import 'migrations/m0019_ride_request_metadata.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -45,6 +47,8 @@ class HailODatabase {
              M0015PolicyRulesTables(),
              M0016OperationJournal(),
              M0017RuleRollouts(),
+             M0018AuthCredentials(),
+             M0019RideRequestMetadata(),
            ];
 
   final String databaseName;

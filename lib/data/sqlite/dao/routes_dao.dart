@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/route_chain.dart';
 import '../../../domain/models/route_node.dart';

@@ -24,7 +24,7 @@ void main() {
 
     final first = await database.open(databasePath: dbPath);
     final firstRows = await first.query(TableNames.schemaMigrations);
-    expect(firstRows.length, 17);
+    expect(firstRows.length, 19);
     final firstByVersion = <int, Map<String, Object?>>{
       for (final row in firstRows)
         (row['version'] as int): Map<String, Object?>.from(row),
@@ -70,11 +70,13 @@ void main() {
     expect(firstByVersion[15]?['checksum'], 'm0015_policy_rules_tables_v1');
     expect(firstByVersion[16]?['checksum'], 'm0016_operation_journal_v1');
     expect(firstByVersion[17]?['checksum'], 'm0017_rule_rollouts_v1');
+    expect(firstByVersion[18]?['checksum'], 'm0018_auth_credentials_v1');
+    expect(firstByVersion[19]?['checksum'], 'm0019_ride_request_metadata_v1');
     await first.close();
 
     final second = await database.open(databasePath: dbPath);
     final secondRows = await second.query(TableNames.schemaMigrations);
-    expect(secondRows.length, 17);
+    expect(secondRows.length, 19);
     await second.close();
   });
 }

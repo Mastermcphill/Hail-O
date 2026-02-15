@@ -1,6 +1,7 @@
 class TableNames {
   static const String schemaMigrations = 'schema_migrations';
   static const String users = 'users';
+  static const String authCredentials = 'auth_credentials';
   static const String driverProfiles = 'driver_profiles';
   static const String vehicles = 'vehicles';
   static const String nextOfKin = 'next_of_kin';
@@ -8,6 +9,7 @@ class TableNames {
   static const String routes = 'routes';
   static const String routeNodes = 'route_nodes';
   static const String rides = 'rides';
+  static const String rideRequestMetadata = 'ride_request_metadata';
   static const String bidsOffers = 'bids_offers';
   static const String seats = 'seats';
   static const String manifests = 'manifests';

@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 class FleetConfigsDao {
   const FleetConfigsDao(this.db);

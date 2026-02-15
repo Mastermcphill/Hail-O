@@ -1,0 +1,25 @@
+FROM ghcr.io/cirruslabs/flutter:3.38.9 AS build
+
+WORKDIR /app
+COPY . /app
+
+RUN flutter pub get
+RUN dart build cli --target=bin/hailo_backend.dart --output=/app/out
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN mkdir -p /data
+
+COPY --from=build /app/out/bundle /app/bundle
+
+ENV PORT=8080
+ENV DB_PATH=/data/hail_o_backend.db
+
+EXPOSE 8080
+
+CMD ["/app/bundle/bin/hailo_backend"]

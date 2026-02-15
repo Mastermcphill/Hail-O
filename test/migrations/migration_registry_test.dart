@@ -122,6 +122,23 @@ void main() {
       ),
       true,
     );
+    expect(
+      await _hasIndex(
+        db,
+        table: 'auth_credentials',
+        columns: const <String>['email'],
+        requireUnique: true,
+      ),
+      true,
+    );
+    expect(
+      await _hasIndex(
+        db,
+        table: 'ride_request_metadata',
+        columns: const <String>['scheduled_departure_at'],
+      ),
+      true,
+    );
   });
 }
 
