@@ -22,10 +22,24 @@ run_step() {
   fi
 }
 
+skip_step() {
+  local name="$1"
+  local reason="$2"
+  echo "=== ${name} (SKIPPED) ==="
+  echo "$reason"
+  STEP_NAMES+=("$name")
+  STEP_STATUS+=("SKIP")
+}
+
+run_step "Render blueprint verification" bash tool/verify_render_blueprint.sh
 run_step "Backend tests (dart test)" bash -lc 'cd backend && dart test'
 run_step "Flutter tests (flutter test)" flutter test
 run_step "Staging smoke (bash)" bash -lc 'HAILO_API_BASE_URL=https://hail-o-api-staging.onrender.com ENV=staging bash tool/smoke_backend.sh'
-run_step "Production smoke (bash)" bash -lc 'HAILO_API_BASE_URL=https://hail-o-api.onrender.com ENV=production HAILO_ALLOW_PROD_SMOKE=1 bash tool/smoke_backend.sh'
+if [[ "${HAILO_ALLOW_PROD_SMOKE:-0}" == "1" ]]; then
+  run_step "Production smoke (bash)" bash -lc 'HAILO_API_BASE_URL=https://hail-o-api.onrender.com ENV=production HAILO_ALLOW_PROD_SMOKE=1 bash tool/smoke_backend.sh'
+else
+  skip_step "Production smoke (bash)" "Set HAILO_ALLOW_PROD_SMOKE=1 to run production smoke."
+fi
 
 echo
 echo "=== Release Gate Summary ==="

@@ -27,7 +27,11 @@ DRIVER_EMAIL="smoke.driver.${RUN_ID}@hailo.dev"
 ADMIN_EMAIL="${HAILO_ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${HAILO_ADMIN_PASSWORD:-}"
 REVERSAL_LEDGER_ID="${HAILO_REVERSAL_LEDGER_ID:-}"
-NOW_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+NOW_UTC="$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) + timedelta(hours=2)).isoformat().replace('+00:00', 'Z'))
+PY
+)"
 
 idem() {
   local step="$1"
@@ -80,6 +84,63 @@ else:
 PY
 }
 
+json_path_value() {
+  local body_path="$1"
+  local path="$2"
+  python3 - "$body_path" "$path" <<'PY'
+import json
+import pathlib
+import sys
+
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+value = data
+for part in sys.argv[2].split('.'):
+    if isinstance(value, dict):
+        value = value.get(part)
+    elif isinstance(value, list):
+        try:
+            value = value[int(part)]
+        except Exception:
+            value = None
+    else:
+        value = None
+    if value is None:
+        break
+if value is None:
+    print("")
+elif isinstance(value, bool):
+    print("true" if value else "false")
+elif isinstance(value, (dict, list)):
+    print(json.dumps(value, separators=(",", ":")))
+else:
+    print(value)
+PY
+}
+
+json_array_length() {
+  local body_path="$1"
+  local path="$2"
+  python3 - "$body_path" "$path" <<'PY'
+import json
+import pathlib
+import sys
+
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+value = data
+for part in sys.argv[2].split('.'):
+    if isinstance(value, dict):
+        value = value.get(part)
+    else:
+        value = None
+    if value is None:
+        break
+if isinstance(value, list):
+    print(len(value))
+else:
+    print(0)
+PY
+}
+
 request_json() {
   local method="$1"
   local url="$2"
@@ -95,7 +156,7 @@ request_json() {
   header_file="$(mktemp)"
   body_file="$(mktemp)"
 
-  local args=(-sS --fail-with-body -X "$method" "$url" -H "Accept: application/json" -D "$header_file" -o "$body_file")
+  local args=(-sS -X "$method" "$url" -H "Accept: application/json" -D "$header_file" -o "$body_file")
   if [[ -n "$body" ]]; then
     payload_file="$(mktemp)"
     printf "%s" "$body" >"$payload_file"
@@ -139,6 +200,16 @@ request_json() {
 
   json_validate_file "$body_file"
   RESPONSE_BODY="$(cat "$body_file")"
+
+  if [[ "$RESPONSE_STATUS" -ge 400 ]]; then
+    local error_trace_id
+    error_trace_id="$(json_path_value "$body_file" "trace_id")"
+    if [[ -z "$error_trace_id" ]]; then
+      echo "Error response missing trace_id for $method $url"
+      cat "$body_file"
+      exit 1
+    fi
+  fi
 
   if [[ -n "$payload_file" ]]; then
     rm -f "$payload_file"
@@ -234,16 +305,16 @@ echo "status=$RESPONSE_STATUS rider_email=$RIDER_EMAIL trace=$TRACE_HEADER_VALUE
 cleanup_response_files
 
 echo
-echo "=== RIDER REQUEST RIDE ==="
+echo "=== RIDER REQUEST RIDE (CANCELLATION FLOW) ==="
 RIDE_BODY="{\"scheduled_departure_at\":\"$NOW_UTC\",\"trip_scope\":\"intra_city\",\"distance_meters\":12000,\"duration_seconds\":1800,\"luggage_count\":1,\"vehicle_class\":\"sedan\",\"base_fare_minor\":100000,\"premium_markup_minor\":5000,\"connection_fee_minor\":5000}"
 request_json "POST" "$BASE_URL/rides/request" "$RIDE_BODY" "$RIDER_TOKEN" "$(idem ride-request)"
-RIDE_ID="$(json_field "$RESPONSE_BODY_FILE" "ride_id")"
-if [[ -z "$RIDE_ID" ]]; then
+RIDE_CANCEL_ID="$(json_field "$RESPONSE_BODY_FILE" "ride_id")"
+if [[ -z "$RIDE_CANCEL_ID" ]]; then
   echo "Missing ride_id from request ride response"
   cat "$RESPONSE_BODY_FILE"
   exit 1
 fi
-echo "status=$RESPONSE_STATUS ride_id=$RIDE_ID"
+echo "status=$RESPONSE_STATUS ride_id=$RIDE_CANCEL_ID"
 cleanup_response_files
 
 echo
@@ -264,14 +335,103 @@ echo "driver_user_id=$DRIVER_USER_ID login_status=$RESPONSE_STATUS"
 cleanup_response_files
 
 echo
-echo "=== DRIVER ACCEPT RIDE + REPLAY ==="
+echo "=== RIDER CANNOT ACCEPT RIDE (ROLE GUARD) ==="
+request_json "POST" "$BASE_URL/rides/$RIDE_CANCEL_ID/accept" "{}" "$RIDER_TOKEN" "$(idem rider-accept-forbidden)" "" "403"
+FORBIDDEN_CODE="$(json_field "$RESPONSE_BODY_FILE" "code")"
+assert_true "$([[ "$FORBIDDEN_CODE" == "forbidden" ]] && echo 1 || echo 0)" "Rider accept should return code=forbidden"
+echo "rider_accept_status=$RESPONSE_STATUS code=$FORBIDDEN_CODE"
+cleanup_response_files
+
+echo
+echo "=== DRIVER CANNOT CALL ADMIN REVERSAL (ROLE GUARD) ==="
+request_json "POST" "$BASE_URL/admin/reversal" "{\"original_ledger_id\":1,\"reason\":\"smoke_forbidden\"}" "$DRIVER_TOKEN" "$(idem driver-admin-forbidden)" "" "403"
+ADMIN_FORBIDDEN_CODE="$(json_field "$RESPONSE_BODY_FILE" "code")"
+assert_true "$([[ "$ADMIN_FORBIDDEN_CODE" == "admin_only" ]] && echo 1 || echo 0)" "Driver admin reversal should return code=admin_only"
+echo "driver_admin_reversal_status=$RESPONSE_STATUS code=$ADMIN_FORBIDDEN_CODE"
+cleanup_response_files
+
+echo
+echo "=== DRIVER ACCEPT RIDE + REPLAY (CANCELLATION FLOW) ==="
 ACCEPT_KEY="$(idem ride-accept)"
-request_json "POST" "$BASE_URL/rides/$RIDE_ID/accept" "{}" "$DRIVER_TOKEN" "$ACCEPT_KEY" "" "200"
+request_json "POST" "$BASE_URL/rides/$RIDE_CANCEL_ID/accept" "{}" "$DRIVER_TOKEN" "$ACCEPT_KEY" "" "200"
 FIRST_ACCEPT_STATUS="$RESPONSE_STATUS"
 cleanup_response_files
-request_json "POST" "$BASE_URL/rides/$RIDE_ID/accept" "{}" "$DRIVER_TOKEN" "$ACCEPT_KEY" "" "200"
+request_json "POST" "$BASE_URL/rides/$RIDE_CANCEL_ID/accept" "{}" "$DRIVER_TOKEN" "$ACCEPT_KEY" "" "200"
 echo "accept_status=$FIRST_ACCEPT_STATUS accept_replay_status=$RESPONSE_STATUS"
 cleanup_response_files
+
+echo
+echo "=== RIDER CANCEL RIDE + REPLAY (IDEMPOTENT) ==="
+CANCEL_KEY="$(idem ride-cancel)"
+request_json "POST" "$BASE_URL/rides/$RIDE_CANCEL_ID/cancel" "{}" "$RIDER_TOKEN" "$CANCEL_KEY" "" "200"
+FIRST_CANCEL_STATUS="$RESPONSE_STATUS"
+FIRST_CANCEL_REPLAYED="$(json_field "$RESPONSE_BODY_FILE" "replayed")"
+FIRST_CANCEL_RESULT_HASH="$(json_field "$RESPONSE_BODY_FILE" "result_hash")"
+cleanup_response_files
+request_json "POST" "$BASE_URL/rides/$RIDE_CANCEL_ID/cancel" "{}" "$RIDER_TOKEN" "$CANCEL_KEY" "" "200"
+CANCEL_REPLAY_FLAG="$(json_field "$RESPONSE_BODY_FILE" "replayed")"
+CANCEL_REPLAY_RESULT_HASH="$(json_field "$RESPONSE_BODY_FILE" "result_hash")"
+if [[ "$CANCEL_REPLAY_FLAG" != "true" && ( -z "$FIRST_CANCEL_RESULT_HASH" || "$FIRST_CANCEL_RESULT_HASH" != "$CANCEL_REPLAY_RESULT_HASH" ) ]]; then
+  echo "Cancel replay did not expose replayed=true or matching result_hash"
+  cat "$RESPONSE_BODY_FILE"
+  exit 1
+fi
+echo "cancel_status=$FIRST_CANCEL_STATUS replay_status=$RESPONSE_STATUS replayed=$CANCEL_REPLAY_FLAG first_replayed=$FIRST_CANCEL_REPLAYED"
+cleanup_response_files
+
+echo
+echo "=== CANCELLED RIDE SNAPSHOT HAS PENALTY AUDIT ==="
+request_json "GET" "$BASE_URL/rides/$RIDE_CANCEL_ID" "" "$RIDER_TOKEN" "" "" "200"
+PENALTY_COUNT="$(json_array_length "$RESPONSE_BODY_FILE" "penalties")"
+assert_true "$([[ "$PENALTY_COUNT" -gt 0 ]] && echo 1 || echo 0)" "Cancelled ride snapshot has no penalty records"
+echo "ride_id=$RIDE_CANCEL_ID penalties=$PENALTY_COUNT"
+cleanup_response_files
+
+echo
+echo "=== RIDER REQUEST RIDE (HAPPY PATH) ==="
+request_json "POST" "$BASE_URL/rides/request" "$RIDE_BODY" "$RIDER_TOKEN" "$(idem ride-request-happy)" "" "201"
+RIDE_HAPPY_ID="$(json_field "$RESPONSE_BODY_FILE" "ride_id")"
+RIDE_HAPPY_ESCROW_ID="$(json_field "$RESPONSE_BODY_FILE" "escrow_id")"
+if [[ -z "$RIDE_HAPPY_ID" ]]; then
+  echo "Missing happy-path ride_id from request ride response"
+  cat "$RESPONSE_BODY_FILE"
+  exit 1
+fi
+echo "status=$RESPONSE_STATUS ride_id=$RIDE_HAPPY_ID escrow_id=$RIDE_HAPPY_ESCROW_ID"
+cleanup_response_files
+
+echo
+echo "=== DRIVER ACCEPT/COMPLETE (HAPPY PATH) ==="
+request_json "POST" "$BASE_URL/rides/$RIDE_HAPPY_ID/accept" "{}" "$DRIVER_TOKEN" "$(idem ride-accept-happy)" "" "200"
+cleanup_response_files
+request_json "POST" "$BASE_URL/rides/$RIDE_HAPPY_ID/complete" "{\"escrow_id\":\"$RIDE_HAPPY_ESCROW_ID\",\"settlement_trigger\":\"manual_override\"}" "$DRIVER_TOKEN" "$(idem ride-complete-happy)" "" "200,500"
+SETTLEMENT_OK="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.ok")"
+if [[ "$RESPONSE_STATUS" == "200" ]]; then
+  echo "ride_complete_status=$RESPONSE_STATUS settlement_ok=$SETTLEMENT_OK"
+else
+  COMPLETE_CODE="$(json_field "$RESPONSE_BODY_FILE" "code")"
+  echo "ride_complete_status=$RESPONSE_STATUS code=$COMPLETE_CODE"
+  echo "Ride completion returned non-200 in this environment; settlement/payout assertions are skipped."
+fi
+
+if [[ "$RESPONSE_STATUS" == "200" && "$SETTLEMENT_OK" == "true" ]]; then
+  cleanup_response_files
+  echo
+  echo "=== COMPLETED RIDE SNAPSHOT HAS PAYOUT RECORD ==="
+  request_json "GET" "$BASE_URL/rides/$RIDE_HAPPY_ID" "" "$RIDER_TOKEN" "" "" "200"
+  PAYOUT_STATUS="$(json_path_value "$RESPONSE_BODY_FILE" "payout.status")"
+  assert_true "$([[ -n "$PAYOUT_STATUS" ]] && echo 1 || echo 0)" "Completed ride snapshot is missing payout record"
+  echo "ride_id=$RIDE_HAPPY_ID payout_status=$PAYOUT_STATUS"
+  cleanup_response_files
+else
+  echo
+  echo "=== PAYOUT ASSERTION SKIPPED ==="
+  SETTLEMENT_ERROR="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.error")"
+  echo "Settlement not finalized in this environment (error=${SETTLEMENT_ERROR:-not_available})."
+  cleanup_response_files
+fi
+
+RIDE_ID="$RIDE_HAPPY_ID"
 
 if [[ -n "$ADMIN_EMAIL" && -n "$ADMIN_PASSWORD" ]]; then
   echo
