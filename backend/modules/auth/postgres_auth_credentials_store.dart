@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/domain/services/auth_service.dart';
+import '../../../lib/domain/services/auth_service.dart';
 
 import '../../infra/postgres_provider.dart';
 import 'auth_credentials_store.dart';

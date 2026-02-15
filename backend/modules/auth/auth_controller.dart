@@ -1,8 +1,8 @@
-import 'package:hail_o_finance_core/domain/models/user.dart';
-import 'package:hail_o_finance_core/domain/services/auth_service.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
+import '../../../lib/domain/models/user.dart';
+import '../../../lib/domain/services/auth_service.dart';
 import '../../infra/request_context.dart';
 import '../../infra/token_service.dart';
 import '../../server/http_utils.dart';

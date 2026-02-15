@@ -1,8 +1,8 @@
-import 'package:hail_o_finance_core/data/sqlite/dao/auth_credentials_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/users_dao.dart';
-import 'package:hail_o_finance_core/domain/models/auth_credential.dart';
-import 'package:hail_o_finance_core/domain/models/user.dart';
-import 'package:hail_o_finance_core/domain/services/auth_service.dart';
+import '../../../lib/data/sqlite/dao/auth_credentials_dao.dart';
+import '../../../lib/data/sqlite/dao/users_dao.dart';
+import '../../../lib/domain/models/auth_credential.dart';
+import '../../../lib/domain/models/user.dart';
+import '../../../lib/domain/services/auth_service.dart';
 import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import 'auth_credentials_store.dart';

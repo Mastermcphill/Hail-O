@@ -1,10 +1,10 @@
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/services/ride_api_flow_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_settlement_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_snapshot_service.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
+import '../../../lib/domain/errors/domain_errors.dart';
+import '../../../lib/domain/services/ride_api_flow_service.dart';
+import '../../../lib/domain/services/ride_settlement_service.dart';
+import '../../../lib/domain/services/ride_snapshot_service.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 

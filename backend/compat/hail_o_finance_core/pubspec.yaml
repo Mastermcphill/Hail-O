@@ -1,0 +1,12 @@
+name: hail_o_finance_core
+description: Compatibility shim for backend pure Dart runtime.
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  path: ^1.9.1
+  sqflite_common: ^2.5.5
+  sqflite_common_ffi: ^2.3.6

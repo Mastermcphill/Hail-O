@@ -1,9 +1,9 @@
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/services/dispute_service.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../lib/domain/errors/domain_errors.dart';
+import '../../../lib/domain/services/dispute_service.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 

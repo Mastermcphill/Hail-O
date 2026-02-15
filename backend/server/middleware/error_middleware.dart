@@ -1,7 +1,7 @@
 import 'package:shelf/shelf.dart';
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/services/ride_booking_guard_service.dart';
 
+import '../../../lib/domain/errors/domain_errors.dart';
+import '../../../lib/domain/services/ride_booking_guard_service.dart';
 import '../../infra/request_context.dart';
 import '../http_utils.dart';
 
