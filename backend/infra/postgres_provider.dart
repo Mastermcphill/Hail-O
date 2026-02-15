@@ -8,11 +8,14 @@ class PostgresProvider {
     this.databaseUrl, {
     int poolSize = 4,
     String dbSchema = 'hailo_prod',
+    int statementTimeoutMs = 10000,
   }) : _poolSize = poolSize > 0 ? poolSize : 1,
-       dbSchema = _normalizeSchema(dbSchema);
+       dbSchema = _normalizeSchema(dbSchema),
+       statementTimeoutMs = statementTimeoutMs > 0 ? statementTimeoutMs : 10000;
 
   final String databaseUrl;
   final String dbSchema;
+  final int statementTimeoutMs;
   final int _poolSize;
   late final Pool _pool = Pool(_poolSize);
   final Queue<PostgreSQLConnection> _connectionQueue =
@@ -83,6 +86,12 @@ class PostgresProvider {
     return _pool.withResource(() async {
       final connection = _connectionQueue.removeFirst();
       try {
+        await connection.execute(
+          'SET statement_timeout TO @timeout_ms',
+          substitutionValues: <String, Object?>{
+            'timeout_ms': statementTimeoutMs,
+          },
+        );
         await connection.execute('SET search_path TO $_quotedSchema, public');
         return await action(connection);
       } finally {

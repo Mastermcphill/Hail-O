@@ -24,6 +24,16 @@ Future<void> main() async {
   final db = await DbProvider.instance.open(databasePath: config.sqlitePath);
   final requestMetrics = RequestMetrics();
   final environment = (Platform.environment['ENV'] ?? 'development').trim();
+  final dbQueryTimeoutMs =
+      int.tryParse(
+        (Platform.environment['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim(),
+      ) ??
+      10000;
+  final requestIdleTimeoutSeconds =
+      int.tryParse(
+        (Platform.environment['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim(),
+      ) ??
+      30;
   final metricsPublic =
       (Platform.environment['METRICS_PUBLIC'] ?? 'false')
           .trim()
@@ -44,7 +54,11 @@ Future<void> main() async {
         'BACKEND_DB_MODE=postgres requires DATABASE_URL environment variable',
       );
     }
-    postgresProvider = PostgresProvider(databaseUrl, dbSchema: config.dbSchema);
+    postgresProvider = PostgresProvider(
+      databaseUrl,
+      dbSchema: config.dbSchema,
+      statementTimeoutMs: dbQueryTimeoutMs,
+    );
     await BackendPostgresMigrator(
       postgresProvider: postgresProvider,
       dbSchema: config.dbSchema,
@@ -98,9 +112,10 @@ Future<void> main() async {
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
   stdout.writeln(
-    'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic',
+    'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds',
   );
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
+  server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
   stdout.writeln(
     'Hail-O backend listening on http://${server.address.host}:${server.port}',
   );
