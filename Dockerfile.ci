@@ -2,9 +2,11 @@ FROM dart:stable
 
 ENV DART_VM_OPTIONS="--old_gen_heap_size=256"
 ENV PUB_CACHE=/tmp/pub_cache
+ENV CI_FULL=0
 
 WORKDIR /app
 COPY . /app
-WORKDIR /app/backend
 
-CMD ["bash","-lc","dart pub get && dart analyze && dart test"]
+RUN chmod +x /app/tool/ci.sh
+
+CMD ["bash","/app/tool/ci.sh"]

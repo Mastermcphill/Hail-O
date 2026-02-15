@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "${CI_FULL:-0}" = "1" ]; then
-  echo "CI mode: FULL"
-else
-  echo "CI mode: FAST"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT_DIR"
+
+MODE="FAST"
+if [[ "${CI_FULL:-0}" == "1" ]]; then
+  MODE="FULL"
 fi
 
-flutter --version
-flutter pub get
-flutter analyze
+echo "CI mode: ${MODE}"
+dart --version
 
-if [ "${CI_FULL:-0}" = "1" ]; then
-  flutter test --concurrency=1
-else
-  flutter test --concurrency=1 \
-    test/domain \
-    test/services \
-    test/data \
-    test/reliability \
-    test/threats \
-    test/sync
+echo "=== BACKEND DEPENDENCIES ==="
+(cd backend && dart pub get)
+
+echo "=== BACKEND ANALYZE ==="
+(cd backend && dart analyze)
+
+echo "=== BACKEND TESTS ==="
+(cd backend && dart test)
+
+if [[ "$MODE" == "FULL" ]]; then
+  if ! command -v flutter >/dev/null 2>&1; then
+    echo "flutter is required for CI_FULL=1 but was not found in PATH"
+    exit 2
+  fi
+  echo "=== FLUTTER TESTS ==="
+  flutter test
 fi
