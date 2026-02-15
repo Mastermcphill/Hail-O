@@ -17,10 +17,11 @@ Future<void> main() async {
     );
   }
 
-  final provider = PostgresProvider(databaseUrl);
+  final provider = PostgresProvider(databaseUrl, dbSchema: config.dbSchema);
   try {
     await BackendPostgresMigrator(
       postgresProvider: provider,
+      dbSchema: config.dbSchema,
     ).runPendingMigrations();
     stdout.writeln('Postgres migrations applied successfully');
   } finally {

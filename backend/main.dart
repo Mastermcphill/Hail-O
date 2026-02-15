@@ -34,9 +34,10 @@ Future<void> main() async {
         'BACKEND_DB_MODE=postgres requires DATABASE_URL environment variable',
       );
     }
-    postgresProvider = PostgresProvider(databaseUrl);
+    postgresProvider = PostgresProvider(databaseUrl, dbSchema: config.dbSchema);
     await BackendPostgresMigrator(
       postgresProvider: postgresProvider,
+      dbSchema: config.dbSchema,
     ).runPendingMigrations();
     authCredentialsStore = PostgresAuthCredentialsStore(postgresProvider);
     rideRequestMetadataStore = PostgresRideRequestMetadataStore(
@@ -64,6 +65,7 @@ Future<void> main() async {
   final buildInfo = <String, Object?>{
     'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'local',
     'runtime': 'dart_vm',
+    'db_schema': config.dbSchema,
   };
   final handler = AppServer(
     db: db,

@@ -89,16 +89,24 @@ class BackendPostgresMigrator {
     PostgresProvider? postgresProvider,
     MigrationDatabase? migrationDatabase,
     String? migrationsDirectory,
+    String dbSchema = 'hailo_prod',
   }) : assert(postgresProvider != null || migrationDatabase != null),
        _migrationDatabase =
            migrationDatabase ?? ProviderMigrationDatabase(postgresProvider!),
+       dbSchema = _normalizeSchema(dbSchema),
        migrationsDirectory =
            migrationsDirectory ?? _resolveMigrationsDirectory();
 
   final MigrationDatabase _migrationDatabase;
   final String migrationsDirectory;
+  final String dbSchema;
+  static final RegExp _schemaPattern = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+  String get _quotedSchema => '"${dbSchema.replaceAll('"', '""')}"';
+  String get _qualifiedMigrationsTable => '$_quotedSchema.schema_migrations';
 
   Future<void> runPendingMigrations() async {
+    await _ensureSchemaExists(_migrationDatabase);
     await _ensureMigrationsTable(_migrationDatabase);
 
     final directory = Directory(migrationsDirectory);
@@ -132,7 +140,7 @@ class BackendPostgresMigrator {
         }
         await txn.execute(
           '''
-          INSERT INTO schema_migrations(version, name, applied_at)
+          INSERT INTO $_qualifiedMigrationsTable(version, name, applied_at)
           VALUES (@version, @name, NOW())
           ''',
           substitutionValues: <String, Object?>{
@@ -144,28 +152,32 @@ class BackendPostgresMigrator {
     }
   }
 
+  Future<void> _ensureSchemaExists(MigrationDatabase database) {
+    return database.execute('CREATE SCHEMA IF NOT EXISTS $_quotedSchema');
+  }
+
   Future<void> _ensureMigrationsTable(MigrationDatabase database) async {
     await database.execute('''
-      CREATE TABLE IF NOT EXISTS schema_migrations (
+      CREATE TABLE IF NOT EXISTS $_qualifiedMigrationsTable (
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     ''');
     await database.execute(
-      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS version INTEGER',
+      'ALTER TABLE $_qualifiedMigrationsTable ADD COLUMN IF NOT EXISTS version INTEGER',
     );
     await database.execute(
-      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS name TEXT',
+      'ALTER TABLE $_qualifiedMigrationsTable ADD COLUMN IF NOT EXISTS name TEXT',
     );
     await database.execute(
-      'ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+      'ALTER TABLE $_qualifiedMigrationsTable ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
     );
   }
 
   Future<bool> _isApplied(MigrationDatabase database, int version) async {
     final result = await database.query(
-      'SELECT 1 FROM schema_migrations WHERE version = @version LIMIT 1',
+      'SELECT 1 FROM $_qualifiedMigrationsTable WHERE version = @version LIMIT 1',
       substitutionValues: <String, Object?>{'version': version},
     );
     return result.isNotEmpty;
@@ -199,5 +211,17 @@ class BackendPostgresMigrator {
       );
     }
     return parsed;
+  }
+
+  static String _normalizeSchema(String schema) {
+    final trimmed = schema.trim();
+    if (trimmed.isEmpty || !_schemaPattern.hasMatch(trimmed)) {
+      throw ArgumentError.value(
+        schema,
+        'dbSchema',
+        'Schema must match ^[A-Za-z_][A-Za-z0-9_]*\$',
+      );
+    }
+    return trimmed;
   }
 }

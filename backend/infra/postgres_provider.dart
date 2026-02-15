@@ -4,16 +4,36 @@ import 'package:pool/pool.dart';
 import 'package:postgres/postgres.dart';
 
 class PostgresProvider {
-  PostgresProvider(this.databaseUrl, {int poolSize = 4})
-    : _poolSize = poolSize > 0 ? poolSize : 1;
+  PostgresProvider(
+    this.databaseUrl, {
+    int poolSize = 4,
+    String dbSchema = 'hailo_prod',
+  }) : _poolSize = poolSize > 0 ? poolSize : 1,
+       dbSchema = _normalizeSchema(dbSchema);
 
   final String databaseUrl;
+  final String dbSchema;
   final int _poolSize;
   late final Pool _pool = Pool(_poolSize);
   final Queue<PostgreSQLConnection> _connectionQueue =
       Queue<PostgreSQLConnection>();
   final List<PostgreSQLConnection> _allConnections = <PostgreSQLConnection>[];
   bool _initialized = false;
+  static final RegExp _schemaPattern = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+  static String _normalizeSchema(String schema) {
+    final trimmed = schema.trim();
+    if (trimmed.isEmpty || !_schemaPattern.hasMatch(trimmed)) {
+      throw ArgumentError.value(
+        schema,
+        'dbSchema',
+        'Schema must match ^[A-Za-z_][A-Za-z0-9_]*\$',
+      );
+    }
+    return trimmed;
+  }
+
+  String get _quotedSchema => '"${dbSchema.replaceAll('"', '""')}"';
 
   Future<void> _initialize() async {
     if (_initialized) {
@@ -63,6 +83,7 @@ class PostgresProvider {
     return _pool.withResource(() async {
       final connection = _connectionQueue.removeFirst();
       try {
+        await connection.execute('SET search_path TO $_quotedSchema, public');
         return await action(connection);
       } finally {
         _connectionQueue.addLast(connection);
