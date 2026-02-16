@@ -72,6 +72,7 @@ try {
 
   if ($gateExitCode -ne 0) {
     Write-Output 'NIGHTLY_GATE_RESULT FAIL'
+    Write-Error 'NIGHTLY_GATE_FAILED' -ErrorAction Continue
     exit 1
   }
 
