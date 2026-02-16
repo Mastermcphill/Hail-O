@@ -19,4 +19,4 @@ COPY . /app
 
 RUN chmod +x /app/tool/ci.sh
 
-CMD ["bash","/app/tool/ci.sh"]
+CMD ["powershell","-ExecutionPolicy","Bypass","-File","/app/tool/ci_nightly_scheduler.ps1"]
