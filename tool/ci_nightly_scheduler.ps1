@@ -1,6 +1,20 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-PowerShellExecutable {
+  $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+  if ($null -ne $pwsh -and -not [string]::IsNullOrWhiteSpace([string]$pwsh.Source)) {
+    return [string]$pwsh.Source
+  }
+
+  $windowsPowerShell = Get-Command powershell -ErrorAction SilentlyContinue
+  if ($null -ne $windowsPowerShell -and -not [string]::IsNullOrWhiteSpace([string]$windowsPowerShell.Source)) {
+    return [string]$windowsPowerShell.Source
+  }
+
+  throw 'Unable to resolve a PowerShell executable (pwsh or powershell).'
+}
+
 function Get-NextNightlyRunUtc {
   $now = [DateTime]::UtcNow
   $target = $now.Date.AddHours(2)
@@ -11,6 +25,7 @@ function Get-NextNightlyRunUtc {
 }
 
 Write-Output 'NIGHTLY_SCHEDULER_START'
+$powerShellExe = Get-PowerShellExecutable
 while ($true) {
   $nextRun = Get-NextNightlyRunUtc
   $sleepSeconds = [int][Math]::Ceiling(($nextRun - [DateTime]::UtcNow).TotalSeconds)
@@ -23,7 +38,7 @@ while ($true) {
 
   $runStart = (Get-Date).ToUniversalTime().ToString('o')
   Write-Output "NIGHTLY_SCHEDULER_RUN_START $runStart"
-  & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ci_nightly_gate.ps1')
+  & $powerShellExe -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ci_nightly_gate.ps1')
   $runExitCode = $LASTEXITCODE
   Write-Output "NIGHTLY_SCHEDULER_RUN_EXIT $runExitCode"
 }

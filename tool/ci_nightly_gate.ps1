@@ -1,6 +1,20 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-PowerShellExecutable {
+  $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+  if ($null -ne $pwsh -and -not [string]::IsNullOrWhiteSpace([string]$pwsh.Source)) {
+    return [string]$pwsh.Source
+  }
+
+  $windowsPowerShell = Get-Command powershell -ErrorAction SilentlyContinue
+  if ($null -ne $windowsPowerShell -and -not [string]::IsNullOrWhiteSpace([string]$windowsPowerShell.Source)) {
+    return [string]$windowsPowerShell.Source
+  }
+
+  throw 'Unable to resolve a PowerShell executable (pwsh or powershell).'
+}
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 Push-Location $root
@@ -8,8 +22,11 @@ try {
   $start = (Get-Date).ToUniversalTime().ToString('o')
   Write-Output "NIGHTLY_GATE_START $start"
 
+  $artifactDir = '<not_found>'
   $stagingDatabaseUrl = [string]$env:HAILO_STAGING_DATABASE_URL
   if ([string]::IsNullOrWhiteSpace($stagingDatabaseUrl)) {
+    Write-Output "NIGHTLY_GATE_ARTIFACT_DIR $artifactDir"
+    Write-Output 'NIGHTLY_GATE_RESULT FAIL'
     throw 'Missing HAILO_STAGING_DATABASE_URL in CI worker env.'
   }
 
@@ -18,8 +35,9 @@ try {
   Remove-Item Env:HAILO_ALLOW_PROD_SMOKE -ErrorAction SilentlyContinue
   Remove-Item Env:HAILO_PROD_CONFIRM -ErrorAction SilentlyContinue
 
+  $powerShellExe = Get-PowerShellExecutable
   $gateOutput = @(
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'release_gate.ps1') 2>&1
+    & $powerShellExe -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'release_gate.ps1') 2>&1
   )
   $gateExitCode = $LASTEXITCODE
 
@@ -34,7 +52,6 @@ try {
       Select-Object -Last 1
   )
 
-  $artifactDir = ''
   if ($artifactLine.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$artifactLine[0])) {
     $artifactDir = ([string]$artifactLine[0]).Substring('artifact_dir='.Length).Trim()
   } else {
