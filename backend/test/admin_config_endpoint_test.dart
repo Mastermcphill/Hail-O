@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
 import '../../lib/data/sqlite/hailo_database.dart';
+import '../infra/api_contract.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/sqlite_auth_credentials_store.dart';
@@ -69,6 +70,33 @@ void main() {
       expect(config.containsKey('jwt_secret'), isFalse);
       expect(config.containsKey('database_url'), isFalse);
       expect(config.containsKey('password'), isFalse);
+
+      final contractForbidden = await _request(
+        handler,
+        method: 'GET',
+        path: '/admin/contract',
+        token: riderToken,
+      );
+      expect(contractForbidden.statusCode, 403);
+      final contractForbiddenBody = await _decodeBody(contractForbidden);
+      expect(contractForbiddenBody['code'], 'admin_only');
+
+      final contractAuthed = await _request(
+        handler,
+        method: 'GET',
+        path: '/admin/contract',
+        token: adminToken,
+      );
+      expect(contractAuthed.statusCode, 200);
+      final contractBody = await _decodeBody(contractAuthed);
+      expect(contractBody['ok'], isTrue);
+      final contract = Map<String, Object?>.from(
+        contractBody['contract'] as Map<String, Object?>,
+      );
+      expect(contract['version'], apiContractVersion);
+      expect(contract['hash'], apiContractHash());
+      expect(contract['build_commit'], 'test');
+      expect(contract['db_schema'], 'test_schema');
     },
   );
 }
@@ -81,7 +109,11 @@ Handler _buildHandler(Database db) {
     environment: 'staging',
     requestMetrics: RequestMetrics(),
     dbHealthCheck: () async => true,
-    buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
+    buildInfo: const <String, Object?>{
+      'commit': 'test',
+      'runtime': 'test',
+      'db_schema': 'test_schema',
+    },
     runtimeConfigSnapshot: const <String, Object?>{
       'environment': 'staging',
       'db_mode': 'postgres',

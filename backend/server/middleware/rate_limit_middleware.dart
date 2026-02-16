@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:shelf/shelf.dart';
 
 import '../../infra/request_context.dart';
@@ -18,6 +20,7 @@ Middleware rateLimitMiddleware({
   int maxRequestsPerUser = 120,
   int maxAuthRequestsPerIp = 20,
   int maxAuthRequestsPerUser = 40,
+  bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
   NowProvider? nowProvider,
 }) {
@@ -54,7 +57,10 @@ Middleware rateLimitMiddleware({
       }
 
       final currentUtc = now();
-      final ipKey = _extractClientIp(request);
+      final ipKey = _extractClientIp(
+        request,
+        trustProxyHeaders: trustProxyHeaders,
+      );
       final isAuthPath = path.startsWith('auth/');
       final ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
       if (!consume(ipBuckets, ipKey, currentUtc, ipLimit)) {
@@ -91,14 +97,24 @@ Middleware rateLimitMiddleware({
   };
 }
 
-String _extractClientIp(Request request) {
-  final forwarded = request.headers['x-forwarded-for']?.trim() ?? '';
-  if (forwarded.isNotEmpty) {
-    return forwarded.split(',').first.trim();
+String _extractClientIp(Request request, {required bool trustProxyHeaders}) {
+  if (trustProxyHeaders) {
+    final forwarded = request.headers['x-forwarded-for']?.trim() ?? '';
+    if (forwarded.isNotEmpty) {
+      return forwarded.split(',').first.trim();
+    }
+    final realIp = request.headers['x-real-ip']?.trim() ?? '';
+    if (realIp.isNotEmpty) {
+      return realIp;
+    }
   }
-  final realIp = request.headers['x-real-ip']?.trim() ?? '';
-  if (realIp.isNotEmpty) {
-    return realIp;
+
+  final connectionInfo = request.context['shelf.io.connection_info'];
+  if (connectionInfo is HttpConnectionInfo) {
+    final address = connectionInfo.remoteAddress.address.trim();
+    if (address.isNotEmpty) {
+      return address;
+    }
   }
   return 'unknown';
 }

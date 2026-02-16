@@ -54,8 +54,9 @@ sort "$STATUS_FILE" | uniq -c | sed 's/^ *//'
 
 echo
 echo "RATE_LIMIT_BURST_CHECK:"
-BURST_COUNT="${LOAD_BURST_REQUESTS:-25}"
+BURST_COUNT="${LOAD_BURST_REQUESTS:-${RATE_LIMIT_BURST:-25}}"
 ENFORCE_BURST="${HAILO_ENFORCE_RATE_LIMIT_BURST:-0}"
+EXPECTED_ENABLED="${RATE_LIMIT_ENABLED:-auto}"
 RATE_LIMIT_HITS=0
 for i in $(seq 1 "$BURST_COUNT"); do
   BODY_FILE="$(mktemp)"
@@ -85,12 +86,24 @@ done
 
 echo "BURST_REQUESTS=$BURST_COUNT"
 echo "BURST_429_COUNT=$RATE_LIMIT_HITS"
+if [[ "$RATE_LIMIT_HITS" -gt 0 ]]; then
+  if [[ "$EXPECTED_ENABLED" == "0" || "$EXPECTED_ENABLED" == "false" ]]; then
+    echo "Observed 429 while RATE_LIMIT_ENABLED indicates disabled."
+    exit 1
+  fi
+  echo "RATE_LIMIT_BURST_CHECK=PASS (ENABLED)"
+  exit 0
+fi
+
 if [[ "$RATE_LIMIT_HITS" -lt 1 ]]; then
   if [[ "$ENFORCE_BURST" == "1" ]]; then
     echo "Expected at least one 429 from auth burst check but got none."
     exit 1
   fi
-  echo "RATE_LIMIT_BURST_CHECK=SKIPPED (no 429 observed; set HAILO_ENFORCE_RATE_LIMIT_BURST=1 to fail hard)"
+  if [[ "$EXPECTED_ENABLED" == "1" || "$EXPECTED_ENABLED" == "true" ]]; then
+    echo "RATE_LIMIT_ENABLED is true but no 429 observed during burst check."
+    exit 1
+  fi
+  echo "RATE_LIMIT_BURST_CHECK=DISABLED (expected no 429)"
   exit 0
 fi
-echo "RATE_LIMIT_BURST_CHECK=PASS"

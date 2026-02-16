@@ -7,6 +7,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
 import '../../lib/data/sqlite/hailo_database.dart';
+import '../infra/api_contract.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/sqlite_auth_credentials_store.dart';
@@ -26,6 +27,27 @@ void main() {
 
     final handler = _buildHandler(db);
     final golden = _loadGolden();
+    final current = apiContractGoldenSnapshot();
+    final breaking = detectBreakingContractChanges(
+      baseline: golden,
+      candidate: current,
+    );
+    final nonBreaking = detectNonBreakingContractChanges(
+      baseline: golden,
+      candidate: current,
+    );
+    expect(
+      breaking,
+      isEmpty,
+      reason:
+          'Breaking contract changes detected:\n${breaking.map((e) => '- $e').join('\n')}',
+    );
+    if (nonBreaking.isNotEmpty) {
+      // Signal additive contract changes in CI logs for intentional golden updates.
+      print(
+        'api contract non-breaking deltas:\n${nonBreaking.map((e) => '- $e').join('\n')}',
+      );
+    }
     final endpoints = Map<String, dynamic>.from(
       golden['endpoints'] as Map<String, dynamic>,
     );

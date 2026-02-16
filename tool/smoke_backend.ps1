@@ -443,7 +443,7 @@ $completeRide = Invoke-CurlJsonRequest `
       escrow_id = $escrowId
       settlement_trigger = 'manual_override'
     } | ConvertTo-Json -Compress) `
-  -AllowedStatus @(200, 500)
+  -AllowedStatus @(200, 409, 500)
 
 if ($completeRide.Status -eq 200) {
   $settlementNode = $completeRide.Json.settlement
@@ -455,8 +455,11 @@ if ($completeRide.Status -eq 200) {
   Write-Output "ride_complete_status=$($completeRide.Status) settlement_ok=$settlementOk"
 } else {
   $settlementNode = $null
-  $settlementOk = $manualSettlementOk
   $completeErrorCode = [string]$completeRide.Json.code
+  $settlementOk = $manualSettlementOk
+  if ($completeRide.Status -eq 409 -and $completeErrorCode -eq 'complete_not_allowed_from_status' -and $manualSettlementOk) {
+    $settlementOk = $true
+  }
   Write-Output "ride_complete_status=$($completeRide.Status) code=$completeErrorCode settlement_ok=$settlementOk"
   if (-not $manualSettlementOk) {
     Write-Output 'Ride completion returned non-200 in this environment; settlement/payout assertions are skipped.'

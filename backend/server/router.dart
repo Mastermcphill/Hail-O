@@ -57,6 +57,7 @@ Handler buildApiRouter({
   final adminController = AdminController(
     walletReversalService: WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
+    buildInfo: buildInfo,
   );
   final driversController = DriversController();
 

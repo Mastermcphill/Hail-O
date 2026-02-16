@@ -36,7 +36,9 @@ Future<void> main() async {
   final rateLimitEnabled =
       (env['RATE_LIMIT_ENABLED'] ?? 'true').trim().toLowerCase() != 'false';
   final rateLimitWindowSeconds =
-      int.tryParse((env['RATE_LIMIT_WINDOW_SECONDS'] ?? '60').trim()) ?? 60;
+      int.tryParse((env['RATE_LIMIT_WINDOW_SEC'] ?? '').trim()) ??
+      int.tryParse((env['RATE_LIMIT_WINDOW_SECONDS'] ?? '60').trim()) ??
+      60;
   final rateLimitMaxRequestsPerIp =
       int.tryParse((env['RATE_LIMIT_PER_IP_PER_MIN'] ?? '').trim()) ??
       int.tryParse((env['RATE_LIMIT_MAX_REQUESTS_PER_IP'] ?? '60').trim()) ??
@@ -46,11 +48,14 @@ Future<void> main() async {
       int.tryParse((env['RATE_LIMIT_MAX_REQUESTS_PER_USER'] ?? '120').trim()) ??
       120;
   final rateLimitAuthMaxRequestsPerIp =
+      int.tryParse((env['RATE_LIMIT_BURST'] ?? '').trim()) ??
       int.tryParse((env['RATE_LIMIT_AUTH_PER_IP_PER_MIN'] ?? '20').trim()) ??
       20;
   final rateLimitAuthMaxRequestsPerUser =
       int.tryParse((env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '40').trim()) ??
       40;
+  final trustProxyHeaders =
+      (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() != 'false';
   final metricsPublic =
       (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
   final migrationHeadVersion = BackendPostgresMigrator.migrationHeadVersion();
@@ -105,6 +110,8 @@ Future<void> main() async {
   final buildInfo = <String, Object?>{
     'commit': env['RENDER_GIT_COMMIT'] ?? 'local',
     'runtime': 'dart_vm',
+    'runtime_marker': env['STARTUP_RUNTIME_MARKER'] ?? 'unknown',
+    'dart_version': env['DART_SDK_VERSION'] ?? 'unknown',
     'db_schema': config.dbSchema,
     'migration_head': migrationHeadVersion,
   };
@@ -116,10 +123,13 @@ Future<void> main() async {
     'allowed_origins_count': allowedOrigins.length,
     'rate_limit_enabled': rateLimitEnabled,
     'rate_limit_window_seconds': rateLimitWindowSeconds,
+    'rate_limit_window_sec': rateLimitWindowSeconds,
     'rate_limit_max_requests_per_ip': rateLimitMaxRequestsPerIp,
     'rate_limit_max_requests_per_user': rateLimitMaxRequestsPerUser,
     'rate_limit_auth_per_ip_per_min': rateLimitAuthMaxRequestsPerIp,
+    'rate_limit_burst': rateLimitAuthMaxRequestsPerIp,
     'rate_limit_auth_per_user_per_min': rateLimitAuthMaxRequestsPerUser,
+    'trust_proxy_headers': trustProxyHeaders,
     'metrics_public': metricsPublic,
     'metrics_protected': !metricsPublic,
     'db_pool_size': dbPoolSize,
@@ -143,6 +153,7 @@ Future<void> main() async {
     maxRequestsPerUser: rateLimitMaxRequestsPerUser,
     maxAuthRequestsPerIp: rateLimitAuthMaxRequestsPerIp,
     maxAuthRequestsPerUser: rateLimitAuthMaxRequestsPerUser,
+    trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     authCredentialsStore: authCredentialsStore,
@@ -153,6 +164,9 @@ Future<void> main() async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
+  );
+  stdout.writeln(
+    'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser trust_proxy_headers=$trustProxyHeaders',
   );
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);

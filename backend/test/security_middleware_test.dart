@@ -137,6 +137,68 @@ void main() {
       expect(secondAuth.statusCode, 429);
       expect(general.statusCode, 200);
     });
+
+    test('trust proxy headers toggle controls X-Forwarded-For usage', () async {
+      final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
+
+      final trustedHandler = Pipeline()
+          .addMiddleware(
+            rateLimitMiddleware(
+              window: const Duration(minutes: 1),
+              maxRequestsPerIp: 1,
+              maxRequestsPerUser: 10,
+              trustProxyHeaders: true,
+              nowProvider: () => fixedNow,
+            ),
+          )
+          .addHandler((request) async => Response.ok('ok'));
+
+      final trustedFirst = await trustedHandler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/health/one'),
+          headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+        ),
+      );
+      final trustedSecond = await trustedHandler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/health/two'),
+          headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+        ),
+      );
+      expect(trustedFirst.statusCode, 200);
+      expect(trustedSecond.statusCode, 200);
+
+      final untrustedHandler = Pipeline()
+          .addMiddleware(
+            rateLimitMiddleware(
+              window: const Duration(minutes: 1),
+              maxRequestsPerIp: 1,
+              maxRequestsPerUser: 10,
+              trustProxyHeaders: false,
+              nowProvider: () => fixedNow,
+            ),
+          )
+          .addHandler((request) async => Response.ok('ok'));
+
+      final untrustedFirst = await untrustedHandler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/health/one'),
+          headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+        ),
+      );
+      final untrustedSecond = await untrustedHandler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/health/two'),
+          headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+        ),
+      );
+      expect(untrustedFirst.statusCode, 200);
+      expect(untrustedSecond.statusCode, 429);
+    });
   });
 
   group('cors policy middleware', () {

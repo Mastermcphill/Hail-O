@@ -32,7 +32,26 @@ skip_step() {
 }
 
 run_step "Render blueprint verification" bash tool/verify_render_blueprint.sh
-run_step "Backend checks (pub get + analyze + test)" bash -lc 'cd backend && dart pub get && dart analyze && dart test'
+run_step "Staging routing verification" bash -lc 'curl -sS -i https://hail-o-api-staging.onrender.com/health > /tmp/hailo_staging_health.txt && ! grep -qi "^x-render-routing: no-server" /tmp/hailo_staging_health.txt'
+if [[ "${HAILO_REQUIRE_RUNTIME_MARKER:-0}" == "1" ]]; then
+run_step "Render runtime sanity (/health marker)" bash -lc "python3 - <<'PY'
+import json
+import urllib.request
+req = urllib.request.Request('https://hail-o-api-staging.onrender.com/health', headers={'Accept':'application/json'})
+with urllib.request.urlopen(req, timeout=30) as resp:
+    data = json.loads(resp.read().decode('utf-8'))
+build = data.get('build') or {}
+assert data.get('ok') is True, data
+assert data.get('db_ok') is True, data
+assert build.get('runtime') == 'dart_vm', build
+assert build.get('runtime_marker') == 'entrypoint_dart_ok', build
+assert 'Dart SDK version' in (build.get('dart_version') or ''), build
+print('runtime marker ok')
+PY"
+else
+skip_step "Render runtime sanity (/health marker)" "Set HAILO_REQUIRE_RUNTIME_MARKER=1 to enforce runtime marker check."
+fi
+run_step "Backend checks (pub get + analyze + test + contract)" bash -lc 'cd backend && dart pub get && dart analyze && dart test && dart run tool/check_contract_breaking.dart'
 run_step "Flutter tests (flutter test)" flutter test
 run_step "Staging smoke (bash)" bash -lc 'HAILO_API_BASE_URL=https://hail-o-api-staging.onrender.com ENV=staging bash tool/smoke_backend.sh'
 if [[ "${HAILO_ALLOW_PROD_SMOKE:-0}" == "1" ]]; then

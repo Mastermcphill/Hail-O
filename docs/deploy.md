@@ -19,6 +19,7 @@
 - API Dockerfile path: `backend/Dockerfile`
 - CI Dockerfile path: `Dockerfile.ci`
 - `Start Command` and `Docker Command` overrides must stay empty (use Dockerfile `CMD`).
+- If `Root Directory` is anything other than `.`, deploys will fail (missing Dockerfile/app paths).
 
 ## Required env vars
 - `BACKEND_DB_MODE=postgres`
@@ -34,6 +35,8 @@
   - Default `true`.
 - `RATE_LIMIT_WINDOW_SECONDS`:
   - Default `60`.
+- `RATE_LIMIT_WINDOW_SEC`:
+  - Short alias of `RATE_LIMIT_WINDOW_SECONDS`.
 - `RATE_LIMIT_PER_IP_PER_MIN`:
   - Default `60` (preferred key, aliases to `RATE_LIMIT_MAX_REQUESTS_PER_IP`).
 - `RATE_LIMIT_PER_USER_PER_MIN`:
@@ -44,8 +47,12 @@
   - Legacy alias of `RATE_LIMIT_PER_USER_PER_MIN`.
 - `RATE_LIMIT_AUTH_PER_IP_PER_MIN`:
   - Default `20` for `/auth/*`.
+- `RATE_LIMIT_BURST`:
+  - Alias for `RATE_LIMIT_AUTH_PER_IP_PER_MIN`.
 - `RATE_LIMIT_AUTH_PER_USER_PER_MIN`:
   - Default `40` for `/auth/*`.
+- `TRUST_PROXY_HEADERS`:
+  - Default `true`. Uses `X-Forwarded-For` first-hop, then `X-Real-IP`, then remote socket.
 - `METRICS_PUBLIC`:
   - Default `false` (metrics endpoint requires admin auth).
 - `DB_POOL_SIZE`:

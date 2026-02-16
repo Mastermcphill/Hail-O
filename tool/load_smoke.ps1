@@ -53,9 +53,18 @@ foreach ($group in $grouped) {
 
 Write-Output ''
 Write-Output 'RATE_LIMIT_BURST_CHECK:'
-$burstRequests = if ($env:LOAD_BURST_REQUESTS) { [int]$env:LOAD_BURST_REQUESTS } else { 25 }
+$burstRequests = if ($env:LOAD_BURST_REQUESTS) {
+  [int]$env:LOAD_BURST_REQUESTS
+} elseif ($env:RATE_LIMIT_BURST) {
+  [int]$env:RATE_LIMIT_BURST
+} else {
+  25
+}
 if ($burstRequests -le 0) { $burstRequests = 25 }
 $enforceBurst = $env:HAILO_ENFORCE_RATE_LIMIT_BURST -eq '1'
+$expectedEnabled = $null
+if ($env:RATE_LIMIT_ENABLED -match '^(1|true)$') { $expectedEnabled = $true }
+if ($env:RATE_LIMIT_ENABLED -match '^(0|false)$') { $expectedEnabled = $false }
 $rateLimited = 0
 
 for ($i = 1; $i -le $burstRequests; $i++) {
@@ -94,11 +103,21 @@ for ($i = 1; $i -le $burstRequests; $i++) {
 
 Write-Output "BURST_REQUESTS=$burstRequests"
 Write-Output "BURST_429_COUNT=$rateLimited"
+if ($rateLimited -gt 0) {
+  if ($expectedEnabled -eq $false) {
+    throw 'Observed 429 responses while RATE_LIMIT_ENABLED indicates disabled.'
+  }
+  Write-Output 'RATE_LIMIT_BURST_CHECK=PASS (ENABLED)'
+  exit 0
+}
+
 if ($rateLimited -lt 1) {
   if ($enforceBurst) {
     throw 'Expected at least one 429 from auth burst check but got none.'
   }
-  Write-Output 'RATE_LIMIT_BURST_CHECK=SKIPPED (no 429 observed; set HAILO_ENFORCE_RATE_LIMIT_BURST=1 to fail hard)'
+  if ($expectedEnabled -eq $true) {
+    throw 'RATE_LIMIT_ENABLED is true but no 429 observed during burst check.'
+  }
+  Write-Output 'RATE_LIMIT_BURST_CHECK=DISABLED (expected no 429)'
   exit 0
 }
-Write-Output 'RATE_LIMIT_BURST_CHECK=PASS'

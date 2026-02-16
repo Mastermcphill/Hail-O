@@ -3,12 +3,20 @@
 ## 1) Verify Render Blueprint
 PowerShell:
 ```powershell
-powershell -ExecutionPolicy Bypass -File tool/verify_render_blueprint.ps1
+powershell -ExecutionPolicy Bypass -File tool/verify_render_settings.ps1
+powershell -ExecutionPolicy Bypass -File tool/verify_staging_routing.ps1
+$env:HAILO_REQUIRE_RUNTIME_MARKER='1'
+powershell -ExecutionPolicy Bypass -File tool/sanity_render_runtime.ps1
 ```
 
 Bash:
 ```bash
 bash tool/verify_render_blueprint.sh
+```
+
+Workspace safety check:
+```powershell
+powershell -ExecutionPolicy Bypass -File tool/verify_workspace.ps1
 ```
 
 ## 2) Run Release Gate
@@ -92,9 +100,10 @@ Optional burst tuning:
 ```powershell
 $env:LOAD_BURST_REQUESTS='40'
 $env:HAILO_ENFORCE_RATE_LIMIT_BURST='1'
+$env:RATE_LIMIT_ENABLED='1'
 ```
 ```bash
-LOAD_BURST_REQUESTS=40 HAILO_ENFORCE_RATE_LIMIT_BURST=1 bash tool/load_smoke.sh
+LOAD_BURST_REQUESTS=40 HAILO_ENFORCE_RATE_LIMIT_BURST=1 RATE_LIMIT_ENABLED=1 bash tool/load_smoke.sh
 ```
 
 ## 7) Capture Incident Snapshot (optional but recommended)

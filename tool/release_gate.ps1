@@ -8,7 +8,8 @@ $failed = $false
 function Invoke-GateStep {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
-    [Parameter(Mandatory = $true)][scriptblock]$Action
+    [Parameter(Mandatory = $true)][scriptblock]$Action,
+    [switch]$StopOnFail
   )
 
   Write-Output "=== $Name ==="
@@ -20,6 +21,9 @@ function Invoke-GateStep {
     $script:failed = $true
     Write-Output "Step failed: $Name"
     Write-Output $_
+    if ($StopOnFail) {
+      throw
+    }
   }
 }
 
@@ -35,11 +39,29 @@ function Add-SkippedStep {
 
 Push-Location $root
 try {
-  Invoke-GateStep -Name 'Render blueprint verification' -Action {
-    powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'verify_render_blueprint.ps1')
+  Invoke-GateStep -Name 'Render settings verification' -StopOnFail -Action {
+    powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'verify_render_settings.ps1')
     if ($LASTEXITCODE -ne 0) {
-      throw "render blueprint verification failed with exit code $LASTEXITCODE"
+      throw "render settings verification failed with exit code $LASTEXITCODE"
     }
+  }
+
+  Invoke-GateStep -Name 'Staging routing verification' -StopOnFail -Action {
+    powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'verify_staging_routing.ps1')
+    if ($LASTEXITCODE -ne 0) {
+      throw "staging routing verification failed with exit code $LASTEXITCODE"
+    }
+  }
+
+  if ($env:HAILO_REQUIRE_RUNTIME_MARKER -eq '1') {
+    Invoke-GateStep -Name 'Render runtime sanity (/health marker)' -StopOnFail -Action {
+      powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sanity_render_runtime.ps1')
+      if ($LASTEXITCODE -ne 0) {
+        throw "render runtime sanity failed with exit code $LASTEXITCODE"
+      }
+    }
+  } else {
+    Add-SkippedStep -Name 'Render runtime sanity (/health marker)' -Reason 'Set HAILO_REQUIRE_RUNTIME_MARKER=1 to enforce runtime marker check.'
   }
 
   Invoke-GateStep -Name 'Backend checks (pub get + analyze + test)' -Action {
@@ -56,6 +78,10 @@ try {
       dart test
       if ($LASTEXITCODE -ne 0) {
         throw "backend dart test failed with exit code $LASTEXITCODE"
+      }
+      dart run tool/check_contract_breaking.dart
+      if ($LASTEXITCODE -ne 0) {
+        throw "backend contract breaking check failed with exit code $LASTEXITCODE"
       }
     } finally {
       Pop-Location

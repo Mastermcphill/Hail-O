@@ -23,6 +23,9 @@
 - `RATE_LIMIT_ENABLED` (default `true`)
 - `RATE_LIMIT_PER_IP_PER_MIN` (preferred) or `RATE_LIMIT_MAX_REQUESTS_PER_IP`
 - `RATE_LIMIT_PER_USER_PER_MIN` (preferred) or `RATE_LIMIT_MAX_REQUESTS_PER_USER`
+- `RATE_LIMIT_WINDOW_SEC` (alias) or `RATE_LIMIT_WINDOW_SECONDS`
 - `RATE_LIMIT_AUTH_PER_IP_PER_MIN` (default `20`)
+- `RATE_LIMIT_BURST` (alias for auth per-IP burst)
 - `RATE_LIMIT_AUTH_PER_USER_PER_MIN` (default `40`)
+- `TRUST_PROXY_HEADERS` (default `true`)
 - `METRICS_PUBLIC` (default `false`)

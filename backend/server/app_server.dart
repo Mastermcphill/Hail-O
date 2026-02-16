@@ -33,6 +33,7 @@ class AppServer {
     this.maxRequestsPerUser = 120,
     this.maxAuthRequestsPerIp = 20,
     this.maxAuthRequestsPerUser = 40,
+    this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
     this.authCredentialsStore,
@@ -55,6 +56,7 @@ class AppServer {
   final int maxRequestsPerUser;
   final int maxAuthRequestsPerIp;
   final int maxAuthRequestsPerUser;
+  final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
   final AuthCredentialsStore? authCredentialsStore;
@@ -108,6 +110,7 @@ class AppServer {
                         maxRequestsPerUser: maxRequestsPerUser,
                         maxAuthRequestsPerIp: maxAuthRequestsPerIp,
                         maxAuthRequestsPerUser: maxAuthRequestsPerUser,
+                        trustProxyHeaders: trustProxyHeaders,
                       ),
                     )
                     .addHandler(router)
