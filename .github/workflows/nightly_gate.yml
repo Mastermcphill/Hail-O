@@ -1,0 +1,51 @@
+name: Nightly Release Gate
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly-gate:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Dart stable
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Setup Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Export nightly gate env
+        shell: powershell
+        env:
+          HAILO_STAGING_DATABASE_URL_SECRET: ${{ secrets.HAILO_STAGING_DATABASE_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:HAILO_STAGING_DATABASE_URL_SECRET)) {
+            throw 'Missing required GitHub secret: HAILO_STAGING_DATABASE_URL'
+          }
+
+          "HAILO_ALLOW_DIRTY=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HAILO_REQUIRE_RUNTIME_MARKER=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HAILO_STAGING_DATABASE_URL=$env:HAILO_STAGING_DATABASE_URL_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run release gate
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File tool/release_gate.ps1
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gate-artifacts-${{ github.run_id }}
+          path: test_artifacts/ops
+          if-no-files-found: warn
