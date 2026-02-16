@@ -110,3 +110,4 @@ Write-Output 'Render blueprint verification: PASS'
 foreach ($service in $services) {
   Write-Output ("- {0} ({1}) rootDir={2} dockerfilePath={3}" -f $service.name, $service.type, $service.rootDir, $service.dockerfilePath)
 }
+Write-Output 'Recommended Render UI Root Directory: .'

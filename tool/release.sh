@@ -6,8 +6,8 @@ cd "$ROOT_DIR"
 
 INCLUDE_PROD="${INCLUDE_PROD:-0}"
 
-echo "=== FAST LOCAL GATE (backend dart test) ==="
-(cd backend && dart test)
+echo "=== FAST LOCAL GATE (backend pub get + analyze + test) ==="
+(cd backend && dart pub get && dart analyze && dart test)
 
 echo "=== STAGING RELEASE GATE ==="
 HAILO_ALLOW_PROD_SMOKE=0 bash tool/release_gate.sh

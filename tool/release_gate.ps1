@@ -42,9 +42,17 @@ try {
     }
   }
 
-  Invoke-GateStep -Name 'Backend tests (dart test)' -Action {
+  Invoke-GateStep -Name 'Backend checks (pub get + analyze + test)' -Action {
     Push-Location (Join-Path $root 'backend')
     try {
+      dart pub get
+      if ($LASTEXITCODE -ne 0) {
+        throw "backend dart pub get failed with exit code $LASTEXITCODE"
+      }
+      dart analyze
+      if ($LASTEXITCODE -ne 0) {
+        throw "backend dart analyze failed with exit code $LASTEXITCODE"
+      }
       dart test
       if ($LASTEXITCODE -ne 0) {
         throw "backend dart test failed with exit code $LASTEXITCODE"

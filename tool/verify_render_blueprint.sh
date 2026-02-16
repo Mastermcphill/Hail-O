@@ -96,3 +96,4 @@ assert_service "hail-o-api" "web" "backend/Dockerfile" "."
 assert_service "hail-o-api-staging" "web" "backend/Dockerfile" "."
 
 echo "Render blueprint verification: PASS"
+echo "Recommended Render UI Root Directory: ."

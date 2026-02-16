@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required for JSON validation in load_smoke.sh"
+  exit 2
+fi
+
 ENV_NAME="${ENV:-staging}"
 if [[ -n "${HAILO_API_BASE_URL:-}" ]]; then
   BASE_URL="$HAILO_API_BASE_URL"
@@ -46,3 +51,46 @@ echo "LOAD_REQUESTS=$COUNT"
 echo "LOAD_CONCURRENCY=$CONCURRENCY"
 echo "STATUS_COUNTS:"
 sort "$STATUS_FILE" | uniq -c | sed 's/^ *//'
+
+echo
+echo "RATE_LIMIT_BURST_CHECK:"
+BURST_COUNT="${LOAD_BURST_REQUESTS:-25}"
+ENFORCE_BURST="${HAILO_ENFORCE_RATE_LIMIT_BURST:-0}"
+RATE_LIMIT_HITS=0
+for i in $(seq 1 "$BURST_COUNT"); do
+  BODY_FILE="$(mktemp)"
+  STATUS="$(curl -sS -o "$BODY_FILE" -w "%{http_code}" \
+    -X POST "$BASE_URL/auth/login" \
+    -H "Content-Type: application/json" \
+    -H "X-Forwarded-For: 203.0.113.10" \
+    --data '{"email":"burst.invalid@hailo.dev","password":"invalid"}')"
+  if [[ "$STATUS" == "429" ]]; then
+    python3 - "$BODY_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+raw = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+data = json.loads(raw)
+if data.get("code") != "rate_limited":
+    raise SystemExit("rate limit burst expected code=rate_limited")
+trace_id = (data.get("trace_id") or "").strip()
+if not trace_id or trace_id == "trace-unset":
+    raise SystemExit("rate limit burst expected non-empty trace_id")
+PY
+    RATE_LIMIT_HITS=$((RATE_LIMIT_HITS + 1))
+  fi
+  rm -f "$BODY_FILE"
+done
+
+echo "BURST_REQUESTS=$BURST_COUNT"
+echo "BURST_429_COUNT=$RATE_LIMIT_HITS"
+if [[ "$RATE_LIMIT_HITS" -lt 1 ]]; then
+  if [[ "$ENFORCE_BURST" == "1" ]]; then
+    echo "Expected at least one 429 from auth burst check but got none."
+    exit 1
+  fi
+  echo "RATE_LIMIT_BURST_CHECK=SKIPPED (no 429 observed; set HAILO_ENFORCE_RATE_LIMIT_BURST=1 to fail hard)"
+  exit 0
+fi
+echo "RATE_LIMIT_BURST_CHECK=PASS"

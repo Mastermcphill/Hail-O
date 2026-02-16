@@ -76,3 +76,28 @@ powershell -ExecutionPolicy Bypass -File tool/smoke_backend.ps1
 ```bash
 HAILO_API_BASE_URL=https://hail-o-api.onrender.com ENV=production HAILO_ALLOW_PROD_SMOKE=1 bash tool/smoke_backend.sh
 ```
+
+## 6) Run Load Smoke (staging-first)
+PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File tool/load_smoke.ps1
+```
+
+Bash:
+```bash
+bash tool/load_smoke.sh
+```
+
+Optional burst tuning:
+```powershell
+$env:LOAD_BURST_REQUESTS='40'
+$env:HAILO_ENFORCE_RATE_LIMIT_BURST='1'
+```
+```bash
+LOAD_BURST_REQUESTS=40 HAILO_ENFORCE_RATE_LIMIT_BURST=1 bash tool/load_smoke.sh
+```
+
+## 7) Capture Incident Snapshot (optional but recommended)
+```powershell
+powershell -ExecutionPolicy Bypass -File tool/incident_snapshot.ps1
+```

@@ -32,7 +32,7 @@ skip_step() {
 }
 
 run_step "Render blueprint verification" bash tool/verify_render_blueprint.sh
-run_step "Backend tests (dart test)" bash -lc 'cd backend && dart test'
+run_step "Backend checks (pub get + analyze + test)" bash -lc 'cd backend && dart pub get && dart analyze && dart test'
 run_step "Flutter tests (flutter test)" flutter test
 run_step "Staging smoke (bash)" bash -lc 'HAILO_API_BASE_URL=https://hail-o-api-staging.onrender.com ENV=staging bash tool/smoke_backend.sh'
 if [[ "${HAILO_ALLOW_PROD_SMOKE:-0}" == "1" ]]; then
