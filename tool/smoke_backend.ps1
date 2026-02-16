@@ -25,10 +25,52 @@ $adminEmail = $env:HAILO_ADMIN_EMAIL
 $adminPassword = $env:HAILO_ADMIN_PASSWORD
 $reversalLedgerId = $env:HAILO_REVERSAL_LEDGER_ID
 $nowUtc = [DateTime]::UtcNow.AddHours(2).ToString('o')
+$script:smokeArtifactDir = [string]$env:HAILO_SMOKE_ARTIFACT_DIR
+$script:smokeResponseSequence = 0
+if (-not [string]::IsNullOrWhiteSpace($script:smokeArtifactDir)) {
+  New-Item -ItemType Directory -Path $script:smokeArtifactDir -Force | Out-Null
+}
 
 function New-IdempotencyKey {
   param([Parameter(Mandatory = $true)][string]$Step)
   return "smoke-$runId-$Step"
+}
+
+function Save-SmokeResponseArtifact {
+  param(
+    [Parameter(Mandatory = $true)][string]$Method,
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][int]$Status,
+    [Parameter(Mandatory = $true)][string]$RawBody
+  )
+
+  if ([string]::IsNullOrWhiteSpace($script:smokeArtifactDir)) {
+    return
+  }
+
+  $script:smokeResponseSequence++
+  $pathSlug = 'root'
+  try {
+    $uri = [Uri]$Url
+    $pathSlug = ($uri.AbsolutePath.Trim('/') -replace '[^A-Za-z0-9]+', '_').Trim('_')
+  } catch {
+    $pathSlug = 'unknown_path'
+  }
+  if ([string]::IsNullOrWhiteSpace($pathSlug)) {
+    $pathSlug = 'root'
+  }
+
+  $methodSlug = ($Method.ToLowerInvariant() -replace '[^a-z0-9]+', '_').Trim('_')
+  if ([string]::IsNullOrWhiteSpace($methodSlug)) {
+    $methodSlug = 'request'
+  }
+
+  $fileName = '{0:D3}_{1}_{2}_{3}.json' -f $script:smokeResponseSequence, $methodSlug, $Status, $pathSlug
+  [System.IO.File]::WriteAllText(
+    (Join-Path $script:smokeArtifactDir $fileName),
+    $RawBody,
+    $utf8NoBom
+  )
 }
 
 function Invoke-CurlJsonRequest {
@@ -73,6 +115,7 @@ function Invoke-CurlJsonRequest {
     & curl.exe @curlArgs
     if ($LASTEXITCODE -ne 0) {
       $rawFailureBody = if (Test-Path $bodyPath) { Get-Content $bodyPath -Raw } else { '' }
+      Save-SmokeResponseArtifact -Method $Method -Url $Url -Status 0 -RawBody $rawFailureBody
       throw "curl failed with exit code $LASTEXITCODE for $Method $Url`n$rawFailureBody"
     }
 
@@ -80,12 +123,14 @@ function Invoke-CurlJsonRequest {
     $statusLine = $headerLines | Where-Object { $_ -match '^HTTP/\S+\s+\d{3}' } | Select-Object -Last 1
     if (-not $statusLine) {
       $rawBody = Get-Content $bodyPath -Raw
+      Save-SmokeResponseArtifact -Method $Method -Url $Url -Status 0 -RawBody $rawBody
       throw "Unable to parse HTTP status for $Method $Url`n$rawBody"
     }
 
     $status = [int]([regex]::Match($statusLine, '\s(\d{3})\s').Groups[1].Value)
+    $rawBody = Get-Content $bodyPath -Raw
     if ($AllowedStatus -notcontains $status) {
-      $rawBody = Get-Content $bodyPath -Raw
+      Save-SmokeResponseArtifact -Method $Method -Url $Url -Status $status -RawBody $rawBody
       throw "Unexpected HTTP status $status for $Method $Url. Expected one of: $($AllowedStatus -join ', ')`n$rawBody"
     }
 
@@ -97,7 +142,7 @@ function Invoke-CurlJsonRequest {
       }
     }
 
-    $rawBody = Get-Content $bodyPath -Raw
+    Save-SmokeResponseArtifact -Method $Method -Url $Url -Status $status -RawBody $rawBody
     try {
       $json = $rawBody | ConvertFrom-Json
     } catch {
@@ -211,6 +256,19 @@ function Invoke-WithRideRetry {
 
 Write-Output "BASE_URL=$baseUrl"
 Write-Output "RUN_ID=$runId"
+if (-not [string]::IsNullOrWhiteSpace($script:smokeArtifactDir)) {
+  $context = [ordered]@{
+    generated_at = (Get-Date).ToString('o')
+    base_url = $baseUrl
+    env = $envName
+    run_id = $runId
+  }
+  [System.IO.File]::WriteAllText(
+    (Join-Path $script:smokeArtifactDir 'smoke_context.json'),
+    ($context | ConvertTo-Json -Depth 4),
+    [System.Text.Encoding]::UTF8
+  )
+}
 
 Write-Output "`n=== HEALTH /api/healthz ==="
 $healthApi = Invoke-CurlJsonRequest -Method 'GET' -Url "$baseUrl/api/healthz" -AllowedStatus @(200)
