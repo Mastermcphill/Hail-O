@@ -40,7 +40,7 @@ if ($concurrency -le 0) { $concurrency = 10 }
 
 $jobs = @()
 for ($i = 1; $i -le $count; $i++) {
-  while ((Get-Job -State Running).Count -ge $concurrency) {
+  while (@(Get-Job -State Running).Count -ge $concurrency) {
     Start-Sleep -Milliseconds 50
   }
 
