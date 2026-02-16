@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-
 param(
   [string]$BaseUrl = 'https://hail-o-api-staging.onrender.com'
 )
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
 $headerPath = [System.IO.Path]::GetTempFileName()
 $bodyPath = [System.IO.Path]::GetTempFileName()
