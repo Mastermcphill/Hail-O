@@ -16,6 +16,8 @@ Middleware rateLimitMiddleware({
   Duration window = const Duration(minutes: 1),
   int maxRequestsPerIp = 60,
   int maxRequestsPerUser = 120,
+  int maxAuthRequestsPerIp = 20,
+  int maxAuthRequestsPerUser = 40,
   Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
   NowProvider? nowProvider,
 }) {
@@ -53,7 +55,9 @@ Middleware rateLimitMiddleware({
 
       final currentUtc = now();
       final ipKey = _extractClientIp(request);
-      if (!consume(ipBuckets, ipKey, currentUtc, maxRequestsPerIp)) {
+      final isAuthPath = path.startsWith('auth/');
+      final ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
+      if (!consume(ipBuckets, ipKey, currentUtc, ipLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,
@@ -66,8 +70,11 @@ Middleware rateLimitMiddleware({
       }
 
       final userId = request.requestContext.userId?.trim() ?? '';
+      final userLimit = isAuthPath
+          ? maxAuthRequestsPerUser
+          : maxRequestsPerUser;
       if (userId.isNotEmpty &&
-          !consume(userBuckets, userId, currentUtc, maxRequestsPerUser)) {
+          !consume(userBuckets, userId, currentUtc, userLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,

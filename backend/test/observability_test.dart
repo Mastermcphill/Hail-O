@@ -39,7 +39,7 @@ void main() {
     expect(response.statusCode, 400);
     final decoded =
         jsonDecode(await response.readAsString()) as Map<String, dynamic>;
-    expect(decoded['code'], 'invalid_format');
+    expect(decoded['code'], 'invalid_json');
     expect((decoded['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 

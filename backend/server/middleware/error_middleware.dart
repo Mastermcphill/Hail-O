@@ -2,6 +2,7 @@ import 'package:shelf/shelf.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/ride_booking_guard_service.dart';
+import '../../../lib/domain/services/ride_lifecycle_guard_service.dart';
 import '../http_utils.dart';
 
 Middleware errorMiddleware() {
@@ -26,6 +27,8 @@ Middleware errorMiddleware() {
           error.reason.code,
           error.toString(),
         );
+      } on RideLifecycleViolation catch (error) {
+        return _errorResponse(request, 409, error.code, error.toString());
       } on ArgumentError catch (error) {
         return _errorResponse(
           request,
@@ -34,7 +37,7 @@ Middleware errorMiddleware() {
           error.message?.toString(),
         );
       } on FormatException catch (error) {
-        return _errorResponse(request, 400, 'invalid_format', error.message);
+        return _errorResponse(request, 400, 'invalid_json', error.message);
       } catch (_) {
         return _errorResponse(request, 500, 'internal_error', null);
       }

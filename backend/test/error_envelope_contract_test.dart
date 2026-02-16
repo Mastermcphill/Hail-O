@@ -41,7 +41,7 @@ void main() {
       expect(response.statusCode, 400);
       final envelope = await _decodeEnvelope(response);
       expect(envelope['ok'], isFalse);
-      expect(envelope['code'], 'invalid_format');
+      expect(envelope['code'], 'invalid_json');
       expect((envelope['message'] as String?)?.isNotEmpty, isTrue);
       expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
     },
@@ -91,6 +91,22 @@ void main() {
     final envelope = await _decodeEnvelope(response);
     expect(envelope['ok'], isFalse);
     expect(envelope['code'], 'invalid_email');
+    expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
+  });
+
+  test('route not found response has stable envelope with trace_id', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(db);
+    final response = await handler(
+      shelf.Request('GET', Uri.parse('http://localhost/not-found-route')),
+    );
+
+    expect(response.statusCode, 404);
+    final envelope = await _decodeEnvelope(response);
+    expect(envelope['ok'], isFalse);
+    expect(envelope['code'], 'route_not_found');
     expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 }

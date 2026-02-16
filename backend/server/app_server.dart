@@ -11,6 +11,7 @@ import 'middleware/error_middleware.dart';
 import 'middleware/idempotency_middleware.dart';
 import 'middleware/observability_middleware.dart';
 import 'middleware/rate_limit_middleware.dart';
+import 'middleware/request_size_middleware.dart';
 import 'middleware/security_headers_middleware.dart';
 import 'middleware/trace_middleware.dart';
 import 'router.dart';
@@ -30,6 +31,9 @@ class AppServer {
     this.rateLimitWindow = const Duration(minutes: 1),
     this.maxRequestsPerIp = 60,
     this.maxRequestsPerUser = 120,
+    this.maxAuthRequestsPerIp = 20,
+    this.maxAuthRequestsPerUser = 40,
+    this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
@@ -49,6 +53,9 @@ class AppServer {
   final Duration rateLimitWindow;
   final int maxRequestsPerIp;
   final int maxRequestsPerUser;
+  final int maxAuthRequestsPerIp;
+  final int maxAuthRequestsPerUser;
+  final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
@@ -86,6 +93,7 @@ class AppServer {
         .addMiddleware(observabilityMiddleware(metrics: requestMetrics))
         .addMiddleware(errorMiddleware())
         .addMiddleware(corsPolicyMiddleware(allowedOrigins: allowedOrigins))
+        .addMiddleware(requestSizeMiddleware(maxBytes: maxRequestBodyBytes))
         .addMiddleware(idempotencyMiddleware())
         .addMiddleware(
           authMiddleware(tokenService, publicPaths: authPublicPaths),
@@ -98,6 +106,8 @@ class AppServer {
                         window: rateLimitWindow,
                         maxRequestsPerIp: maxRequestsPerIp,
                         maxRequestsPerUser: maxRequestsPerUser,
+                        maxAuthRequestsPerIp: maxAuthRequestsPerIp,
+                        maxAuthRequestsPerUser: maxAuthRequestsPerUser,
                       ),
                     )
                     .addHandler(router)

@@ -13,11 +13,23 @@ Middleware authMiddleware(
     'health',
     'api/healthz',
   },
+  Set<String> protectedPrefixes = const <String>{
+    'rides/',
+    'drivers/',
+    'settlement/',
+    'disputes',
+    'admin/',
+    'api/admin/',
+    'metrics',
+  },
 }) {
   return (Handler innerHandler) {
     return (Request request) {
       final path = request.url.path;
       if (publicPaths.contains(path)) {
+        return innerHandler(request);
+      }
+      if (!_isProtectedPath(path, protectedPrefixes)) {
         return innerHandler(request);
       }
 
@@ -65,4 +77,13 @@ Middleware authMiddleware(
       }
     };
   };
+}
+
+bool _isProtectedPath(String path, Set<String> protectedPrefixes) {
+  for (final prefix in protectedPrefixes) {
+    if (path == prefix || path.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
 }

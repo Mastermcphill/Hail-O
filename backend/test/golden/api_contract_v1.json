@@ -1,0 +1,37 @@
+{
+  "version": "v1",
+  "endpoints": {
+    "health": {
+      "required_keys": [
+        "ok",
+        "service",
+        "db_mode",
+        "db_ok",
+        "build"
+      ]
+    },
+    "auth_register": {
+      "required_keys": [
+        "ok",
+        "user_id",
+        "role"
+      ]
+    },
+    "auth_login": {
+      "required_keys": [
+        "ok",
+        "token",
+        "user_id",
+        "role"
+      ]
+    },
+    "error": {
+      "required_keys": [
+        "ok",
+        "code",
+        "message",
+        "trace_id"
+      ]
+    }
+  }
+}

@@ -11,6 +11,10 @@ Middleware securityHeadersMiddleware({
         'x-content-type-options': 'nosniff',
         'x-frame-options': 'SAMEORIGIN',
         'x-xss-protection': '1; mode=block',
+        'referrer-policy': 'no-referrer',
+        'x-permitted-cross-domain-policies': 'none',
+        'permissions-policy': 'geolocation=(), camera=(), microphone=()',
+        'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
       };
       if (enableStrictTransportSecurity) {
         headers['strict-transport-security'] =

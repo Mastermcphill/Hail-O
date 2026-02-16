@@ -78,7 +78,16 @@ Handler buildApiRouter({
     ..mount('/drivers/', driversController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
-    ..mount('/admin/', adminController.router.call);
+    ..mount('/admin/', adminController.router.call)
+    ..all(
+      '/<ignored|.*>',
+      (request, _) => jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      ),
+    );
 
   return router.call;
 }
