@@ -291,14 +291,15 @@ function Get-DatabaseMigrationHead {
     }
   }
 
-  $headLine = $probeOutput |
-    ForEach-Object { [string]$_ } |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    Select-Object -Last 1
+  $outputText = ($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+  $integerMatches = [regex]::Matches($outputText, '\b\d+\b')
+  if ($integerMatches.Count -lt 1) {
+    throw "Unable to parse migration head probe output as an integer.`n$outputText"
+  }
 
+  $headToken = $integerMatches[$integerMatches.Count - 1].Value
   $headValue = 0
-  if (-not [int]::TryParse([string]$headLine, [ref]$headValue)) {
-    $outputText = ($probeOutput -join [Environment]::NewLine)
+  if (-not [int]::TryParse($headToken, [ref]$headValue)) {
     throw "Unable to parse migration head probe output as an integer.`n$outputText"
   }
   return $headValue
