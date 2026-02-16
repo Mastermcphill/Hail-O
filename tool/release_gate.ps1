@@ -21,6 +21,8 @@ New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 
 $steps = @()
 $failed = $false
+$script:stagingDatabaseUrlForProbe = ''
+$script:stagingDatabaseUrlSslmode = ''
 
 function Convert-ToStepLogFileName {
   param([Parameter(Mandatory = $true)][string]$Name)
@@ -103,15 +105,162 @@ function Get-RepoMigrationHead {
   return $head
 }
 
+function Get-StagingDatabaseUrlFromEnvironment {
+  $preferred = [string]$env:HAILO_STAGING_DATABASE_URL
+  if (-not [string]::IsNullOrWhiteSpace($preferred)) {
+    return $preferred.Trim()
+  }
+  return ([string]$env:DATABASE_URL).Trim()
+}
+
+function Normalize-StagingDatabaseUrlForProbe {
+  param([Parameter(Mandatory = $true)][string]$DatabaseUrl)
+
+  $trimmed = $DatabaseUrl.Trim()
+  if ([string]::IsNullOrWhiteSpace($trimmed)) {
+    return [pscustomobject]@{
+      Url = ''
+      SslMode = 'missing'
+    }
+  }
+
+  try {
+    $builder = [System.UriBuilder]::new($trimmed)
+    $rawQuery = [string]$builder.Query
+    $query = $rawQuery.TrimStart('?')
+    $pairs = @()
+    if (-not [string]::IsNullOrWhiteSpace($query)) {
+      $pairs = @($query -split '&' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
+    $hasSslMode = $false
+    foreach ($pair in $pairs) {
+      $key = (($pair -split '=', 2)[0]).Trim()
+      if ([System.Uri]::UnescapeDataString($key).Equals('sslmode', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $hasSslMode = $true
+        break
+      }
+    }
+
+    if ($hasSslMode) {
+      return [pscustomobject]@{
+        Url = $trimmed
+        SslMode = 'present'
+      }
+    }
+
+    if ($pairs.Count -eq 0) {
+      $builder.Query = 'sslmode=require'
+    } else {
+      $pairs += 'sslmode=require'
+      $builder.Query = ($pairs -join '&')
+    }
+
+    return [pscustomobject]@{
+      Url = $builder.Uri.AbsoluteUri
+      SslMode = 'added'
+    }
+  } catch {
+    if ($trimmed -match '(?i)(^|[?&])sslmode=') {
+      return [pscustomobject]@{
+        Url = $trimmed
+        SslMode = 'present'
+      }
+    }
+
+    $separator = if ($trimmed.Contains('?')) {
+      if ($trimmed.EndsWith('?') -or $trimmed.EndsWith('&')) { '' } else { '&' }
+    } else {
+      '?'
+    }
+    return [pscustomobject]@{
+      Url = "$trimmed${separator}sslmode=require"
+      SslMode = 'added'
+    }
+  }
+}
+
+function Ensure-BackendPubGet {
+  param([Parameter(Mandatory = $true)][string]$RootPath)
+
+  $backendDir = Join-Path $RootPath 'backend'
+  if (-not (Test-Path $backendDir)) {
+    throw "Backend directory not found: $backendDir"
+  }
+
+  Push-Location $backendDir
+  try {
+    $out = & dart pub get 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $txt = ($out -join [Environment]::NewLine)
+      throw "backend dart pub get failed with exit code $LASTEXITCODE.`n$txt"
+    }
+  } finally {
+    Pop-Location
+  }
+}
+
+function Resolve-DartExePath {
+  try {
+    $cmd = Get-Command dart -ErrorAction Stop
+    $src = [string]$cmd.Source
+
+    # If this is dart.bat, prefer dart.exe sitting alongside it.
+    if ($src.ToLowerInvariant().EndsWith('.bat')) {
+      $dir = Split-Path -Parent $src
+      $exe = Join-Path $dir 'dart.exe'
+      if (Test-Path $exe) {
+        return $exe
+      }
+    }
+
+    return $src
+  } catch {
+    # Fall back to "dart" if command resolution fails.
+    return 'dart'
+  }
+}
+
+function Invoke-DartRunCaptured {
+  param(
+    [Parameter(Mandatory = $true)][string]$ScriptPath
+  )
+
+  $dartExe = Resolve-DartExePath
+  if ([string]::IsNullOrWhiteSpace($dartExe)) {
+    $dartExe = 'dart'
+  }
+
+  # Use cmd.exe to guarantee stderr+stdout capture reliably on Windows.
+  $quotedDart = '"' + $dartExe.Replace('"', '""') + '"'
+  $quotedScript = '"' + $ScriptPath.Replace('"', '""') + '"'
+  $cmdLine = "$quotedDart run $quotedScript 2>&1"
+
+  $output = & cmd.exe /c $cmdLine
+  $exitCode = $LASTEXITCODE
+
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = @($output)
+    DartExe = $dartExe
+    CmdLine = $cmdLine
+  }
+}
+
 function Get-DatabaseMigrationHead {
   param(
     [Parameter(Mandatory = $true)][string]$RootPath,
-    [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+    [string]$DatabaseUrl,
     [Parameter(Mandatory = $true)][string]$Schema
   )
 
   if ([string]::IsNullOrWhiteSpace($DatabaseUrl)) {
-    throw 'Missing staging database URL. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL.'
+    throw 'Missing staging DB URL in this session. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL before running the gate.'
+  }
+
+  $probePath = Join-Path $RootPath 'backend/tool/get_applied_migration_head.dart'
+  if (-not (Test-Path $probePath)) {
+    throw "Migration head probe file not found: $probePath"
   }
 
   $previousDatabaseUrl = [string]$env:DATABASE_URL
@@ -121,14 +270,13 @@ function Get-DatabaseMigrationHead {
   try {
     $env:DATABASE_URL = $DatabaseUrl.Trim()
     $env:DB_SCHEMA = $Schema
-    Push-Location (Join-Path $RootPath 'backend')
-    try {
-      $probeOutput = & dart run tool/get_applied_migration_head.dart 2>&1
-      if ($LASTEXITCODE -ne 0) {
-        throw "Migration head probe failed with exit code $LASTEXITCODE."
-      }
-    } finally {
-      Pop-Location
+
+    $result = Invoke-DartRunCaptured -ScriptPath $probePath
+    $probeOutput = $result.Output
+
+    if ($result.ExitCode -ne 0) {
+      $outText = ($probeOutput -join [Environment]::NewLine)
+      throw "Migration head probe failed with exit code $($result.ExitCode).`nDartExe=$($result.DartExe)`nCmd=$($result.CmdLine)`n$outText"
     }
   } finally {
     if ([string]::IsNullOrWhiteSpace($previousDatabaseUrl)) {
@@ -147,6 +295,7 @@ function Get-DatabaseMigrationHead {
     ForEach-Object { [string]$_ } |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
     Select-Object -Last 1
+
   $headValue = 0
   if (-not [int]::TryParse([string]$headLine, [ref]$headValue)) {
     $outputText = ($probeOutput -join [Environment]::NewLine)
@@ -330,16 +479,33 @@ try {
     Write-Output "staging_migration_head=$([string]$stagingHealth.build.migration_head)"
   }
 
+  Invoke-GateStep -Name 'Staging DB URL presence' -StopOnFail -Action {
+    $derivedUrl = Get-StagingDatabaseUrlFromEnvironment
+    if ([string]::IsNullOrWhiteSpace($derivedUrl)) {
+      throw 'Missing staging DB URL in this session. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL before running the gate.'
+    }
+
+    $normalized = Normalize-StagingDatabaseUrlForProbe -DatabaseUrl $derivedUrl
+    $script:stagingDatabaseUrlForProbe = [string]$normalized.Url
+    $script:stagingDatabaseUrlSslmode = [string]$normalized.SslMode
+
+    $prefixLength = [Math]::Min(10, $derivedUrl.Length)
+    $prefix = $derivedUrl.Substring(0, $prefixLength)
+    Write-Output 'staging_db_url_present=true'
+    Write-Output "staging_db_url_preview=${prefix}***"
+    Write-Output "staging_db_url_sslmode=$script:stagingDatabaseUrlSslmode"
+  }
+
   Invoke-GateStep -Name 'Migration head parity (repo vs staging db)' -StopOnFail -Action {
+    Ensure-BackendPubGet -RootPath $root
+
     $repoHead = Get-RepoMigrationHead -MigrationsDirectory (Join-Path $root 'backend/migrations')
-    $stagingDatabaseUrl = if (-not [string]::IsNullOrWhiteSpace($env:HAILO_STAGING_DATABASE_URL)) {
-      [string]$env:HAILO_STAGING_DATABASE_URL
-    } else {
-      [string]$env:DATABASE_URL
+    if ([string]::IsNullOrWhiteSpace($script:stagingDatabaseUrlForProbe)) {
+      throw 'Missing staging DB URL in this session. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL before running the gate.'
     }
     $dbHead = Get-DatabaseMigrationHead `
       -RootPath $root `
-      -DatabaseUrl $stagingDatabaseUrl `
+      -DatabaseUrl $script:stagingDatabaseUrlForProbe `
       -Schema $ExpectedStagingSchema
 
     $parityPayload = [ordered]@{
