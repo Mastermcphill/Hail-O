@@ -13,6 +13,7 @@ import '../models/ride_trip.dart';
 import '../models/user.dart';
 import 'accept_ride_service.dart';
 import 'cancel_ride_service.dart';
+import 'escrow_service.dart';
 import 'penalty_engine_service.dart';
 import 'ride_orchestrator_service.dart';
 import 'ride_settlement_service.dart';
@@ -320,6 +321,68 @@ class RideApiFlowService {
           'error': 'escrow_not_found',
         },
       };
+    }
+
+    if (hold.status != 'released') {
+      if (trigger != SettlementTrigger.manualOverride) {
+        return <String, Object?>{
+          'ok': false,
+          'ride_id': rideId,
+          'completed': completed,
+          'settlement': <String, Object?>{
+            'ok': false,
+            'error': 'escrow_not_released',
+          },
+        };
+      }
+
+      final ride = await RidesDao(db).findById(rideId);
+      if (ride == null) {
+        return <String, Object?>{
+          'ok': false,
+          'ride_id': rideId,
+          'completed': completed,
+          'settlement': <String, Object?>{
+            'ok': false,
+            'error': 'ride_not_found',
+          },
+        };
+      }
+      final riderId = (ride['rider_id'] as String?)?.trim() ?? '';
+      if (riderId.isEmpty) {
+        return <String, Object?>{
+          'ok': false,
+          'ride_id': rideId,
+          'completed': completed,
+          'settlement': <String, Object?>{
+            'ok': false,
+            'error': 'ride_missing_rider',
+          },
+        };
+      }
+
+      final release =
+          await EscrowService(
+            db,
+            nowUtc: _nowUtc,
+            rideSettlementService: _rideSettlementService,
+          ).releaseOnManualOverride(
+            escrowId: hold.id,
+            riderId: riderId,
+            idempotencyKey: '$idempotencyKey:manual_release',
+            settlementIdempotencyKey: 'settlement:${hold.id}',
+          );
+      if (release['ok'] != true) {
+        return <String, Object?>{
+          'ok': false,
+          'ride_id': rideId,
+          'completed': completed,
+          'settlement': <String, Object?>{
+            'ok': false,
+            'error': (release['reason'] as String?) ?? 'escrow_release_failed',
+          },
+        };
+      }
     }
 
     final settlement = await _rideSettlementService.settleOnEscrowRelease(

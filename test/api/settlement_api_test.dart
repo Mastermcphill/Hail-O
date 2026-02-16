@@ -66,15 +66,8 @@ void main() {
         idempotencyKey: 'ride-started-settle-1',
         payload: const <String, Object?>{},
       );
-
-      await EscrowHoldsDao(harness.db).markReleasedIfHeld(
-        escrowId: escrowId,
-        releaseMode: 'manual_override',
-        releasedAtIso: DateTime.now().toUtc().toIso8601String(),
-        idempotencyScope: 'test.release',
-        idempotencyKey: 'test.release:$escrowId',
-        viaOrchestrator: true,
-      );
+      final holdBefore = await EscrowHoldsDao(harness.db).findById(escrowId);
+      expect(holdBefore?.status, 'held');
 
       final complete = await harness.postJson(
         '/rides/$rideId/complete',
@@ -87,10 +80,29 @@ void main() {
       final settlement = completeBody['settlement'] as Map<String, Object?>;
       expect(settlement['ok'], true);
 
+      final completeReplay = await harness.postJson(
+        '/rides/$rideId/complete',
+        bearerToken: driver.token,
+        idempotencyKey: 'ride-complete-settle-1',
+        body: <String, Object?>{'escrow_id': escrowId},
+      );
+      expect(completeReplay.statusCode, 200);
+      final replayBody = completeReplay.requireJsonMap();
+      final replaySettlement = replayBody['settlement'] as Map<String, Object?>;
+      expect(replaySettlement['ok'], true);
+      expect(replaySettlement['replayed'], true);
+
       final payout = await PayoutRecordsDao(
         harness.db,
       ).findByEscrowId(escrowId);
       expect(payout, isNotNull);
+      final payoutCountRows = await harness.db.rawQuery(
+        'SELECT COUNT(1) AS c FROM payout_records WHERE escrow_id = ?',
+        <Object?>[escrowId],
+      );
+      final payoutCount = (payoutCountRows.first['c'] as int?) ?? 0;
+      expect(payoutCount, 1);
+
       final ledgerRows = await WalletLedgerDao(
         harness.db,
       ).listByWallet(driver.userId, WalletType.driverA);

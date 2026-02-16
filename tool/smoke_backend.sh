@@ -409,45 +409,37 @@ RIDE_START_OK="$(json_field "$RESPONSE_BODY_FILE" "ok")"
 echo "ride_start_status=$RESPONSE_STATUS start_ok=$RIDE_START_OK"
 cleanup_response_files
 
-request_json "POST" "$BASE_URL/settlement/release/manual" "{\"escrow_id\":\"$RIDE_HAPPY_ESCROW_ID\",\"rider_id\":\"$FIRST_REGISTER_USER_ID\"}" "$RIDER_TOKEN" "$(idem escrow-release-manual-happy)" "" "200"
-MANUAL_SETTLEMENT_OK="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.ok")"
-echo "manual_release_status=$RESPONSE_STATUS settlement_ok=$MANUAL_SETTLEMENT_OK"
+COMPLETE_KEY="$(idem ride-complete-happy)"
+
+request_json "POST" "$BASE_URL/rides/$RIDE_HAPPY_ID/complete" "{\"escrow_id\":\"$RIDE_HAPPY_ESCROW_ID\",\"settlement_trigger\":\"manual_override\"}" "$DRIVER_TOKEN" "$COMPLETE_KEY" "" "200"
+SETTLEMENT_OK="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.ok")"
+# NOTE:
+# Completion is a hard gate in lifecycle smoke. Do not downgrade this to
+# a skipped payout assertion: accepted+started rides must complete+settle.
+assert_true "$([[ "$SETTLEMENT_OK" == "true" ]] && echo 1 || echo 0)" "Ride completion settlement failed"
+echo "ride_complete_status=$RESPONSE_STATUS settlement_ok=$SETTLEMENT_OK"
 cleanup_response_files
 
-request_json "POST" "$BASE_URL/rides/$RIDE_HAPPY_ID/complete" "{\"escrow_id\":\"$RIDE_HAPPY_ESCROW_ID\",\"settlement_trigger\":\"manual_override\"}" "$DRIVER_TOKEN" "$(idem ride-complete-happy)" "" "200,500"
-SETTLEMENT_OK="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.ok")"
-if [[ "$RESPONSE_STATUS" == "200" ]]; then
-  if [[ "$SETTLEMENT_OK" != "true" && "$MANUAL_SETTLEMENT_OK" == "true" ]]; then
-    SETTLEMENT_OK="true"
-  fi
-  echo "ride_complete_status=$RESPONSE_STATUS settlement_ok=$SETTLEMENT_OK"
-else
-  COMPLETE_CODE="$(json_field "$RESPONSE_BODY_FILE" "code")"
-  if [[ "$MANUAL_SETTLEMENT_OK" == "true" ]]; then
-    SETTLEMENT_OK="true"
-  fi
-  echo "ride_complete_status=$RESPONSE_STATUS code=$COMPLETE_CODE settlement_ok=$SETTLEMENT_OK"
-  if [[ "$MANUAL_SETTLEMENT_OK" != "true" ]]; then
-    echo "Ride completion returned non-200 in this environment; settlement/payout assertions are skipped."
-  fi
+echo
+echo "=== COMPLETE REPLAY IS IDEMPOTENT ==="
+request_json "POST" "$BASE_URL/rides/$RIDE_HAPPY_ID/complete" "{\"escrow_id\":\"$RIDE_HAPPY_ESCROW_ID\",\"settlement_trigger\":\"manual_override\"}" "$DRIVER_TOKEN" "$COMPLETE_KEY" "" "200"
+REPLAY_SETTLEMENT_OK="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.ok")"
+REPLAY_FLAG="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.replayed")"
+if [[ "$REPLAY_FLAG" != "true" ]]; then
+  REPLAY_FLAG="$(json_field "$RESPONSE_BODY_FILE" "replayed")"
 fi
+assert_true "$([[ "$REPLAY_SETTLEMENT_OK" == "true" ]] && echo 1 || echo 0)" "Ride completion replay settlement failed"
+assert_true "$([[ "$REPLAY_FLAG" == "true" ]] && echo 1 || echo 0)" "Ride completion replay did not mark replayed=true"
+echo "ride_complete_replay_status=$RESPONSE_STATUS replayed=$REPLAY_FLAG"
+cleanup_response_files
 
-if [[ "$SETTLEMENT_OK" == "true" ]]; then
-  cleanup_response_files
-  echo
-  echo "=== COMPLETED RIDE SNAPSHOT HAS PAYOUT RECORD ==="
-  request_json "GET" "$BASE_URL/rides/$RIDE_HAPPY_ID" "" "$RIDER_TOKEN" "" "" "200"
-  PAYOUT_STATUS="$(json_path_value "$RESPONSE_BODY_FILE" "payout.status")"
-  assert_true "$([[ -n "$PAYOUT_STATUS" ]] && echo 1 || echo 0)" "Completed ride snapshot is missing payout record"
-  echo "ride_id=$RIDE_HAPPY_ID payout_status=$PAYOUT_STATUS"
-  cleanup_response_files
-else
-  echo
-  echo "=== PAYOUT ASSERTION SKIPPED ==="
-  SETTLEMENT_ERROR="$(json_path_value "$RESPONSE_BODY_FILE" "settlement.error")"
-  echo "Settlement not finalized in this environment (error=${SETTLEMENT_ERROR:-not_available})."
-  cleanup_response_files
-fi
+echo
+echo "=== COMPLETED RIDE SNAPSHOT HAS PAYOUT RECORD ==="
+request_json "GET" "$BASE_URL/rides/$RIDE_HAPPY_ID" "" "$RIDER_TOKEN" "" "" "200"
+PAYOUT_STATUS="$(json_path_value "$RESPONSE_BODY_FILE" "payout.status")"
+assert_true "$([[ -n "$PAYOUT_STATUS" ]] && echo 1 || echo 0)" "Completed ride snapshot is missing payout record"
+echo "ride_id=$RIDE_HAPPY_ID payout_status=$PAYOUT_STATUS"
+cleanup_response_files
 
 RIDE_ID="$RIDE_HAPPY_ID"
 

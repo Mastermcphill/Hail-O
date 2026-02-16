@@ -420,67 +420,53 @@ $startRide = Invoke-CurlJsonRequest `
 $startOk = [bool]($startRide.Json.ok -eq $true)
 Write-Output "ride_start_status=$($startRide.Status) start_ok=$startOk"
 
-$manualRelease = Invoke-CurlJsonRequest `
-  -Method 'POST' `
-  -Url "$baseUrl/settlement/release/manual" `
-  -Token $riderToken `
-  -IdempotencyKey (New-IdempotencyKey -Step 'escrow-release-manual-happy') `
-  -JsonBody (@{
-      escrow_id = $escrowId
-      rider_id = $riderUserId
-    } | ConvertTo-Json -Compress) `
-  -AllowedStatus @(200)
-$manualSettlementNode = $manualRelease.Json.settlement
-$manualSettlementOk = [bool]($null -ne $manualSettlementNode -and $manualSettlementNode.ok -eq $true)
-Write-Output "manual_release_status=$($manualRelease.Status) settlement_ok=$manualSettlementOk"
+$completeKey = New-IdempotencyKey -Step 'ride-complete-happy'
 
 $completeRide = Invoke-CurlJsonRequest `
   -Method 'POST' `
   -Url "$baseUrl/rides/$rideId/complete" `
   -Token $driverToken `
-  -IdempotencyKey (New-IdempotencyKey -Step 'ride-complete-happy') `
+  -IdempotencyKey $completeKey `
   -JsonBody (@{
       escrow_id = $escrowId
       settlement_trigger = 'manual_override'
     } | ConvertTo-Json -Compress) `
-  -AllowedStatus @(200, 409, 500)
+  -AllowedStatus @(200)
+$settlementNode = $completeRide.Json.settlement
+$settlementOk = [bool]($null -ne $settlementNode -and $settlementNode.ok -eq $true)
+# NOTE:
+# Completion is a hard gate in lifecycle smoke. Do not downgrade this to
+# a skipped payout assertion: accepted+started rides must complete+settle.
+Assert-True -Condition $settlementOk -Message "Ride completion settlement failed. body=$($completeRide.Body)"
+Write-Output "ride_complete_status=$($completeRide.Status) settlement_ok=$settlementOk"
 
-if ($completeRide.Status -eq 200) {
-  $settlementNode = $completeRide.Json.settlement
-  $settlementOk = [bool]($null -ne $settlementNode -and $settlementNode.ok -eq $true)
-  if (-not $settlementOk -and $manualSettlementOk) {
-    $settlementOk = $true
-    $settlementNode = $manualSettlementNode
-  }
-  Write-Output "ride_complete_status=$($completeRide.Status) settlement_ok=$settlementOk"
-} else {
-  $settlementNode = $null
-  $completeErrorCode = [string]$completeRide.Json.code
-  $settlementOk = $manualSettlementOk
-  if ($completeRide.Status -eq 409 -and $completeErrorCode -eq 'complete_not_allowed_from_status' -and $manualSettlementOk) {
-    $settlementOk = $true
-  }
-  Write-Output "ride_complete_status=$($completeRide.Status) code=$completeErrorCode settlement_ok=$settlementOk"
-  if (-not $manualSettlementOk) {
-    Write-Output 'Ride completion returned non-200 in this environment; settlement/payout assertions are skipped.'
-  }
-}
+Write-Output "`n=== COMPLETE REPLAY IS IDEMPOTENT ==="
+$completeReplay = Invoke-CurlJsonRequest `
+  -Method 'POST' `
+  -Url "$baseUrl/rides/$rideId/complete" `
+  -Token $driverToken `
+  -IdempotencyKey $completeKey `
+  -JsonBody (@{
+      escrow_id = $escrowId
+      settlement_trigger = 'manual_override'
+    } | ConvertTo-Json -Compress) `
+  -AllowedStatus @(200)
+$replaySettlement = $completeReplay.Json.settlement
+$replaySettlementOk = [bool]($null -ne $replaySettlement -and $replaySettlement.ok -eq $true)
+$replayed = [bool]($replaySettlement.replayed -eq $true -or $completeReplay.Json.replayed -eq $true)
+Assert-True -Condition $replaySettlementOk -Message "Complete replay settlement not ok. body=$($completeReplay.Body)"
+Assert-True -Condition $replayed -Message "Complete replay was not marked replayed. body=$($completeReplay.Body)"
+Write-Output "ride_complete_replay_status=$($completeReplay.Status) replayed=$replayed"
 
-if ($settlementOk) {
-  Write-Output "`n=== COMPLETED RIDE SNAPSHOT HAS PAYOUT RECORD ==="
-  $completeSnapshot = Invoke-CurlJsonRequest `
-    -Method 'GET' `
-    -Url "$baseUrl/rides/$rideId" `
-    -Token $riderToken `
-    -AllowedStatus @(200)
-  $payoutStatus = [string]$completeSnapshot.Json.payout.status
-  Assert-True -Condition ([string]::IsNullOrWhiteSpace($payoutStatus) -eq $false) -Message "Completed ride snapshot has no payout record. body=$($completeSnapshot.Body)"
-  Write-Output "ride_id=$rideId payout_status=$payoutStatus"
-} else {
-  $settlementError = if ($null -ne $settlementNode) { [string]$settlementNode.error } else { 'not_available' }
-  Write-Output "`n=== PAYOUT ASSERTION SKIPPED ==="
-  Write-Output "Settlement not finalized in this environment (error=$settlementError)."
-}
+Write-Output "`n=== COMPLETED RIDE SNAPSHOT HAS PAYOUT RECORD ==="
+$completeSnapshot = Invoke-CurlJsonRequest `
+  -Method 'GET' `
+  -Url "$baseUrl/rides/$rideId" `
+  -Token $riderToken `
+  -AllowedStatus @(200)
+$payoutStatus = [string]$completeSnapshot.Json.payout.status
+Assert-True -Condition ([string]::IsNullOrWhiteSpace($payoutStatus) -eq $false) -Message "Completed ride snapshot has no payout record. body=$($completeSnapshot.Body)"
+Write-Output "ride_id=$rideId payout_status=$payoutStatus"
 
 if ($adminEmail -and $adminPassword) {
   Write-Output "`n=== ADMIN LOGIN ==="
