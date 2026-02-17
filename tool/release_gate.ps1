@@ -504,6 +504,32 @@ try {
     if ([string]::IsNullOrWhiteSpace($script:stagingDatabaseUrlForProbe)) {
       throw 'Missing staging DB URL in this session. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL before running the gate.'
     }
+
+    $stagingDatabaseUrl = Get-StagingDatabaseUrlFromEnvironment
+    if ([string]::IsNullOrWhiteSpace($stagingDatabaseUrl)) {
+      throw 'Missing staging DB URL in this session. Set HAILO_STAGING_DATABASE_URL (preferred) or DATABASE_URL before running the gate.'
+    }
+
+    $databaseUri = $null
+    try {
+      $databaseUri = [System.Uri]::new($stagingDatabaseUrl)
+    } catch {
+      throw 'Unable to parse staging DB URL for migration parity diagnostics.'
+    }
+
+    $databasePathSegments = @(
+      $databaseUri.AbsolutePath.Trim('/') -split '/' |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    $databaseName = ''
+    if ($databasePathSegments.Count -gt 0) {
+      $databaseName = [string]$databasePathSegments[$databasePathSegments.Count - 1]
+    }
+
+    Write-Output "db_host=$($databaseUri.Host)"
+    Write-Output "db_name=$databaseName"
+    Write-Output "db_schema=$ExpectedStagingSchema"
+
     $dbHead = Get-DatabaseMigrationHead `
       -RootPath $root `
       -DatabaseUrl $script:stagingDatabaseUrlForProbe `
