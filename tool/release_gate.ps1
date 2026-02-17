@@ -587,9 +587,36 @@ try {
   }
 
   Invoke-GateStep -Name 'Flutter tests (flutter test)' -StopOnFail -Action {
-    flutter test
-    if ($LASTEXITCODE -ne 0) {
-      throw "flutter test failed with exit code $LASTEXITCODE"
+    Push-Location $root
+    try {
+      Write-Output "=== Flutter warmup ==="
+
+      # Ensure flutter exists
+      $flutterVersion = & flutter --version 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw "flutter --version failed with exit code $LASTEXITCODE"
+      }
+
+      # Pre-cache artifacts (prevents bootstrap during test)
+      & flutter precache --no-android --no-ios --no-linux --no-macos --no-windows 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw "flutter precache failed with exit code $LASTEXITCODE"
+      }
+
+      # Doctor once to finish initialization
+      & flutter doctor -v 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw "flutter doctor failed with exit code $LASTEXITCODE"
+      }
+
+      Write-Output "=== Flutter tests ==="
+      & flutter test
+      if ($LASTEXITCODE -ne 0) {
+        throw "flutter test failed with exit code $LASTEXITCODE"
+      }
+    }
+    finally {
+      Pop-Location
     }
   }
 
