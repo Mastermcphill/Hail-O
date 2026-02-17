@@ -1,18 +1,14 @@
-FROM dart:stable
+FROM mcr.microsoft.com/powershell:7.4-debian-bookworm-slim
 
 ENV DART_VM_OPTIONS="--old_gen_heap_size=256"
 ENV PUB_CACHE=/tmp/pub_cache
 ENV CI_FULL=0
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends wget ca-certificates gnupg apt-transport-https \
-  && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb \
-  && dpkg -i /tmp/packages-microsoft-prod.deb \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends powershell \
-  && ln -sf /usr/bin/pwsh /usr/local/bin/powershell \
-  && rm -f /tmp/packages-microsoft-prod.deb \
-  && rm -rf /var/lib/apt/lists/*
+# Keep Dart available for existing CI scripts without relying on external apt repos.
+COPY --from=dart:stable /usr/lib/dart /usr/lib/dart
+
+RUN if [ -x /usr/lib/dart/bin/dart ]; then ln -sf /usr/lib/dart/bin/dart /usr/local/bin/dart; fi \
+  && if [ -x /usr/bin/pwsh ]; then ln -sf /usr/bin/pwsh /usr/local/bin/powershell; fi
 
 WORKDIR /app
 COPY . /app
