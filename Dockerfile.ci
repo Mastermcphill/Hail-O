@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/powershell:7.4-debian-bookworm-slim
+FROM mcr.microsoft.com/powershell:7.4-debian-bookworm
 
 ENV DART_VM_OPTIONS="--old_gen_heap_size=256"
 ENV PUB_CACHE=/tmp/pub_cache
