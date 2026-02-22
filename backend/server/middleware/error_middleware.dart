@@ -1,0 +1,60 @@
+import 'package:shelf/shelf.dart';
+
+import '../../../lib/domain/errors/domain_errors.dart';
+import '../../../lib/domain/services/ride_booking_guard_service.dart';
+import '../../../lib/domain/services/ride_lifecycle_guard_service.dart';
+import '../http_utils.dart';
+
+Middleware errorMiddleware() {
+  return (Handler innerHandler) {
+    return (Request request) async {
+      try {
+        return await innerHandler(request);
+      } on UnauthorizedActionError catch (error) {
+        return _errorResponse(request, 403, error.code, error.message);
+      } on LifecycleViolationError catch (error) {
+        return _errorResponse(request, 409, error.code, error.message);
+      } on DomainInvariantError catch (error) {
+        return _errorResponse(request, 409, error.code, error.message);
+      } on InsufficientFundsError catch (error) {
+        return _errorResponse(request, 409, error.code, error.message);
+      } on DomainError catch (error) {
+        return _errorResponse(request, 400, error.code, error.message);
+      } on BookingBlockedException catch (error) {
+        return _errorResponse(
+          request,
+          409,
+          error.reason.code,
+          error.toString(),
+        );
+      } on RideLifecycleViolation catch (error) {
+        return _errorResponse(request, 409, error.code, error.toString());
+      } on ArgumentError catch (error) {
+        return _errorResponse(
+          request,
+          400,
+          'invalid_argument',
+          error.message?.toString(),
+        );
+      } on FormatException catch (error) {
+        return _errorResponse(request, 400, 'invalid_json', error.message);
+      } catch (_) {
+        return _errorResponse(request, 500, 'internal_error', null);
+      }
+    };
+  };
+}
+
+Response _errorResponse(
+  Request request,
+  int statusCode,
+  String code,
+  String? message,
+) {
+  return jsonErrorResponse(
+    request,
+    statusCode,
+    code: code,
+    message: message ?? code,
+  );
+}

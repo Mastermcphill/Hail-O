@@ -1,0 +1,54 @@
+name: Nightly Release Gate
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly-release-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Ensure PowerShell is available
+        shell: pwsh
+        run: |
+          pwsh --version
+
+      - name: Setup Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Print tool versions
+        shell: pwsh
+        run: |
+          flutter --version
+          dart --version
+          pwsh --version
+
+      - name: Run nightly release gate
+        shell: pwsh
+        env:
+          HAILO_STAGING_DATABASE_URL: ${{ secrets.HAILO_STAGING_DATABASE_URL }}
+          HAILO_ALLOW_DIRTY: "1"
+          HAILO_REQUIRE_RUNTIME_MARKER: "1"
+          HAILO_ALLOW_PROD_SMOKE: ""
+          HAILO_PROD_CONFIRM: ""
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:HAILO_STAGING_DATABASE_URL)) {
+            throw "Missing required GitHub secret: HAILO_STAGING_DATABASE_URL"
+          }
+
+          pwsh -ExecutionPolicy Bypass -File ./tool/release_gate.ps1
+
+      - name: Upload release gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-artifacts
+          path: test_artifacts/ops/**

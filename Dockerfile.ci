@@ -1,0 +1,18 @@
+FROM mcr.microsoft.com/powershell:7.4-debian-bookworm-slim
+
+ENV DART_VM_OPTIONS="--old_gen_heap_size=256"
+ENV PUB_CACHE=/tmp/pub_cache
+ENV CI_FULL=0
+
+# Keep Dart available for existing CI scripts without relying on external apt repos.
+COPY --from=dart:stable /usr/lib/dart /usr/lib/dart
+
+RUN if [ -x /usr/lib/dart/bin/dart ]; then ln -sf /usr/lib/dart/bin/dart /usr/local/bin/dart; fi \
+  && if [ -x /usr/bin/pwsh ]; then ln -sf /usr/bin/pwsh /usr/local/bin/powershell; fi
+
+WORKDIR /app
+COPY . /app
+
+RUN chmod +x /app/tool/ci.sh
+
+CMD ["pwsh","-ExecutionPolicy","Bypass","-File","/app/tool/ci_nightly_scheduler.ps1"]

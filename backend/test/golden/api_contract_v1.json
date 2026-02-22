@@ -1,0 +1,61 @@
+{
+  "version": "v1",
+  "endpoints": {
+    "health": {
+      "required_keys": [
+        "ok",
+        "service",
+        "db_mode",
+        "db_ok",
+        "build"
+      ],
+      "field_types": {
+        "ok": "bool",
+        "service": "string",
+        "db_mode": "string",
+        "db_ok": "bool",
+        "build": "object"
+      }
+    },
+    "auth_register": {
+      "required_keys": [
+        "ok",
+        "user_id",
+        "role"
+      ],
+      "field_types": {
+        "ok": "bool",
+        "user_id": "string",
+        "role": "string"
+      }
+    },
+    "auth_login": {
+      "required_keys": [
+        "ok",
+        "token",
+        "user_id",
+        "role"
+      ],
+      "field_types": {
+        "ok": "bool",
+        "token": "string",
+        "user_id": "string",
+        "role": "string"
+      }
+    },
+    "error": {
+      "required_keys": [
+        "ok",
+        "code",
+        "message",
+        "trace_id"
+      ],
+      "field_types": {
+        "ok": "bool",
+        "code": "string",
+        "message": "string",
+        "trace_id": "string"
+      }
+    }
+  }
+}
