@@ -246,6 +246,95 @@ class ApiClient {
     }
   }
 
+  Future<Map<String, dynamic>> delete(
+    String path, {
+    Map<String, dynamic>? body,
+    String? idempotencyKey,
+  }) async {
+    final normalizedPath = _normalizePath(path);
+    final requestBody = body ?? <String, dynamic>{};
+    if (_shouldUseMockByConfig(normalizedPath)) {
+      return _mockResponse(
+        method: 'DELETE',
+        path: normalizedPath,
+        body: requestBody,
+      );
+    }
+
+    final requestId = newRequestId();
+    final includeJsonContentType = requestBody.isNotEmpty;
+    final headers = await _buildHeaders(
+      requestId: requestId,
+      idempotencyKey: idempotencyKey,
+      includeJsonContentType: includeJsonContentType,
+    );
+    for (var attempt = 0; ; attempt++) {
+      try {
+        http.Response response;
+        if (requestBody.isEmpty) {
+          response = await _httpClient
+              .delete(_buildUri(normalizedPath), headers: headers)
+              .timeout(_requestTimeout);
+        } else {
+          final request = http.Request('DELETE', _buildUri(normalizedPath));
+          request.headers.addAll(headers);
+          request.body = jsonEncode(requestBody);
+          final streamed = await _httpClient
+              .send(request)
+              .timeout(_requestTimeout);
+          response = await http.Response.fromStream(streamed);
+        }
+        return _decodeResponse(response);
+      } on ApiException catch (error) {
+        if (_shouldFallbackToMock(error, normalizedPath)) {
+          return _mockResponse(
+            method: 'DELETE',
+            path: normalizedPath,
+            body: requestBody,
+          );
+        }
+        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        rethrow;
+      } on TimeoutException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'request_timeout',
+          message: 'Request timed out.',
+          rawBody: error.toString(),
+        );
+      } on SocketException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'network_error',
+          message: 'Network request failed.',
+          rawBody: error.toString(),
+        );
+      } on http.ClientException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'client_error',
+          message: 'HTTP client request failed.',
+          rawBody: error.toString(),
+        );
+      }
+    }
+  }
+
   void close() {
     _httpClient.close();
   }

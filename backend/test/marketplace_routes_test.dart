@@ -380,6 +380,131 @@ void main() {
         expect(secondData['action'], 'duplicate_ignored');
       },
     );
+
+    test('pricing preview + coupon endpoints return envelope data', () async {
+      final applyCoupon = await _send(
+        handler,
+        method: 'POST',
+        path: '/marketplace/apply-coupon',
+        userId: 'user-rider-1',
+        headers: const <String, String>{'idempotency-key': 'idem-coupon-1'},
+        body: const <String, Object?>{
+          'org_id': 'org-demo-1',
+          'coupon_code': 'LAUNCH50',
+          'offer_id': 'offer_sedan_01',
+          'seats': 2,
+        },
+      );
+      expect(applyCoupon.statusCode, 200);
+      final applyPayload = await _decodeJsonMap(applyCoupon);
+      expect(applyPayload['ok'], isTrue);
+      final applyData = Map<String, Object?>.from(applyPayload['data'] as Map);
+      final preview = Map<String, Object?>.from(
+        applyData['pricing_preview'] as Map,
+      );
+      expect((preview['coupon_discount_minor'] as int?) ?? 0, greaterThan(0));
+
+      final previewResponse = await _send(
+        handler,
+        method: 'GET',
+        path:
+            '/marketplace/pricing/preview?org_id=org-demo-1&offer_id=offer_sedan_01&seats=2',
+        userId: 'user-rider-1',
+      );
+      expect(previewResponse.statusCode, 200);
+      final previewPayload = await _decodeJsonMap(previewResponse);
+      expect(previewPayload['ok'], isTrue);
+      final previewData = Map<String, Object?>.from(
+        previewPayload['data'] as Map,
+      );
+      expect(previewData['base_minor'], greaterThan(0));
+      expect(previewData['final_due_minor'], greaterThanOrEqualTo(0));
+    });
+
+    test('org credits and invoices endpoints return envelope data', () async {
+      final create = await _send(
+        handler,
+        method: 'POST',
+        path: '/marketplace/purchases',
+        userId: 'user-rider-9',
+        headers: const <String, String>{'idempotency-key': 'idem-org-9'},
+        body: const <String, Object?>{
+          'offerId': 'offer_sedan_01',
+          'seatCount': 2,
+          'org_id': 'org-credits-9',
+        },
+      );
+      expect(create.statusCode, 200);
+
+      final credits = await _send(
+        handler,
+        method: 'GET',
+        path: '/orgs/org-credits-9/credits',
+        userId: 'user-rider-9',
+      );
+      expect(credits.statusCode, 200);
+      final creditsPayload = await _decodeJsonMap(credits);
+      expect(creditsPayload['ok'], isTrue);
+      final creditsData = Map<String, Object?>.from(
+        creditsPayload['data'] as Map,
+      );
+      expect(creditsData['org_id'], 'org-credits-9');
+
+      final invoices = await _send(
+        handler,
+        method: 'GET',
+        path: '/orgs/org-credits-9/billing/invoices',
+        userId: 'user-rider-9',
+      );
+      expect(invoices.statusCode, 200);
+      final invoicesPayload = await _decodeJsonMap(invoices);
+      expect(invoicesPayload['ok'], isTrue);
+      expect(invoicesPayload['data'], isA<List<dynamic>>());
+    });
+
+    test('risk lock blocks marketplace mutation routes but not reads', () async {
+      final adminToken = TokenService(
+        secret: 'backend-test-secret',
+      ).issueToken(userId: 'admin-1', role: 'admin');
+      final adjustRisk = await _send(
+        handler,
+        method: 'POST',
+        path: '/admin/risk/org/org-risk-locked/adjust',
+        userId: 'admin-1',
+        role: 'admin',
+        headers: <String, String>{
+          'idempotency-key': 'idem-risk-adjust',
+          'authorization': 'Bearer $adminToken',
+        },
+        body: const <String, Object?>{'delta': 90, 'reason': 'risk_test'},
+      );
+      expect(adjustRisk.statusCode, 200);
+
+      final blockedCreate = await _send(
+        handler,
+        method: 'POST',
+        path: '/marketplace/purchases',
+        userId: 'user-risk-1',
+        headers: const <String, String>{'idempotency-key': 'idem-risk-1'},
+        body: const <String, Object?>{
+          'offerId': 'offer_sedan_01',
+          'seatCount': 1,
+          'org_id': 'org-risk-locked',
+        },
+      );
+      expect(blockedCreate.statusCode, 403);
+      final blockedPayload = await _decodeJsonMap(blockedCreate);
+      expect(blockedPayload['error_code'], 'RISK_LOCKED');
+
+      final readsStillAllowed = await _send(
+        handler,
+        method: 'GET',
+        path:
+            '/marketplace/pricing/preview?org_id=org-risk-locked&offer_id=offer_sedan_01&seats=1',
+        userId: 'user-risk-1',
+      );
+      expect(readsStillAllowed.statusCode, 200);
+    });
   });
 
   group('DbProvider postgres branch', () {
@@ -441,6 +566,7 @@ Future<Response> _send(
   required String method,
   required String path,
   String? userId,
+  String role = 'rider',
   Map<String, String>? headers,
   Map<String, Object?>? body,
 }) async {
@@ -453,7 +579,7 @@ Future<Response> _send(
   if (userId != null && userId.trim().isNotEmpty) {
     request = RequestContext.withContext(
       request,
-      RequestContext(traceId: 'test-trace', userId: userId, role: 'rider'),
+      RequestContext(traceId: 'test-trace', userId: userId, role: role),
     );
   }
   return handler(request);

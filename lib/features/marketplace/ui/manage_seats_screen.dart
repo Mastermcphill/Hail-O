@@ -35,7 +35,10 @@ class _MarketplaceManageSeatsScreenState
     return Consumer<MarketplaceController>(
       builder: (context, controller, child) {
         final receipt = _currentReceipt(controller.activeReceipt);
-        final isBusy = controller.loadingReceipt || controller.updatingPurchase;
+        final isBusy =
+            controller.loadingReceipt ||
+            controller.updatingPurchase ||
+            controller.riskLocked;
 
         if (controller.loadingReceipt && receipt == null) {
           return const Center(child: CircularProgressIndicator());
@@ -71,6 +74,20 @@ class _MarketplaceManageSeatsScreenState
               'Manage Seats',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
+            if (controller.riskLocked) ...<Widget>[
+              const SizedBox(height: 8),
+              Card(
+                key: const Key('marketplace_manage_risk_locked_banner'),
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Text(
+                    controller.errorMessage ??
+                        'Seat management is currently locked by risk policy.',
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             SelectableText('purchase_id: ${receipt.purchaseId}'),
             const SizedBox(height: 12),

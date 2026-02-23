@@ -1,7 +1,9 @@
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/timeline_event.dart';
+import '../models/billing_invoice.dart';
 import 'marketplace_repository.dart';
 
 dynamic extractEnvelopeData(Map<String, dynamic> envelope) {
@@ -92,6 +94,34 @@ List<TimelineEvent> mapTimelinePayload(dynamic payload) {
 
 List<TimelineEvent> mapTimelineFromEnvelope(Map<String, dynamic> response) {
   return mapTimelinePayload(extractEnvelopeData(response));
+}
+
+PricingBreakdown mapPricingBreakdownPayload(dynamic payload) {
+  final map = _asMap(payload);
+  return PricingBreakdown.fromMap(map);
+}
+
+PricingBreakdown mapPricingBreakdownFromEnvelope(Map<String, dynamic> response) {
+  return mapPricingBreakdownPayload(extractEnvelopeData(response));
+}
+
+List<BillingInvoice> mapInvoiceListPayload(dynamic payload) {
+  final list = _extractList(payload, listKey: 'invoices');
+  return list
+      .map((item) => BillingInvoice.fromMap(item))
+      .toList(growable: false);
+}
+
+List<BillingInvoice> mapInvoiceListFromEnvelope(Map<String, dynamic> response) {
+  return mapInvoiceListPayload(extractEnvelopeData(response));
+}
+
+BillingInvoice? mapSingleInvoicePayload(dynamic payload) {
+  final map = _asMap(payload);
+  if (map.isEmpty) {
+    return null;
+  }
+  return BillingInvoice.fromMap(map);
 }
 
 Map<String, dynamic> _normalizeOfferMap(Map<String, dynamic> map) {

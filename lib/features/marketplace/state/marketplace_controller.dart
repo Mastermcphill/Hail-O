@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import '../../../core/util/ids.dart';
 import '../data/marketplace_local_store.dart';
 import '../data/marketplace_repository.dart';
+import '../models/billing_invoice.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
@@ -24,14 +26,24 @@ class MarketplaceController extends ChangeNotifier {
   List<Offer> _offers = <Offer>[];
   PaywallCopy? _paywallCopy;
   List<TimelineEvent> _timelineEvents = <TimelineEvent>[];
+  PricingBreakdown? _pricingBreakdown;
+  List<BillingInvoice> _invoices = <BillingInvoice>[];
   String? _errorMessage;
   bool _loadingOffers = false;
   bool _loadingPaywall = false;
   bool _loadingTimeline = false;
   bool _loadingReceipt = false;
+  bool _loadingPricing = false;
+  bool _loadingInvoices = false;
+  bool _pricingActionInFlight = false;
+  bool _retryingInvoice = false;
   bool _submittingCheckout = false;
   bool _updatingPurchase = false;
   bool _changingPlan = false;
+  bool _riskLocked = false;
+  final String _activeOrgId = 'org_demo';
+  String _couponDraft = '';
+  String _referralDraft = '';
   int _seatCount = 1;
   String? _pendingCheckoutOfferId;
   String? _pendingCheckoutIdempotencyKey;
@@ -43,14 +55,24 @@ class MarketplaceController extends ChangeNotifier {
   List<Offer> get offers => _offers;
   PaywallCopy? get paywallCopy => _paywallCopy;
   List<TimelineEvent> get timelineEvents => _timelineEvents;
+  PricingBreakdown? get pricingBreakdown => _pricingBreakdown;
+  List<BillingInvoice> get invoices => _invoices;
   String? get errorMessage => _errorMessage;
   bool get loadingOffers => _loadingOffers;
   bool get loadingPaywall => _loadingPaywall;
   bool get loadingTimeline => _loadingTimeline;
   bool get loadingReceipt => _loadingReceipt;
+  bool get loadingPricing => _loadingPricing;
+  bool get loadingInvoices => _loadingInvoices;
+  bool get pricingActionInFlight => _pricingActionInFlight;
+  bool get retryingInvoice => _retryingInvoice;
   bool get submittingCheckout => _submittingCheckout;
   bool get updatingPurchase => _updatingPurchase;
   bool get changingPlan => _changingPlan;
+  bool get riskLocked => _riskLocked;
+  String get activeOrgId => _activeOrgId;
+  String get couponDraft => _couponDraft;
+  String get referralDraft => _referralDraft;
   int get seatCount => _seatCount;
   List<SeatAssignment> get assignments => _assignments;
   String? get pendingCheckoutIdempotencyKey => _pendingCheckoutIdempotencyKey;
@@ -88,8 +110,10 @@ class MarketplaceController extends ChangeNotifier {
     notifyListeners();
     try {
       _paywallCopy = await _repository.fetchPaywallCopy(offerId);
+      await _hydratePricingAndInvoices(offerId);
     } catch (error) {
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       _paywallCopy = null;
     } finally {
       _loadingPaywall = false;
@@ -125,6 +149,169 @@ class MarketplaceController extends ChangeNotifier {
     _pendingCheckoutOfferId = offerId;
     _pendingCheckoutIdempotencyKey = pending;
     notifyListeners();
+  }
+
+  Future<void> loadPricingPreview(String offerId) async {
+    if (_loadingPricing) {
+      return;
+    }
+    _loadingPricing = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _pricingBreakdown = await _repository.fetchPricingPreview(
+        orgId: _activeOrgId,
+        offerId: offerId,
+        seats: _seatCount,
+      );
+      _riskLocked = false;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+    } finally {
+      _loadingPricing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadInvoices() async {
+    if (_loadingInvoices) {
+      return;
+    }
+    _loadingInvoices = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      _invoices = await _repository.fetchInvoices(_activeOrgId);
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+      _invoices = <BillingInvoice>[];
+    } finally {
+      _loadingInvoices = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> applyCoupon({
+    required String offerId,
+    required String couponCode,
+  }) async {
+    if (_pricingActionInFlight) {
+      return;
+    }
+    _pricingActionInFlight = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _pricingBreakdown = await _repository.applyCoupon(
+        orgId: _activeOrgId,
+        couponCode: couponCode,
+        offerId: offerId,
+        seats: _seatCount,
+      );
+      _couponDraft = couponCode.trim();
+      await _localStore.writeCouponCode(
+        orgId: _activeOrgId,
+        couponCode: _couponDraft,
+      );
+      _riskLocked = false;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+    } finally {
+      _pricingActionInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeCoupon({required String offerId}) async {
+    if (_pricingActionInFlight) {
+      return;
+    }
+    _pricingActionInFlight = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _pricingBreakdown = await _repository.removeCoupon(
+        orgId: _activeOrgId,
+        offerId: offerId,
+        seats: _seatCount,
+      );
+      _couponDraft = '';
+      await _localStore.clearCouponCode(_activeOrgId);
+      _riskLocked = false;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+    } finally {
+      _pricingActionInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> applyReferral({
+    required String offerId,
+    required String referralCode,
+  }) async {
+    if (_pricingActionInFlight) {
+      return;
+    }
+    _pricingActionInFlight = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _pricingBreakdown = await _repository.applyReferral(
+        orgId: _activeOrgId,
+        referralCode: referralCode,
+        offerId: offerId,
+        seats: _seatCount,
+      );
+      _referralDraft = referralCode.trim();
+      await _localStore.writeReferralCode(
+        orgId: _activeOrgId,
+        referralCode: _referralDraft,
+      );
+      _riskLocked = false;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+    } finally {
+      _pricingActionInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<BillingInvoice?> retryInvoice(String invoiceId) async {
+    if (_retryingInvoice) {
+      return null;
+    }
+    _retryingInvoice = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final updated = await _repository.retryInvoice(
+        orgId: _activeOrgId,
+        invoiceId: invoiceId,
+      );
+      if (updated != null) {
+        _upsertInvoice(updated);
+      }
+      _riskLocked = false;
+      return updated;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+      return null;
+    } finally {
+      _retryingInvoice = false;
+      notifyListeners();
+    }
   }
 
   void setSeatCount(int value) {
@@ -205,6 +392,7 @@ class MarketplaceController extends ChangeNotifier {
         }
       }
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       return null;
     } finally {
       _submittingCheckout = false;
@@ -240,6 +428,10 @@ class MarketplaceController extends ChangeNotifier {
       );
       await _tryHydrateReceipt(restored);
       return restored;
+    } catch (error) {
+      _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
+      return null;
     } finally {
       _submittingCheckout = false;
       notifyListeners();
@@ -278,6 +470,7 @@ class MarketplaceController extends ChangeNotifier {
       return receipt;
     } catch (error) {
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       return null;
     } finally {
       _loadingReceipt = false;
@@ -309,6 +502,7 @@ class MarketplaceController extends ChangeNotifier {
       return updated;
     } catch (error) {
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       return null;
     } finally {
       _updatingPurchase = false;
@@ -339,6 +533,7 @@ class MarketplaceController extends ChangeNotifier {
       return updated;
     } catch (error) {
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       return null;
     } finally {
       _updatingPurchase = false;
@@ -367,6 +562,7 @@ class MarketplaceController extends ChangeNotifier {
       return newPurchaseId;
     } catch (error) {
       _errorMessage = error.toString();
+      _updateRiskLockFromError(error);
       return null;
     } finally {
       _changingPlan = false;
@@ -376,6 +572,16 @@ class MarketplaceController extends ChangeNotifier {
 
   void clearError() {
     _errorMessage = null;
+    notifyListeners();
+  }
+
+  void updateCouponDraft(String value) {
+    _couponDraft = value.trim();
+    notifyListeners();
+  }
+
+  void updateReferralDraft(String value) {
+    _referralDraft = value.trim();
     notifyListeners();
   }
 
@@ -409,6 +615,32 @@ class MarketplaceController extends ChangeNotifier {
       }
     } catch (_) {
       // Keep local receipt snapshot if hydration fails.
+    }
+  }
+
+  Future<void> _hydratePricingAndInvoices(String offerId) async {
+    try {
+      _couponDraft = await _localStore.readCouponCode(_activeOrgId) ?? '';
+      _referralDraft = await _localStore.readReferralCode(_activeOrgId) ?? '';
+    } catch (_) {
+      _couponDraft = '';
+      _referralDraft = '';
+    }
+
+    try {
+      _pricingBreakdown = await _repository.fetchPricingPreview(
+        orgId: _activeOrgId,
+        offerId: offerId,
+        seats: _seatCount,
+      );
+    } catch (_) {
+      // Keep paywall available even when pricing preview fails.
+    }
+
+    try {
+      _invoices = await _repository.fetchInvoices(_activeOrgId);
+    } catch (_) {
+      _invoices = <BillingInvoice>[];
     }
   }
 
@@ -482,6 +714,18 @@ class MarketplaceController extends ChangeNotifier {
     _errorMessage = null;
   }
 
+  void _upsertInvoice(BillingInvoice invoice) {
+    final existingIndex = _invoices.indexWhere(
+      (item) => item.invoiceId == invoice.invoiceId,
+    );
+    if (existingIndex < 0) {
+      _invoices = <BillingInvoice>[invoice, ..._invoices];
+      return;
+    }
+    _invoices[existingIndex] = invoice;
+    _invoices = List<BillingInvoice>.from(_invoices);
+  }
+
   String _selectionSignature(SeatSelection selection) {
     final payload = <String, dynamic>{
       'offer_id': selection.offerId,
@@ -516,6 +760,11 @@ class MarketplaceController extends ChangeNotifier {
 
   bool _isValidAssignmentIndex(int index) {
     return index >= 0 && index < _assignments.length;
+  }
+
+  void _updateRiskLockFromError(Object error) {
+    final normalized = error.toString().toLowerCase();
+    _riskLocked = normalized.contains('risk_locked');
   }
 }
 

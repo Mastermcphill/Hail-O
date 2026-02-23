@@ -3,9 +3,11 @@ import 'package:hailo_core/features/marketplace/data/marketplace_dev_settings.da
 import 'package:hailo_core/features/marketplace/data/marketplace_repository.dart';
 import 'package:hailo_core/features/marketplace/models/offer.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
+import 'package:hailo_core/features/marketplace/models/pricing_breakdown.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
 import 'package:hailo_core/features/marketplace/models/seat_selection.dart';
 import 'package:hailo_core/features/marketplace/models/timeline_event.dart';
+import 'package:hailo_core/features/marketplace/models/billing_invoice.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -106,6 +108,86 @@ class _FakeRepository implements MarketplaceRepository {
   }
 
   @override
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: seats * 1000,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 100,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: (seats * 1000) - 100,
+      appliedCoupon: couponCode,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: seats * 1000,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 100,
+      creditsAppliedMinor: 0,
+      finalDueMinor: (seats * 1000) - 100,
+      appliedReferral: referralCode,
+    );
+  }
+
+  @override
   Future<String> createCheckout(
     SeatSelection selection, {
     required String idempotencyKey,
@@ -185,5 +267,42 @@ class _FakeRepository implements MarketplaceRepository {
         status: TimelineEventStatus.pending,
       ),
     ];
+  }
+
+  @override
+  Future<List<BillingInvoice>> fetchInvoices(String orgId) async {
+    return <BillingInvoice>[
+      BillingInvoice(
+        invoiceId: 'inv_1',
+        orgId: orgId,
+        purchaseId: 'purchase_1',
+        currency: 'NGN',
+        subtotalMinor: 1000,
+        discountMinor: 0,
+        creditAppliedMinor: 0,
+        totalDueMinor: 1000,
+        status: 'open',
+        createdAt: DateTime.now().toUtc(),
+      ),
+    ];
+  }
+
+  @override
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
+  }) async {
+    return BillingInvoice(
+      invoiceId: invoiceId,
+      orgId: orgId,
+      purchaseId: 'purchase_1',
+      currency: 'NGN',
+      subtotalMinor: 1000,
+      discountMinor: 0,
+      creditAppliedMinor: 0,
+      totalDueMinor: 1000,
+      status: 'paid',
+      createdAt: DateTime.now().toUtc(),
+    );
   }
 }

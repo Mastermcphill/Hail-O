@@ -1,7 +1,9 @@
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_errors.dart';
+import '../models/billing_invoice.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
@@ -39,6 +41,105 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       throw _mapError(
         error,
         fallbackMessage: 'Unable to load paywall information for this offer.',
+      );
+    }
+  }
+
+  @override
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    try {
+      final response = await _apiClient.get(
+        MarketplaceEndpoints.pricingPreview(
+          orgId: orgId,
+          offerId: offerId,
+          seats: seats,
+        ),
+      );
+      return mapPricingBreakdownPayload(extractEnvelopeData(response));
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to load pricing preview right now.',
+      );
+    }
+  }
+
+  @override
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.applyCoupon,
+        body: <String, dynamic>{
+          'org_id': orgId,
+          'coupon_code': couponCode,
+          'offer_id': offerId,
+          'seats': seats,
+        },
+      );
+      return mapPricingBreakdownPayload(extractEnvelopeData(response));
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to apply coupon at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    try {
+      final response = await _apiClient.delete(
+        MarketplaceEndpoints.removeCoupon,
+        body: <String, dynamic>{
+          'org_id': orgId,
+          'offer_id': offerId,
+          'seats': seats,
+        },
+      );
+      return mapPricingBreakdownPayload(extractEnvelopeData(response));
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to remove coupon at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.applyReferral,
+        body: <String, dynamic>{
+          'org_id': orgId,
+          'referral_code': referralCode,
+          'offer_id': offerId,
+          'seats': seats,
+        },
+      );
+      return mapPricingBreakdownPayload(extractEnvelopeData(response));
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to apply referral code at this time.',
       );
     }
   }
@@ -185,6 +286,48 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       throw _mapError(
         error,
         fallbackMessage: 'Unable to fetch timeline at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<List<BillingInvoice>> fetchInvoices(String orgId) async {
+    try {
+      final response = await _apiClient.get(
+        MarketplaceEndpoints.orgInvoices(orgId),
+      );
+      return mapInvoiceListPayload(extractEnvelopeData(response));
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to load billing invoices at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.orgRetryInvoice(orgId, invoiceId),
+        body: const <String, dynamic>{},
+      );
+      return mapSingleInvoicePayload(extractEnvelopeData(response));
+    } on ApiException catch (error) {
+      if (error.statusCode == 404) {
+        return null;
+      }
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to retry invoice payment right now.',
+      );
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to retry invoice payment right now.',
       );
     }
   }

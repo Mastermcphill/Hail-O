@@ -56,6 +56,42 @@ class MarketplaceLocalStore {
     );
   }
 
+  Future<String?> readCouponCode(String orgId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_couponCodeKey(orgId));
+  }
+
+  Future<void> writeCouponCode({
+    required String orgId,
+    required String couponCode,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_couponCodeKey(orgId), couponCode);
+  }
+
+  Future<void> clearCouponCode(String orgId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_couponCodeKey(orgId));
+  }
+
+  Future<String?> readReferralCode(String orgId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_referralCodeKey(orgId));
+  }
+
+  Future<void> writeReferralCode({
+    required String orgId,
+    required String referralCode,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_referralCodeKey(orgId), referralCode);
+  }
+
+  Future<void> clearReferralCode(String orgId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_referralCodeKey(orgId));
+  }
+
   String _signatureToIdempotencyKey(String signature) {
     return 'marketplace.checkout.signature.${_digest(signature)}';
   }
@@ -66,6 +102,14 @@ class MarketplaceLocalStore {
 
   String _idempotencyKeyToPurchase(String idempotencyKey) {
     return 'marketplace.checkout.purchase.${_digest(idempotencyKey)}';
+  }
+
+  String _couponCodeKey(String orgId) {
+    return 'marketplace.pricing.coupon.${_digest(orgId)}';
+  }
+
+  String _referralCodeKey(String orgId) {
+    return 'marketplace.pricing.referral.${_digest(orgId)}';
   }
 
   String _digest(String value) {

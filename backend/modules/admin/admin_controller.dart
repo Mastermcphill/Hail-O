@@ -9,6 +9,7 @@ import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import '../marketplace/marketplace_reconciliation_service.dart';
+import '../marketplace/marketplace_revenue_service.dart';
 import '../../server/http_utils.dart';
 
 class AdminController {
@@ -17,17 +18,20 @@ class AdminController {
     required Map<String, Object?> runtimeConfigSnapshot,
     required Map<String, Object?> buildInfo,
     MarketplaceReconciliationService? reconciliationService,
+    MarketplaceRevenueService? revenueService,
   }) : _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
          runtimeConfigSnapshot,
        ),
        _buildInfo = Map<String, Object?>.unmodifiable(buildInfo),
-       _reconciliationService = reconciliationService;
+       _reconciliationService = reconciliationService,
+       _revenueService = revenueService ?? MarketplaceRevenueService();
 
   final WalletReversalService _walletReversalService;
   final Map<String, Object?> _runtimeConfigSnapshot;
   final Map<String, Object?> _buildInfo;
   final MarketplaceReconciliationService? _reconciliationService;
+  final MarketplaceRevenueService _revenueService;
 
   Router get router {
     final router = Router();
@@ -42,6 +46,14 @@ class AdminController {
       '/marketplace/purchases/<purchaseId>/reconcile',
       _marketplacePurchaseReconcile,
     );
+    router.get('/marketplace/offers/explain', _marketplaceOffersExplain);
+    router.get('/billing/orgs/<orgId>/overview', _billingOverview);
+    router.post('/credits/grant', _grantCredits);
+    router.post('/risk/<subjectType>/<subjectId>/adjust', _adjustRisk);
+    router.post('/dunning/<caseId>/pause', _pauseDunning);
+    router.post('/dunning/<caseId>/resume', _resumeDunning);
+    router.post('/dunning/<caseId>/writeoff', _writeoffDunning);
+    router.get('/audit', _auditSummary);
     return router;
   }
 
@@ -175,6 +187,183 @@ class AdminController {
         'drift_reasons': result.driftReasons,
       },
       'trace_id': request.requestContext.traceId,
+    });
+  }
+
+  Future<Response> _marketplaceOffersExplain(Request request) async {
+    _requireAdmin(request);
+    final query = request.url.queryParameters;
+    final subjectType = (query['subject_type'] ?? 'org').trim();
+    final subjectId = (query['subject_id'] ?? '').trim();
+    final orgId = subjectType == 'org' ? subjectId : '';
+    final offerId = (query['offer_id'] ?? 'offer_sedan_01').trim();
+    final seats = int.tryParse((query['seats'] ?? '1').trim()) ?? 1;
+
+    final preview = await _revenueService.pricingPreview(
+      orgId: orgId.isEmpty ? 'admin-preview' : orgId,
+      userId: request.requestContext.userId ?? 'admin',
+      offerId: offerId,
+      seats: seats,
+    );
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{
+        'subject_type': subjectType,
+        'subject_id': subjectId,
+        'matched_rules': const <Map<String, Object?>>[],
+        'experiment_assignment': const <String, Object?>{
+          'experiment_id': 'none',
+          'variant_key': 'A',
+        },
+        'final_prices': preview.toMap(),
+      },
+    });
+  }
+
+  Future<Response> _billingOverview(Request request, String orgId) async {
+    _requireAdmin(request);
+    final data = await _revenueService.billingOverview(orgId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': data,
+    });
+  }
+
+  Future<Response> _grantCredits(Request request) async {
+    _requireAdmin(request);
+    final body = await readJsonBody(request);
+    final orgId =
+        (body['org_id'] as String?)?.trim() ??
+        (body['orgId'] as String?)?.trim() ??
+        '';
+    final amountMinor =
+        (body['amount_minor'] as num?)?.toInt() ??
+        (body['amountMinor'] as num?)?.toInt() ??
+        0;
+    final reason = (body['reason'] as String?)?.trim() ?? 'admin_grant';
+    if (orgId.isEmpty || amountMinor <= 0) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'org_id and amount_minor (>0) are required',
+      });
+    }
+    try {
+      await _revenueService.grantCredits(
+        orgId: orgId,
+        amountMinor: amountMinor,
+        reason: reason,
+      );
+    } on MarketplaceRevenueException catch (error) {
+      return jsonResponse(error.statusCode, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': error.code,
+        'message': error.message,
+      });
+    }
+    final balance = await _revenueService.creditsBalance(orgId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{
+        'granted': amountMinor,
+        'org_id': orgId,
+        'balance': balance,
+      },
+    });
+  }
+
+  Future<Response> _adjustRisk(
+    Request request,
+    String subjectType,
+    String subjectId,
+  ) async {
+    _requireAdmin(request);
+    final body = await readJsonBody(request);
+    final delta =
+        (body['delta'] as num?)?.toInt() ??
+        (body['score_delta'] as num?)?.toInt() ??
+        0;
+    final reason = (body['reason'] as String?)?.trim() ?? 'manual_adjust';
+    if (delta == 0) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'delta must be non-zero',
+      });
+    }
+    await _revenueService.adjustRisk(
+      subjectType: subjectType,
+      subjectId: subjectId,
+      delta: delta,
+      reason: reason,
+    );
+    final state = await _revenueService.riskState(
+      subjectType: subjectType,
+      subjectId: subjectId,
+    );
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': state,
+    });
+  }
+
+  Future<Response> _pauseDunning(Request request, String caseId) async {
+    _requireAdmin(request);
+    await _revenueService.pauseDunningCase(caseId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{'case_id': caseId, 'state': 'paused'},
+    });
+  }
+
+  Future<Response> _resumeDunning(Request request, String caseId) async {
+    _requireAdmin(request);
+    await _revenueService.resumeDunningCase(caseId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{'case_id': caseId, 'state': 'active'},
+    });
+  }
+
+  Future<Response> _writeoffDunning(Request request, String caseId) async {
+    _requireAdmin(request);
+    await _revenueService.writeoffDunningCase(caseId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{'case_id': caseId, 'state': 'written_off'},
+    });
+  }
+
+  Future<Response> _auditSummary(Request request) async {
+    _requireAdmin(request);
+    final orgId =
+        (request.url.queryParameters['org_id'] ??
+                request.url.queryParameters['orgId'] ??
+                '')
+            .trim();
+    if (orgId.isEmpty) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'org_id query parameter is required',
+      });
+    }
+    final data = await _revenueService.auditSummary(orgId);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': data,
     });
   }
 

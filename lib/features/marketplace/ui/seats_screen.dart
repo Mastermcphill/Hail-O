@@ -42,6 +42,20 @@ class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
                   'Seat Selection',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
+                if (controller.riskLocked) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Card(
+                    key: const Key('marketplace_seats_risk_locked_banner'),
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(
+                        controller.errorMessage ??
+                            'Seat updates are currently locked by risk policy.',
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 SelectableText('offer_id: ${widget.offerId}'),
                 const SizedBox(height: 12),
@@ -76,7 +90,8 @@ class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
                 )) ...<Widget>[
                   FilledButton.tonal(
                     key: const Key('marketplace_resume_purchase_button'),
-                    onPressed: controller.submittingCheckout
+                    onPressed:
+                        controller.submittingCheckout || controller.riskLocked
                         ? null
                         : () async {
                             final messenger = ScaffoldMessenger.of(context);
@@ -108,7 +123,8 @@ class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
                 ],
                 FilledButton(
                   key: const Key('marketplace_confirm_seats_button'),
-                  onPressed: controller.submittingCheckout
+                  onPressed:
+                      controller.submittingCheckout || controller.riskLocked
                       ? null
                       : () async {
                           final messenger = ScaffoldMessenger.of(context);

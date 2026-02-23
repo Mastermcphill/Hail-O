@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 import 'marketplace_entitlement_service.dart';
+import 'marketplace_revenue_service.dart';
 import '../payments/payment_service.dart';
 import 'marketplace_offer_repository.dart';
 
@@ -12,15 +13,18 @@ class MarketplaceHandlers {
     required MarketplaceOfferRepository offerRepository,
     PaymentService? paymentService,
     MarketplaceEntitlementService? entitlementService,
+    MarketplaceRevenueService? revenueService,
     Uuid? uuid,
   }) : _offerRepository = offerRepository,
        _paymentService = paymentService,
        _entitlementService = entitlementService,
+       _revenueService = revenueService ?? MarketplaceRevenueService(),
        _uuid = uuid ?? const Uuid();
 
   final MarketplaceOfferRepository _offerRepository;
   final PaymentService? _paymentService;
   final MarketplaceEntitlementService? _entitlementService;
+  final MarketplaceRevenueService _revenueService;
   final Uuid _uuid;
 
   Future<Response> listOffers(Request request) async {
@@ -94,6 +98,7 @@ class MarketplaceHandlers {
         '';
     final seatCount =
         _toInt(payload['seatCount']) ?? _toInt(payload['seat_count']);
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
     final idempotencyKey = (request.headers['idempotency-key'] ?? '').trim();
 
     if (idempotencyKey.isEmpty) {
@@ -115,6 +120,11 @@ class MarketplaceHandlers {
     }
 
     try {
+      await _revenueService.assertMutationAllowed(
+        userId: userId,
+        orgId: orgId,
+        action: 'create_purchase',
+      );
       var purchase = await _offerRepository.createOrGetPurchase(
         userId: userId,
         offerId: offerId,
@@ -140,13 +150,31 @@ class MarketplaceHandlers {
           reason: 'purchase_create',
         );
       }
+      final invoice = await _revenueService.createInvoice(
+        orgId: orgId,
+        userId: userId,
+        purchaseId: purchase.id,
+        offerId: offerId,
+        seats: seatCount,
+      );
       return _ok(
         request,
-        data: _purchasePayload(purchase),
+        data: <String, Object?>{
+          ..._purchasePayload(purchase),
+          'org_id': orgId,
+          'invoice': invoice,
+        },
         headers: <String, String>{
           'x-idempotency-key': idempotencyKey,
           'x-marketplace-purchase-id': purchase.id,
         },
+      );
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
       );
     } on MarketplaceRepositoryStateException catch (error) {
       if (error.code == 'offer_not_found') {
@@ -277,6 +305,7 @@ class MarketplaceHandlers {
     final payload = body.payload!;
     final seatCount =
         _toInt(payload['seat_count']) ?? _toInt(payload['seatCount']);
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
     if (seatCount == null || seatCount < 1 || seatCount > 50) {
       return _error(
         request,
@@ -287,6 +316,11 @@ class MarketplaceHandlers {
     }
 
     try {
+      await _revenueService.assertMutationAllowed(
+        userId: userId,
+        orgId: orgId,
+        action: 'update_seats',
+      );
       final purchase = await _offerRepository.updateSeatCount(
         userId: userId,
         purchaseId: purchaseId,
@@ -303,6 +337,13 @@ class MarketplaceHandlers {
         request,
         data: _purchasePayload(purchase),
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
       );
     } on MarketplaceRepositoryStateException catch (error) {
       if (error.code == 'purchase_not_found') {
@@ -343,6 +384,7 @@ class MarketplaceHandlers {
       );
     }
     final assignments = <MarketplaceSeatAssignmentInput>[];
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
     for (final item in rawAssignments) {
       if (item is! Map) {
         continue;
@@ -362,6 +404,11 @@ class MarketplaceHandlers {
     }
 
     try {
+      await _revenueService.assertMutationAllowed(
+        userId: userId,
+        orgId: orgId,
+        action: 'update_assignments',
+      );
       final purchase = await _offerRepository.replaceAssignments(
         userId: userId,
         purchaseId: purchaseId,
@@ -371,6 +418,13 @@ class MarketplaceHandlers {
         request,
         data: _purchasePayload(purchase),
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
       );
     } on MarketplaceRepositoryStateException catch (error) {
       if (error.code == 'purchase_not_found') {
@@ -400,6 +454,7 @@ class MarketplaceHandlers {
       );
     }
     final payload = body.payload!;
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
     final newOfferId =
         (payload['new_offer_id'] as String?)?.trim() ??
         (payload['newOfferId'] as String?)?.trim() ??
@@ -414,6 +469,11 @@ class MarketplaceHandlers {
     }
 
     try {
+      await _revenueService.assertMutationAllowed(
+        userId: userId,
+        orgId: orgId,
+        action: 'change_plan',
+      );
       final purchase = await _offerRepository.changePlan(
         userId: userId,
         purchaseId: purchaseId,
@@ -430,6 +490,13 @@ class MarketplaceHandlers {
         request,
         data: _purchasePayload(purchase),
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
       );
     } on MarketplaceRepositoryStateException catch (error) {
       if (error.code == 'purchase_not_found' ||
@@ -499,6 +566,339 @@ class MarketplaceHandlers {
       request,
       data: timeline,
       headers: <String, String>{'x-marketplace-purchase-id': purchaseId},
+    );
+  }
+
+  Future<Response> applyCoupon(Request request) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final payload = body.payload!;
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
+    final couponCode =
+        (payload['coupon_code'] as String?)?.trim() ??
+        (payload['couponCode'] as String?)?.trim() ??
+        '';
+    final offerId =
+        (payload['offer_id'] as String?)?.trim() ??
+        (payload['offerId'] as String?)?.trim() ??
+        'offer_sedan_01';
+    final seats =
+        _toInt(payload['seats']) ?? _toInt(payload['seat_count']) ?? 1;
+    try {
+      final result = await _revenueService.applyCoupon(
+        orgId: orgId,
+        userId: userId,
+        couponCode: couponCode,
+        offerId: offerId,
+        seats: seats,
+      );
+      return _ok(request, data: result);
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> removeCoupon(Request request) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final payload = body.payload!;
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
+    final offerId =
+        (payload['offer_id'] as String?)?.trim() ??
+        (payload['offerId'] as String?)?.trim() ??
+        'offer_sedan_01';
+    final seats =
+        _toInt(payload['seats']) ?? _toInt(payload['seat_count']) ?? 1;
+    try {
+      final result = await _revenueService.removeCoupon(
+        orgId: orgId,
+        userId: userId,
+        offerId: offerId,
+        seats: seats,
+      );
+      return _ok(request, data: result);
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> applyReferral(Request request) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final payload = body.payload!;
+    final orgId = _resolveOrgId(payload: payload, userId: userId);
+    final referralCode =
+        (payload['referral_code'] as String?)?.trim() ??
+        (payload['referralCode'] as String?)?.trim() ??
+        '';
+    final offerId =
+        (payload['offer_id'] as String?)?.trim() ??
+        (payload['offerId'] as String?)?.trim() ??
+        'offer_sedan_01';
+    final seats =
+        _toInt(payload['seats']) ?? _toInt(payload['seat_count']) ?? 1;
+    try {
+      final result = await _revenueService.applyReferral(
+        orgId: orgId,
+        userId: userId,
+        referralCode: referralCode,
+        offerId: offerId,
+        seats: seats,
+      );
+      return _ok(request, data: result);
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> pricingPreview(Request request) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final query = request.url.queryParameters;
+    final orgId =
+        (query['org_id'] ?? query['orgId'] ?? '').trim().isEmpty
+        ? userId
+        : (query['org_id'] ?? query['orgId'] ?? '').trim();
+    final offerId =
+        (query['offer_id'] ?? query['offerId'] ?? 'offer_sedan_01').trim();
+    final seats = _toInt(query['seats']) ?? 1;
+    try {
+      final preview = await _revenueService.pricingPreview(
+        orgId: orgId,
+        userId: userId,
+        offerId: offerId,
+        seats: seats,
+      );
+      return _ok(request, data: preview.toMap());
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> getOrgCredits(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final data = await _revenueService.creditsBalance(orgId);
+    return _ok(request, data: data);
+  }
+
+  Future<Response> getOrgCreditsLedger(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final data = await _revenueService.creditsLedger(orgId);
+    return _ok(request, data: data);
+  }
+
+  Future<Response> getOrgInvoices(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final data = await _revenueService.listInvoices(orgId);
+    return _ok(request, data: data);
+  }
+
+  Future<Response> getOrgInvoice(
+    Request request,
+    String orgId,
+    String invoiceId,
+  ) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final invoices = await _revenueService.listInvoices(orgId);
+    for (final invoice in invoices) {
+      if ((invoice['invoice_id'] ?? '').toString() == invoiceId) {
+        return _ok(request, data: invoice);
+      }
+    }
+    return _error(
+      request,
+      404,
+      errorCode: 'NOT_FOUND',
+      message: 'Invoice not found',
+    );
+  }
+
+  Future<Response> setOrgPaymentMethod(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final payload = body.payload!;
+    return _ok(
+      request,
+      data: <String, Object?>{
+        'org_id': orgId,
+        'updated': true,
+        'provider': (payload['provider'] ?? 'manual').toString(),
+        'status': 'stubbed',
+      },
+    );
+  }
+
+  Future<Response> retryOrgInvoice(
+    Request request,
+    String orgId,
+    String invoiceId,
+  ) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    try {
+      final result = await _revenueService.retryInvoice(
+        orgId: orgId,
+        invoiceId: invoiceId,
+      );
+      return _ok(request, data: result);
+    } on MarketplaceRevenueException catch (error) {
+      return _error(
+        request,
+        error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> listOrgUsage(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    return _ok(
+      request,
+      data: <String, Object?>{
+        'org_id': orgId,
+        'since': request.url.queryParameters['since'],
+        'events': const <Map<String, Object?>>[],
+      },
+    );
+  }
+
+  Future<Response> listOrgUsageRollups(Request request, String orgId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    return _ok(
+      request,
+      data: <String, Object?>{
+        'org_id': orgId,
+        'from': request.url.queryParameters['from'],
+        'to': request.url.queryParameters['to'],
+        'rollups': const <Map<String, Object?>>[],
+      },
     );
   }
 
@@ -587,6 +987,20 @@ class MarketplaceHandlers {
       return null;
     }
     return userId;
+  }
+
+  String _resolveOrgId({
+    required Map<String, Object?> payload,
+    required String userId,
+  }) {
+    final orgId =
+        (payload['org_id'] as String?)?.trim() ??
+        (payload['orgId'] as String?)?.trim() ??
+        '';
+    if (orgId.isEmpty) {
+      return userId;
+    }
+    return orgId;
   }
 
   Map<String, Object?> _purchasePayload(MarketplacePurchaseRecord purchase) {

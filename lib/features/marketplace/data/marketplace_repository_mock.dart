@@ -1,8 +1,10 @@
 import 'dart:math';
 
 import '../../../core/util/ids.dart';
+import '../models/billing_invoice.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
@@ -23,6 +25,73 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   final Map<String, String> _purchaseIdByIdempotencyKey = <String, String>{};
   final Set<String> _failedCreateKeys = <String>{};
   final Set<String> _firstRestoreAttempted = <String>{};
+  final Map<String, String> _couponByOrgId = <String, String>{};
+  final Map<String, String> _referralByOrgId = <String, String>{};
+  final Map<String, List<BillingInvoice>> _invoicesByOrgId =
+      <String, List<BillingInvoice>>{};
+
+  static const String _defaultOrgId = 'org_demo';
+
+  @override
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    return _buildPricingBreakdown(orgId: orgId, offerId: offerId, seats: seats);
+  }
+
+  @override
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    final normalized = couponCode.trim().toUpperCase();
+    if (normalized.isEmpty ||
+        !_couponDiscountMinorByCode.containsKey(normalized)) {
+      throw const MarketplaceRepositoryException(
+        'Coupon code is invalid.',
+        code: 'INVALID_COUPON',
+      );
+    }
+    _couponByOrgId[orgId] = normalized;
+    return _buildPricingBreakdown(orgId: orgId, offerId: offerId, seats: seats);
+  }
+
+  @override
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    _couponByOrgId.remove(orgId);
+    return _buildPricingBreakdown(orgId: orgId, offerId: offerId, seats: seats);
+  }
+
+  @override
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    final normalized = referralCode.trim().toUpperCase();
+    if (normalized.isEmpty ||
+        !_referralDiscountMinorByCode.containsKey(normalized)) {
+      throw const MarketplaceRepositoryException(
+        'Referral code is invalid.',
+        code: 'INVALID_REFERRAL',
+      );
+    }
+    _referralByOrgId[orgId] = normalized;
+    return _buildPricingBreakdown(orgId: orgId, offerId: offerId, seats: seats);
+  }
 
   @override
   Future<List<Offer>> fetchOffers() async {
@@ -79,6 +148,15 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
       offerId: offer.id,
       seatCount: seatCount,
       priceMinor: totalPrice,
+    );
+    _appendInvoice(
+      orgId: _defaultOrgId,
+      invoice: _newInvoice(
+        orgId: _defaultOrgId,
+        purchaseId: purchaseId,
+        totalDueMinor: totalPrice,
+        status: 'open',
+      ),
     );
     if (failFirstCreateCheckout &&
         !_failedCreateKeys.contains(idempotencyKey)) {
@@ -238,6 +316,15 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
         status: TimelineEventStatus.success,
       ),
     ];
+    _appendInvoice(
+      orgId: _defaultOrgId,
+      invoice: _newInvoice(
+        orgId: _defaultOrgId,
+        purchaseId: newPurchaseId,
+        totalDueMinor: updated.totalPriceMinor,
+        status: 'open',
+      ),
+    );
     return newPurchaseId;
   }
 
@@ -261,10 +348,113 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
     ];
   }
 
+  @override
+  Future<List<BillingInvoice>> fetchInvoices(String orgId) async {
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    return List<BillingInvoice>.from(
+      _invoicesByOrgId[orgId] ?? const <BillingInvoice>[],
+    );
+  }
+
+  @override
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    final invoices = _invoicesByOrgId[orgId];
+    if (invoices == null || invoices.isEmpty) {
+      return null;
+    }
+    for (var index = 0; index < invoices.length; index++) {
+      final invoice = invoices[index];
+      if (invoice.invoiceId != invoiceId) {
+        continue;
+      }
+      final updated = BillingInvoice(
+        invoiceId: invoice.invoiceId,
+        orgId: invoice.orgId,
+        purchaseId: invoice.purchaseId,
+        currency: invoice.currency,
+        subtotalMinor: invoice.subtotalMinor,
+        discountMinor: invoice.discountMinor,
+        creditAppliedMinor: invoice.creditAppliedMinor,
+        totalDueMinor: invoice.totalDueMinor,
+        status: 'paid',
+        createdAt: invoice.createdAt,
+      );
+      invoices[index] = updated;
+      return updated;
+    }
+    return null;
+  }
+
   Offer _findOffer(String offerId) {
     return _offers.firstWhere(
       (item) => item.id == offerId,
       orElse: () => _offers.first,
+    );
+  }
+
+  PricingBreakdown _buildPricingBreakdown({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) {
+    final safeSeats = min(max(seats, 1), 50);
+    final offer = _findOffer(offerId);
+    final baseMinor = offer.priceMinor * safeSeats;
+    final appliedCoupon = _couponByOrgId[orgId];
+    final appliedReferral = _referralByOrgId[orgId];
+    final couponDiscountMinor = (appliedCoupon != null)
+        ? (_couponDiscountMinorByCode[appliedCoupon] ?? 0)
+        : 0;
+    final referralDiscountMinor = (appliedReferral != null)
+        ? (_referralDiscountMinorByCode[appliedReferral] ?? 0)
+        : 0;
+    final discountTotal = couponDiscountMinor + referralDiscountMinor;
+    final finalDueMinor = max(baseMinor - discountTotal, 0);
+
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offer.id,
+      seats: safeSeats,
+      currency: 'NGN',
+      baseMinor: baseMinor,
+      couponDiscountMinor: min(couponDiscountMinor, baseMinor),
+      referralDiscountMinor: min(referralDiscountMinor, baseMinor),
+      creditsAppliedMinor: 0,
+      finalDueMinor: finalDueMinor,
+      appliedCoupon: appliedCoupon,
+      appliedReferral: appliedReferral,
+    );
+  }
+
+  void _appendInvoice({
+    required String orgId,
+    required BillingInvoice invoice,
+  }) {
+    _invoicesByOrgId.putIfAbsent(orgId, () => <BillingInvoice>[]);
+    _invoicesByOrgId[orgId]!.insert(0, invoice);
+  }
+
+  BillingInvoice _newInvoice({
+    required String orgId,
+    required String purchaseId,
+    required int totalDueMinor,
+    required String status,
+  }) {
+    return BillingInvoice(
+      invoiceId: 'inv_${newRequestId().replaceAll('-', '')}',
+      orgId: orgId,
+      purchaseId: purchaseId,
+      currency: 'NGN',
+      subtotalMinor: totalDueMinor,
+      discountMinor: 0,
+      creditAppliedMinor: 0,
+      totalDueMinor: totalDueMinor,
+      status: status,
+      createdAt: DateTime.now().toUtc(),
     );
   }
 
@@ -420,4 +610,14 @@ final Map<String, PaywallCopy> _paywallByOfferId = <String, PaywallCopy>{
       ctaLabel: 'Continue to Seats',
       connectionFeeMinor: (offer.priceMinor * 0.1).round(),
     ),
+};
+
+const Map<String, int> _couponDiscountMinorByCode = <String, int>{
+  'SAVE500': 500,
+  'LAUNCH50': 1500,
+};
+
+const Map<String, int> _referralDiscountMinorByCode = <String, int>{
+  'REF250': 250,
+  'REF500': 500,
 };

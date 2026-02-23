@@ -12,9 +12,23 @@ class RequestMetrics {
       <String, _LatencyStats>{}; // key: route
   final Map<String, _LatencyStats> _marketplaceDbLatencyByOp =
       <String, _LatencyStats>{}; // key: op
+  final Map<String, int> _marketplaceReconciliationsTotal =
+      <String, int>{}; // key: dry_run|drift|applied
   int _marketplaceRateLimitedCount = 0;
   int _marketplaceWebhookVerificationFailures = 0;
   int _marketplacePaymentFailures = 0;
+  int _marketplaceReconciliationDriftDetected = 0;
+  int _marketplaceReconciliationApplied = 0;
+  int _invoicesCreatedTotal = 0;
+  int _invoicesPaidTotal = 0;
+  int _invoicesFailedTotal = 0;
+  final Map<String, int> _dunningAttemptsTotal = <String, int>{};
+  int _dunningRecoveredTotal = 0;
+  final Map<String, int> _riskStateTotal = <String, int>{};
+  final Map<String, int> _couponApplyTotal = <String, int>{};
+  final Map<String, int> _referralApplyTotal = <String, int>{};
+  int _creditsAppliedTotal = 0;
+  final Map<String, int> _commsSentTotal = <String, int>{};
 
   void record({required int statusCode, String? errorCode}) {
     _recordBase(statusCode: statusCode, errorCode: errorCode);
@@ -84,6 +98,67 @@ class RequestMetrics {
     _marketplacePaymentFailures += 1;
   }
 
+  void recordMarketplaceReconciliation({
+    required bool driftDetected,
+    required bool applied,
+    required bool dryRun,
+  }) {
+    final key =
+        '${dryRun ? 'dry_run' : 'execute'}|${driftDetected ? 'drift' : 'clean'}|${applied ? 'applied' : 'not_applied'}';
+    _marketplaceReconciliationsTotal[key] =
+        (_marketplaceReconciliationsTotal[key] ?? 0) + 1;
+    if (driftDetected) {
+      _marketplaceReconciliationDriftDetected += 1;
+    }
+    if (applied) {
+      _marketplaceReconciliationApplied += 1;
+    }
+  }
+
+  void recordInvoiceCreated({required String status}) {
+    _invoicesCreatedTotal += 1;
+    final normalized = status.trim().toLowerCase();
+    if (normalized == 'paid') {
+      _invoicesPaidTotal += 1;
+    } else if (normalized == 'failed' || normalized == 'open') {
+      _invoicesFailedTotal += 1;
+    }
+  }
+
+  void recordDunningAttempt({required String outcome}) {
+    final key = outcome.trim().toLowerCase();
+    _dunningAttemptsTotal[key] = (_dunningAttemptsTotal[key] ?? 0) + 1;
+    if (key == 'success') {
+      _dunningRecoveredTotal += 1;
+    }
+  }
+
+  void recordRiskState({required String state}) {
+    final key = state.trim().toLowerCase();
+    _riskStateTotal[key] = (_riskStateTotal[key] ?? 0) + 1;
+  }
+
+  void recordCouponApply({required String result}) {
+    final key = result.trim().toLowerCase();
+    _couponApplyTotal[key] = (_couponApplyTotal[key] ?? 0) + 1;
+  }
+
+  void recordReferralApply({required String result}) {
+    final key = result.trim().toLowerCase();
+    _referralApplyTotal[key] = (_referralApplyTotal[key] ?? 0) + 1;
+  }
+
+  void recordCreditsApplied({required int amountMinor}) {
+    if (amountMinor > 0) {
+      _creditsAppliedTotal += amountMinor;
+    }
+  }
+
+  void recordCommsSent({required String channel, required String template}) {
+    final key = '${channel.trim().toLowerCase()}|${template.trim().toLowerCase()}';
+    _commsSentTotal[key] = (_commsSentTotal[key] ?? 0) + 1;
+  }
+
   Map<String, Object?> snapshot() {
     final errorsTotal = _errorsByCode.values.fold<int>(
       0,
@@ -103,6 +178,9 @@ class RequestMetrics {
       'marketplace_webhook_events_total': Map<String, int>.from(
         _marketplaceWebhookEventsTotal,
       ),
+      'marketplace_reconciliations_total': Map<String, int>.from(
+        _marketplaceReconciliationsTotal,
+      ),
       'marketplace_handler_latency_ms': _marketplaceHandlerLatencyByRoute.map(
         (key, value) => MapEntry(key, value.toMap()),
       ),
@@ -114,7 +192,20 @@ class RequestMetrics {
         'webhook_verification_failures':
             _marketplaceWebhookVerificationFailures,
         'payment_failures': _marketplacePaymentFailures,
+        'reconciliation_drift_detected':
+            _marketplaceReconciliationDriftDetected,
+        'reconciliation_applied': _marketplaceReconciliationApplied,
       },
+      'invoices_created_total': _invoicesCreatedTotal,
+      'invoices_paid_total': _invoicesPaidTotal,
+      'invoices_failed_total': _invoicesFailedTotal,
+      'dunning_attempts_total': Map<String, int>.from(_dunningAttemptsTotal),
+      'dunning_recovered_total': _dunningRecoveredTotal,
+      'risk_state_total': Map<String, int>.from(_riskStateTotal),
+      'coupon_apply_total': Map<String, int>.from(_couponApplyTotal),
+      'referral_apply_total': Map<String, int>.from(_referralApplyTotal),
+      'credits_applied_total': _creditsAppliedTotal,
+      'comms_sent_total': Map<String, int>.from(_commsSentTotal),
     };
   }
 

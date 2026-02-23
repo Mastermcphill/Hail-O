@@ -2,9 +2,11 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_config.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
+import '../models/billing_invoice.dart';
 import 'marketplace_dev_settings.dart';
 import 'marketplace_repository_http.dart';
 import 'marketplace_repository_mock.dart';
@@ -13,6 +15,32 @@ abstract class MarketplaceRepository {
   Future<List<Offer>> fetchOffers();
 
   Future<PaywallCopy> fetchPaywallCopy(String offerId);
+
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  });
+
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  });
+
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  });
+
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  });
 
   Future<String> createCheckout(
     SeatSelection selection, {
@@ -39,6 +67,13 @@ abstract class MarketplaceRepository {
   });
 
   Future<List<TimelineEvent>> fetchTimeline(String purchaseId);
+
+  Future<List<BillingInvoice>> fetchInvoices(String orgId);
+
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
+  });
 }
 
 class MarketplaceRepositoryException implements Exception {
@@ -85,6 +120,92 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
     return _execute(
       httpCall: () => _httpRepository.fetchPaywallCopy(offerId),
       mockCall: () => _mockRepository.fetchPaywallCopy(offerId),
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.fetchPricingPreview(
+        orgId: orgId,
+        offerId: offerId,
+        seats: seats,
+      ),
+      mockCall: () => _mockRepository.fetchPricingPreview(
+        orgId: orgId,
+        offerId: offerId,
+        seats: seats,
+      ),
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.applyCoupon(
+        orgId: orgId,
+        couponCode: couponCode,
+        offerId: offerId,
+        seats: seats,
+      ),
+      mockCall: () => _mockRepository.applyCoupon(
+        orgId: orgId,
+        couponCode: couponCode,
+        offerId: offerId,
+        seats: seats,
+      ),
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.removeCoupon(
+        orgId: orgId,
+        offerId: offerId,
+        seats: seats,
+      ),
+      mockCall: () => _mockRepository.removeCoupon(
+        orgId: orgId,
+        offerId: offerId,
+        seats: seats,
+      ),
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.applyReferral(
+        orgId: orgId,
+        referralCode: referralCode,
+        offerId: offerId,
+        seats: seats,
+      ),
+      mockCall: () => _mockRepository.applyReferral(
+        orgId: orgId,
+        referralCode: referralCode,
+        offerId: offerId,
+        seats: seats,
+      ),
     );
   }
 
@@ -179,6 +300,27 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
     return _execute(
       httpCall: () => _httpRepository.fetchTimeline(purchaseId),
       mockCall: () => _mockRepository.fetchTimeline(purchaseId),
+    );
+  }
+
+  @override
+  Future<List<BillingInvoice>> fetchInvoices(String orgId) {
+    return _execute(
+      httpCall: () => _httpRepository.fetchInvoices(orgId),
+      mockCall: () => _mockRepository.fetchInvoices(orgId),
+    );
+  }
+
+  @override
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
+  }) {
+    return _execute(
+      httpCall: () =>
+          _httpRepository.retryInvoice(orgId: orgId, invoiceId: invoiceId),
+      mockCall: () =>
+          _mockRepository.retryInvoice(orgId: orgId, invoiceId: invoiceId),
     );
   }
 

@@ -31,9 +31,11 @@ void main() {
 
     await tester.tap(find.byKey(const Key('marketplace_offer_continue_0')));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const Key('marketplace_paywall_continue_button')),
+    final paywallContinueButton = find.byKey(
+      const Key('marketplace_paywall_continue_button'),
     );
+    await tester.ensureVisible(paywallContinueButton);
+    await tester.tap(paywallContinueButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('marketplace_confirm_seats_button')));
     await tester.pumpAndSettle();

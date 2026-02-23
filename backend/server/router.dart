@@ -27,6 +27,7 @@ import '../modules/marketplace/marketplace_handlers.dart';
 import '../modules/marketplace/marketplace_entitlement_service.dart';
 import '../modules/marketplace/marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_reconciliation_service.dart';
+import '../modules/marketplace/marketplace_revenue_service.dart';
 import '../modules/marketplace/marketplace_router.dart';
 import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
 import '../modules/payments/payment_service.dart';
@@ -105,11 +106,16 @@ Handler buildApiRouter({
         Platform.environment['PAYMENT_PROVIDER_SECRET'],
     metrics: requestMetrics,
   );
+  final revenueService = MarketplaceRevenueService(
+    postgresProvider: postgresProvider,
+    metrics: requestMetrics,
+  );
   final marketplaceRouter = MarketplaceRouter(
     handlers: MarketplaceHandlers(
       offerRepository: offerRepository,
       paymentService: paymentService,
       entitlementService: entitlementService,
+      revenueService: revenueService,
     ),
   );
   final paymentsController = PaymentsController(paymentService: paymentService);
@@ -118,6 +124,7 @@ Handler buildApiRouter({
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
     reconciliationService: reconciliationService,
+    revenueService: revenueService,
   );
 
   final router = Router()
@@ -151,6 +158,7 @@ Handler buildApiRouter({
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
     ..mount('/marketplace/', marketplaceRouter.router.call)
+    ..mount('/orgs/', marketplaceRouter.orgRouter.call)
     ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)

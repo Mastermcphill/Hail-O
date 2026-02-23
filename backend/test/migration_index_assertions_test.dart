@@ -25,6 +25,11 @@ void main() {
         sqlByName['006_marketplace_webhooks.sql'] ?? '';
     final billingLedgerSql = sqlByName['007_billing_ledger_entries.sql'] ?? '';
     final entitlementSql = sqlByName['008_marketplace_entitlements.sql'] ?? '';
+    final referralCouponSql = sqlByName['009_referrals_coupons.sql'] ?? '';
+    final creditsSql = sqlByName['010_credits_wallet.sql'] ?? '';
+    final invoicesDunningCommsSql =
+        sqlByName['011_invoices_dunning_comms.sql'] ?? '';
+    final riskSql = sqlByName['012_risk_engine.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -132,6 +137,89 @@ void main() {
       ),
       isTrue,
       reason: 'entitlement user timeline index must exist',
+    );
+
+    expect(
+      referralCouponSql.contains('CREATE TABLE IF NOT EXISTS referral_codes'),
+      isTrue,
+      reason: 'referral codes table must exist',
+    );
+    expect(
+      referralCouponSql.contains('UNIQUE(code_id, referred_user_id)'),
+      isTrue,
+      reason: 'referral use dedupe uniqueness must exist',
+    );
+    expect(
+      referralCouponSql.contains('CREATE TABLE IF NOT EXISTS coupons'),
+      isTrue,
+      reason: 'coupons table must exist',
+    );
+    expect(
+      referralCouponSql.contains('CREATE TABLE IF NOT EXISTS coupon_redemptions'),
+      isTrue,
+      reason: 'coupon redemptions table must exist',
+    );
+    expect(
+      referralCouponSql.contains('UNIQUE(coupon_id, user_id, purchase_id)'),
+      isTrue,
+      reason: 'coupon redemption dedupe uniqueness must exist',
+    );
+
+    expect(
+      creditsSql.contains('CREATE TABLE IF NOT EXISTS org_credits'),
+      isTrue,
+      reason: 'org credits table must exist',
+    );
+    expect(
+      creditsSql.contains('CREATE TABLE IF NOT EXISTS credit_ledger'),
+      isTrue,
+      reason: 'credit ledger table must exist',
+    );
+
+    expect(
+      invoicesDunningCommsSql.contains(
+        'CREATE TABLE IF NOT EXISTS billing_invoices',
+      ),
+      isTrue,
+      reason: 'billing invoices table must exist',
+    );
+    expect(
+      invoicesDunningCommsSql.contains('CREATE TABLE IF NOT EXISTS dunning_cases'),
+      isTrue,
+      reason: 'dunning cases table must exist',
+    );
+    expect(
+      invoicesDunningCommsSql.contains(
+        'CREATE TABLE IF NOT EXISTS dunning_attempts',
+      ),
+      isTrue,
+      reason: 'dunning attempts table must exist',
+    );
+    expect(
+      invoicesDunningCommsSql.contains('CREATE TABLE IF NOT EXISTS comms_outbox'),
+      isTrue,
+      reason: 'comms outbox table must exist',
+    );
+    expect(
+      invoicesDunningCommsSql.contains('dedupe_key TEXT NOT NULL UNIQUE'),
+      isTrue,
+      reason: 'comms outbox dedupe uniqueness must exist',
+    );
+
+    expect(
+      riskSql.contains('CREATE TABLE IF NOT EXISTS risk_scores'),
+      isTrue,
+      reason: 'risk scores table must exist',
+    );
+    expect(
+      riskSql.contains('CREATE TABLE IF NOT EXISTS risk_events'),
+      isTrue,
+      reason: 'risk events table must exist',
+    );
+    expect(
+      riskSql.contains('CREATE TABLE IF NOT EXISTS risk_rules'),
+      isTrue,
+      reason: 'risk rules table must exist',
     );
   });
 }

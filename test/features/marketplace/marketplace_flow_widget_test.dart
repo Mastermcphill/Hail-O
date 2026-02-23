@@ -78,9 +78,11 @@ void main() {
 
     expect(find.text('Connection Fee Paywall'), findsOneWidget);
 
-    await tester.tap(
-      find.byKey(const Key('marketplace_paywall_continue_button')),
+    final paywallContinueButton = find.byKey(
+      const Key('marketplace_paywall_continue_button'),
     );
+    await tester.ensureVisible(paywallContinueButton);
+    await tester.tap(paywallContinueButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Seat Selection'), findsOneWidget);

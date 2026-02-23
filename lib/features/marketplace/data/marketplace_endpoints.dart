@@ -2,6 +2,23 @@ class MarketplaceEndpoints {
   static const offers = '/marketplace/offers';
   static String offerPaywall(String offerId) =>
       '/marketplace/offers/$offerId/paywall';
+  static String pricingPreview({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) {
+    final query = Uri(
+      queryParameters: <String, String>{
+        'org_id': orgId,
+        'offer_id': offerId,
+        'seats': seats.toString(),
+      },
+    ).query;
+    return '/marketplace/pricing/preview?$query';
+  }
+  static const applyCoupon = '/marketplace/apply-coupon';
+  static const removeCoupon = '/marketplace/remove-coupon';
+  static const applyReferral = '/marketplace/apply-referral';
 
   static const purchases = '/marketplace/purchases';
   static String purchase(String purchaseId) =>
@@ -19,4 +36,8 @@ class MarketplaceEndpoints {
     final query = Uri.encodeQueryComponent(idempotencyKey);
     return '/marketplace/purchases/restore?idempotencyKey=$query';
   }
+
+  static String orgInvoices(String orgId) => '/orgs/$orgId/billing/invoices';
+  static String orgRetryInvoice(String orgId, String invoiceId) =>
+      '/orgs/$orgId/billing/retry/$invoiceId';
 }
