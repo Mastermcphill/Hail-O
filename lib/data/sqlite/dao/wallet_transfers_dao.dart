@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/wallet_transfer.dart';
@@ -64,3 +64,4 @@ class WalletTransfersDao {
     return rows.map(WalletTransfer.fromMap).toList(growable: false);
   }
 }
+

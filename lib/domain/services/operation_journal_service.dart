@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/operation_journal_dao.dart';
 import '../models/operation_journal_entry.dart';
@@ -122,3 +122,4 @@ class OperationJournalService {
     ]);
   }
 }
+

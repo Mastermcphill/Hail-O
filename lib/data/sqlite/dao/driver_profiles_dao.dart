@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/driver_profile.dart';
 import '../table_names.dart';
@@ -29,3 +29,4 @@ class DriverProfilesDao {
     return DriverProfile.fromMap(rows.first);
   }
 }
+

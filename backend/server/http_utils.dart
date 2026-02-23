@@ -30,6 +30,7 @@ Map<String, Object?> errorEnvelope(
   return <String, Object?>{
     'ok': false,
     'code': code,
+    'error_code': code.toUpperCase(),
     'message': message,
     'trace_id': traceId,
   };

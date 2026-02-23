@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS marketplace_timeline_events (
 CREATE INDEX IF NOT EXISTS idx_marketplace_timeline_purchase_created
 ON marketplace_timeline_events(purchase_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_marketplace_timeline_purchase_created_desc
+ON marketplace_timeline_events(purchase_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS marketplace_webhook_events (
   id UUID PRIMARY KEY,
   provider TEXT NOT NULL,

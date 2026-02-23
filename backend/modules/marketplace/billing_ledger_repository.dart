@@ -5,7 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../infra/postgres_provider.dart';
 
 class BillingLedgerEntryRecord {
-  const BillingLedgerEntryRecord({
+  BillingLedgerEntryRecord({
     required this.id,
     required this.purchaseId,
     required this.userId,
@@ -15,9 +15,20 @@ class BillingLedgerEntryRecord {
     required this.amountMinor,
     required this.currency,
     required this.metadata,
-    required this.occurredAt,
-    required this.createdAt,
-  });
+    DateTime? occurredAt,
+    DateTime? createdAt,
+    DateTime? occurredAtUtc,
+    DateTime? createdAtUtc,
+  }) : occurredAt =
+           (occurredAt ??
+                   occurredAtUtc ??
+                   DateTime.fromMillisecondsSinceEpoch(0, isUtc: true))
+               .toUtc(),
+       createdAt =
+           (createdAt ??
+                   createdAtUtc ??
+                   DateTime.fromMillisecondsSinceEpoch(0, isUtc: true))
+               .toUtc();
 
   final String id;
   final String? purchaseId;
@@ -30,9 +41,30 @@ class BillingLedgerEntryRecord {
   final Map<String, Object?> metadata;
   final DateTime occurredAt;
   final DateTime createdAt;
+
+  DateTime get occurredAtUtc => occurredAt;
+  DateTime get createdAtUtc => createdAt;
+
+  Map<String, Object?> toMap() {
+    return <String, Object?>{
+      'id': id,
+      'purchase_id': purchaseId,
+      'user_id': userId,
+      'entry_type': entryType,
+      'provider': provider,
+      'provider_ref': providerRef,
+      'amount_minor': amountMinor,
+      'currency': currency,
+      'metadata': metadata,
+      'occurred_at': occurredAt.toIso8601String(),
+      'created_at': createdAt.toIso8601String(),
+    };
+  }
 }
 
 abstract class BillingLedgerRepository {
+  Future<bool> append(BillingLedgerEntryRecord entry);
+
   Future<bool> appendEntry({
     required String? purchaseId,
     required String userId,
@@ -65,6 +97,21 @@ class InMemoryBillingLedgerRepository implements BillingLedgerRepository {
   final DateTime Function() _nowUtc;
   final List<BillingLedgerEntryRecord> _entries = <BillingLedgerEntryRecord>[];
   final Set<String> _dedupeKeys = <String>{};
+
+  @override
+  Future<bool> append(BillingLedgerEntryRecord entry) {
+    return appendEntry(
+      purchaseId: entry.purchaseId,
+      userId: entry.userId,
+      entryType: entry.entryType,
+      provider: entry.provider,
+      providerRef: entry.providerRef,
+      amountMinor: entry.amountMinor,
+      currency: entry.currency,
+      metadata: entry.metadata,
+      occurredAt: entry.occurredAt,
+    );
+  }
 
   @override
   Future<bool> appendEntry({
@@ -147,6 +194,21 @@ class PostgresBillingLedgerRepository implements BillingLedgerRepository {
   final PostgresProvider _postgresProvider;
   final Uuid _uuid;
   final DateTime Function() _nowUtc;
+
+  @override
+  Future<bool> append(BillingLedgerEntryRecord entry) {
+    return appendEntry(
+      purchaseId: entry.purchaseId,
+      userId: entry.userId,
+      entryType: entry.entryType,
+      provider: entry.provider,
+      providerRef: entry.providerRef,
+      amountMinor: entry.amountMinor,
+      currency: entry.currency,
+      metadata: entry.metadata,
+      occurredAt: entry.occurredAt,
+    );
+  }
 
   @override
   Future<bool> appendEntry({

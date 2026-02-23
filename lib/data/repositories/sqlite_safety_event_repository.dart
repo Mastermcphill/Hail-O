@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import 'safety_event_repository.dart';
 
@@ -34,3 +34,4 @@ class SqliteSafetyEventRepository implements SafetyEventRepository {
     );
   }
 }
+

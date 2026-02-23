@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../data/repositories/moneybox_repository.dart';
 import '../data/repositories/sqlite_moneybox_repository.dart';
@@ -306,3 +306,4 @@ class AutosaveService {
     );
   }
 }
+

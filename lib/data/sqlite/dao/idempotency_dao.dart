@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/idempotency_record.dart';
 import '../table_names.dart';
@@ -129,3 +129,4 @@ class IdempotencyDao implements IdempotencyStore {
     return IdempotencyRecord.fromMap(rows.first);
   }
 }
+

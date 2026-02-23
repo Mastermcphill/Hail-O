@@ -139,7 +139,9 @@ class PaymentService {
         purchaseId,
       );
       if (refreshed != null) {
-        await _entitlementService.syncPurchaseEntitlements(refreshed);
+        await _entitlementService.syncPurchaseEntitlementsFromMap(
+          purchase: refreshed,
+        );
       }
       await _timelineService.appendEvent(
         purchaseId: purchaseId,
@@ -162,7 +164,9 @@ class PaymentService {
         purchaseId,
       );
       if (refreshed != null) {
-        await _entitlementService.syncPurchaseEntitlements(refreshed);
+        await _entitlementService.syncPurchaseEntitlementsFromMap(
+          purchase: refreshed,
+        );
       }
       await _timelineService.appendEvent(
         purchaseId: purchaseId,
@@ -350,7 +354,9 @@ class PaymentService {
     );
     final refreshed = await _marketplaceRepository.findPurchaseById(purchaseId);
     if (refreshed != null) {
-      await _entitlementService.syncPurchaseEntitlements(refreshed);
+      await _entitlementService.syncPurchaseEntitlementsFromMap(
+        purchase: refreshed,
+      );
     }
     await _timelineService.appendEvent(
       purchaseId: purchaseId,

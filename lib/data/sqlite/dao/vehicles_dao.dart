@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/vehicle.dart';
 import '../table_names.dart';
@@ -39,3 +39,4 @@ class VehiclesDao {
     return rows.map(Vehicle.fromMap).toList(growable: false);
   }
 }
+

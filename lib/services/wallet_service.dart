@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../data/repositories/sqlite_wallet_repository.dart';
 import '../data/repositories/wallet_repository.dart';
@@ -935,3 +935,4 @@ class WalletService {
     return 5000;
   }
 }
+

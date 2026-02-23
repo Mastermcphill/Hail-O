@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/ride_event.dart';
 import '../table_names.dart';
@@ -42,3 +42,4 @@ class RideEventsDao {
     return rows.map(RideEvent.fromMap).toList(growable: false);
   }
 }
+

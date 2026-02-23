@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/compliance_requirements_dao.dart';
 import '../../data/sqlite/dao/documents_dao.dart';
@@ -171,3 +171,4 @@ class _CompliancePolicy {
     );
   }
 }
+

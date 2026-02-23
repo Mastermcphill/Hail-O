@@ -210,5 +210,30 @@ void main() {
       expect(first['deduped'], isNot(true));
       expect(second['deduped'], isTrue);
     });
+
+    test('dunning admin controls resolve by case id and expose audit summary', () async {
+      await service.createInvoice(
+        orgId: 'org-admin-dunning',
+        userId: 'user-admin-dunning',
+        purchaseId: 'purchase-admin-dunning-1',
+        offerId: 'offer_sedan_01',
+        seats: 2,
+      );
+      final overview = await service.billingOverview('org-admin-dunning');
+      final cases = (overview['dunning_cases'] as List?) ?? const <Object?>[];
+      expect(cases, isNotEmpty);
+      final firstCase = Map<String, Object?>.from(cases.first as Map);
+      final caseId = (firstCase['id'] as String?) ?? '';
+      expect(caseId, isNotEmpty);
+
+      expect(await service.pauseDunningCase(caseId), isTrue);
+      expect(await service.resumeDunningCase(caseId), isTrue);
+      expect(await service.writeoffDunningCase(caseId), isTrue);
+
+      final audit = await service.auditSummary('org-admin-dunning');
+      expect(audit.containsKey('purchases'), isTrue);
+      expect(audit.containsKey('timeline_summary'), isTrue);
+      expect(audit.containsKey('comms_outbox'), isTrue);
+    });
   });
 }

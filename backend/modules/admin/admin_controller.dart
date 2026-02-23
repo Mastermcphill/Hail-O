@@ -316,7 +316,15 @@ class AdminController {
 
   Future<Response> _pauseDunning(Request request, String caseId) async {
     _requireAdmin(request);
-    await _revenueService.pauseDunningCase(caseId);
+    final updated = await _revenueService.pauseDunningCase(caseId);
+    if (!updated) {
+      return jsonResponse(404, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'NOT_FOUND',
+        'message': 'Dunning case not found',
+      });
+    }
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -326,7 +334,15 @@ class AdminController {
 
   Future<Response> _resumeDunning(Request request, String caseId) async {
     _requireAdmin(request);
-    await _revenueService.resumeDunningCase(caseId);
+    final updated = await _revenueService.resumeDunningCase(caseId);
+    if (!updated) {
+      return jsonResponse(404, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'NOT_FOUND',
+        'message': 'Dunning case not found',
+      });
+    }
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -336,7 +352,15 @@ class AdminController {
 
   Future<Response> _writeoffDunning(Request request, String caseId) async {
     _requireAdmin(request);
-    await _revenueService.writeoffDunningCase(caseId);
+    final updated = await _revenueService.writeoffDunningCase(caseId);
+    if (!updated) {
+      return jsonResponse(404, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'NOT_FOUND',
+        'message': 'Dunning case not found',
+      });
+    }
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,

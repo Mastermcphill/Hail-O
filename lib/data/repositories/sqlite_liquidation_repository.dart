@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import 'liquidation_repository.dart';
 
@@ -44,3 +44,4 @@ class SqliteLiquidationRepository implements LiquidationRepository {
     }, conflictAlgorithm: ConflictAlgorithm.abort);
   }
 }
+

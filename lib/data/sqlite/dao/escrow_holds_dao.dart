@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/escrow_hold.dart';
 import '../../../domain/errors/domain_errors.dart';
@@ -81,3 +81,4 @@ class EscrowHoldsDao {
     return updated > 0;
   }
 }
+

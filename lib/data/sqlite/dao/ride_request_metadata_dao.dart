@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/ride_request_metadata.dart';
 import '../table_names.dart';
@@ -29,3 +29,4 @@ class RideRequestMetadataDao {
     return RideRequestMetadata.fromMap(rows.first);
   }
 }
+

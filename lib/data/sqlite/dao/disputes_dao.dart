@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/dispute.dart';
@@ -66,3 +66,4 @@ class DisputesDao {
     return rows.map(DisputeRecord.fromMap).toList(growable: false);
   }
 }
+

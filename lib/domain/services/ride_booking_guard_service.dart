@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../models/ride_trip.dart';
 import 'compliance_guard_service.dart';
@@ -65,3 +65,4 @@ class RideBookingGuardService {
     }
   }
 }
+

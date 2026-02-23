@@ -14,6 +14,9 @@ Middleware authMiddleware(
     'healthz',
     'api/healthz',
   },
+  Set<String> publicPrefixes = const <String>{
+    'marketplace/offers/',
+  },
   Set<String> protectedPrefixes = const <String>{
     'rides/',
     'drivers/',
@@ -30,7 +33,12 @@ Middleware authMiddleware(
   return (Handler innerHandler) {
     return (Request request) {
       final path = request.url.path;
-      if (publicPaths.contains(path)) {
+      if (publicPaths.contains(path) || _isPublicPath(path, publicPrefixes)) {
+        return innerHandler(request);
+      }
+
+      // RequestContext can be injected by internal pipelines/tests.
+      if ((request.requestContext.userId ?? '').trim().isNotEmpty) {
         return innerHandler(request);
       }
       if (!_isProtectedPath(path, protectedPrefixes)) {
@@ -81,6 +89,18 @@ Middleware authMiddleware(
       }
     };
   };
+}
+
+bool _isPublicPath(String path, Set<String> publicPrefixes) {
+  if (path == 'marketplace/offers') {
+    return true;
+  }
+  for (final prefix in publicPrefixes) {
+    if (path.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool _isProtectedPath(String path, Set<String> protectedPrefixes) {

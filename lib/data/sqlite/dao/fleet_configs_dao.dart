@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 class FleetConfigsDao {
   const FleetConfigsDao(this.db);
@@ -32,3 +32,4 @@ class FleetConfigsDao {
     return ((rows.first['allowance_percent'] as int?) ?? 0).clamp(0, 100);
   }
 }
+

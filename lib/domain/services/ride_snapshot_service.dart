@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/disputes_dao.dart';
 import '../../data/sqlite/dao/escrow_holds_dao.dart';
@@ -42,3 +42,4 @@ class RideSnapshotService {
     };
   }
 }
+

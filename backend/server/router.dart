@@ -20,9 +20,19 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
+import '../modules/marketplace/billing_ledger_repository.dart';
+import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
+import '../modules/marketplace/marketplace_entitlement_service.dart';
+import '../modules/marketplace/marketplace_reconciliation_service.dart';
+import '../modules/marketplace/marketplace_revenue_service.dart';
+import '../modules/marketplace/marketplace_router.dart';
+import '../modules/marketplace/marketplace_handlers.dart';
+import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
+import '../modules/payments/payment_service.dart' as payments;
+import '../modules/payments/payments_controller.dart';
 import 'http_utils.dart';
 
 Handler buildApiRouter({
@@ -61,10 +71,52 @@ Handler buildApiRouter({
   final disputesController = DisputesController(
     disputeService: DisputeService(db),
   );
+  final offerRepository = postgresProvider != null
+      ? PostgresMarketplaceOfferRepository(postgresProvider)
+      : InMemoryMarketplaceOfferRepository();
+  final entitlementRepository = postgresProvider != null
+      ? PostgresMarketplaceEntitlementRepository(postgresProvider)
+      : InMemoryMarketplaceEntitlementRepository();
+  final entitlementService = MarketplaceEntitlementService(
+    repository: entitlementRepository,
+    postgresProvider: postgresProvider,
+  );
+  final billingLedgerRepository = postgresProvider != null
+      ? PostgresBillingLedgerRepository(postgresProvider)
+      : InMemoryBillingLedgerRepository();
+  final paymentService = payments.PaymentService.fromEnvironment(
+    postgresProvider: postgresProvider,
+    billingLedgerRepository: billingLedgerRepository,
+    entitlementService: entitlementService,
+    configuredProvider: env['PAYMENT_PROVIDER'],
+    paystackSecretKey: env['PAYSTACK_SECRET_KEY'],
+    stripeWebhookSecret: env['STRIPE_WEBHOOK_SECRET'],
+    metrics: requestMetrics,
+  );
+  final paymentsController = PaymentsController(paymentService: paymentService);
+  final revenueService = MarketplaceRevenueService(
+    postgresProvider: postgresProvider,
+    metrics: requestMetrics,
+  );
+  final marketplaceHandlers = MarketplaceHandlers(
+    offerRepository: offerRepository,
+    paymentService: paymentService,
+    entitlementService: entitlementService,
+    revenueService: revenueService,
+  );
+  final marketplaceRouter = MarketplaceRouter(handlers: marketplaceHandlers);
+  final reconciliationService = postgresProvider == null
+      ? null
+      : MarketplaceReconciliationService(
+          store: PostgresMarketplaceReconciliationStore(postgresProvider),
+          entitlementService: entitlementService,
+        );
   final adminController = AdminController(
     walletReversalService: WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
+    reconciliationService: reconciliationService,
+    revenueService: revenueService,
   );
 
   final router = Router()
@@ -88,6 +140,10 @@ Handler buildApiRouter({
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..get(
+      '/healthz',
+      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+    )
+    ..get(
       '/metrics',
       (request) => _metricsHandler(request, requestMetrics, metricsPublic),
     )
@@ -95,6 +151,9 @@ Handler buildApiRouter({
     ..mount('/rides/', ridesController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
+    ..mount('/marketplace/', marketplaceRouter.router.call)
+    ..mount('/orgs/', marketplaceRouter.orgRouter.call)
+    ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/admin/', adminController.router.call)
     ..all(
       '/<ignored|.*>',

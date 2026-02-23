@@ -1,4 +1,4 @@
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../../domain/models/auth_credential.dart';
 import '../table_names.dart';
@@ -50,3 +50,4 @@ class AuthCredentialsDao {
     return AuthCredential.fromMap(rows.first);
   }
 }
+

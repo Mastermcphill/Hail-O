@@ -101,6 +101,7 @@ class MarketplaceRevenueService {
   final List<Map<String, Object?>> _commsOutbox = <Map<String, Object?>>[];
   final Map<String, Map<String, Object?>> _dunningCases =
       <String, Map<String, Object?>>{};
+  final Map<String, String> _dunningCaseIdByInvoiceId = <String, String>{};
 
   Future<Map<String, Object?>> applyCoupon({
     required String orgId,
@@ -283,8 +284,10 @@ class MarketplaceRevenueService {
       );
     }
     if ((invoice['status'] ?? '') == 'open') {
-      _dunningCases[invoiceId] = <String, Object?>{
-        'id': _uuid.v4(),
+      final caseId = _uuid.v4();
+      _dunningCaseIdByInvoiceId[invoiceId] = caseId;
+      _dunningCases[caseId] = <String, Object?>{
+        'id': caseId,
         'org_id': orgId,
         'purchase_id': purchaseId,
         'invoice_id': invoiceId,
@@ -363,12 +366,17 @@ class MarketplaceRevenueService {
       );
     }
 
-    final caseRecord = _dunningCases[invoiceId];
+    final existingCaseId = _dunningCaseIdByInvoiceId[invoiceId];
+    final caseRecord = existingCaseId == null
+        ? null
+        : _dunningCases[existingCaseId];
     final attemptNo = ((caseRecord?['attempt_count'] as int?) ?? 0) + 1;
     final recovered = attemptNo >= 2;
-    _dunningCases[invoiceId] = <String, Object?>{
+    final caseId = existingCaseId ?? _uuid.v4();
+    _dunningCaseIdByInvoiceId[invoiceId] = caseId;
+    _dunningCases[caseId] = <String, Object?>{
       ...(caseRecord ?? <String, Object?>{
-        'id': _uuid.v4(),
+        'id': caseId,
         'org_id': orgId,
         'purchase_id': target['purchase_id'],
         'invoice_id': invoiceId,
@@ -614,9 +622,25 @@ class MarketplaceRevenueService {
     return results;
   }
 
+  Future<List<Map<String, Object?>>> runRiskAggregator({int limit = 200}) async {
+    return _riskBySubject.values
+        .take(limit)
+        .map((row) => Map<String, Object?>.from(row))
+        .toList(growable: false);
+  }
+
+  Future<List<Map<String, Object?>>> runUsageRollupRunner({
+    int limit = 200,
+  }) async {
+    // Usage metering is optional in this module; keep the runner idempotent.
+    return const <Map<String, Object?>>[];
+  }
+
   Future<Map<String, Object?>> billingOverview(String orgId) async {
+    final purchases = await _listPurchasesByOrg(orgId);
     return <String, Object?>{
       'org_id': orgId,
+      'purchases': purchases,
       'invoices': await listInvoices(orgId),
       'dunning_cases': _dunningCases.values
           .where((row) => (row['org_id'] ?? '').toString() == orgId)
@@ -629,10 +653,15 @@ class MarketplaceRevenueService {
 
   Future<Map<String, Object?>> auditSummary(String orgId) async {
     final overview = await billingOverview(orgId);
+    final timeline = await _timelineSummaryForOrg(orgId);
     final comms = _commsOutbox
         .where((row) => (row['dedupe_key'] ?? '').toString().startsWith('$orgId:'))
         .toList(growable: false);
-    return <String, Object?>{...overview, 'comms_outbox': comms};
+    return <String, Object?>{
+      ...overview,
+      'timeline_summary': timeline,
+      'comms_outbox': comms,
+    };
   }
 
   Future<void> adjustRisk({
@@ -649,32 +678,38 @@ class MarketplaceRevenueService {
     );
   }
 
-  Future<void> pauseDunningCase(String caseId) async {
-    final row = _dunningCases[caseId];
+  Future<bool> pauseDunningCase(String caseId) async {
+    final row = _resolveDunningCase(caseId);
     if (row == null) {
-      return;
+      return false;
     }
     row['state'] = 'paused';
     row['next_attempt_at'] = null;
+    row['updated_at'] = _nowUtc().toIso8601String();
+    return true;
   }
 
-  Future<void> resumeDunningCase(String caseId) async {
-    final row = _dunningCases[caseId];
+  Future<bool> resumeDunningCase(String caseId) async {
+    final row = _resolveDunningCase(caseId);
     if (row == null) {
-      return;
+      return false;
     }
     row['state'] = 'active';
     row['next_attempt_at'] = _nowUtc().toIso8601String();
+    row['updated_at'] = _nowUtc().toIso8601String();
+    return true;
   }
 
-  Future<void> writeoffDunningCase(String caseId) async {
-    final row = _dunningCases[caseId];
+  Future<bool> writeoffDunningCase(String caseId) async {
+    final row = _resolveDunningCase(caseId);
     if (row == null) {
-      return;
+      return false;
     }
     row['state'] = 'written_off';
     row['next_attempt_at'] = null;
     row['last_error'] = 'written_off_by_admin';
+    row['updated_at'] = _nowUtc().toIso8601String();
+    return true;
   }
 
   Future<int> _offerBaseMinor(String offerId) async {
@@ -818,6 +853,112 @@ class MarketplaceRevenueService {
     final userRank = rank[userState] ?? 0;
     final orgRank = rank[orgState] ?? 0;
     return userRank >= orgRank ? userState : orgState;
+  }
+
+  Map<String, Object?>? _resolveDunningCase(String caseOrInvoiceId) {
+    final direct = _dunningCases[caseOrInvoiceId];
+    if (direct != null) {
+      return direct;
+    }
+    final mappedCaseId = _dunningCaseIdByInvoiceId[caseOrInvoiceId];
+    if (mappedCaseId == null) {
+      return null;
+    }
+    return _dunningCases[mappedCaseId];
+  }
+
+  Future<List<Map<String, Object?>>> _listPurchasesByOrg(String orgId) async {
+    if (_postgresProvider == null) {
+      final invoices = _invoiceByOrg[orgId] ?? const <Map<String, Object?>>[];
+      return invoices
+          .map((invoice) {
+            final purchaseId = (invoice['purchase_id'] ?? '').toString().trim();
+            if (purchaseId.isEmpty) {
+              return null;
+            }
+            return <String, Object?>{
+              'purchase_id': purchaseId,
+              'status': _statusFromInvoice(invoice['status']?.toString() ?? 'open'),
+              'currency': invoice['currency'],
+              'total_due_minor': invoice['total_due_minor'],
+              'created_at': invoice['created_at'],
+            };
+          })
+          .whereType<Map<String, Object?>>()
+          .toList(growable: false);
+    }
+
+    final rows = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT
+          id::text,
+          status,
+          currency,
+          price_minor,
+          seats_total,
+          created_at,
+          updated_at
+        FROM marketplace_purchases
+        WHERE org_id = @org_id
+        ORDER BY created_at DESC
+        LIMIT 200
+        ''',
+        substitutionValues: <String, Object?>{'org_id': orgId},
+      ),
+    );
+    return rows
+        .map((row) => <String, Object?>{
+              'purchase_id': (row[0] as String?)?.trim() ?? '',
+              'status': (row[1] as String?)?.trim() ?? 'PENDING',
+              'currency': (row[2] as String?)?.trim() ?? 'NGN',
+              'price_minor': (row[3] as num?)?.toInt() ?? 0,
+              'seats_total': (row[4] as num?)?.toInt() ?? 0,
+              'created_at': (row[5] as DateTime?)?.toUtc().toIso8601String(),
+              'updated_at': (row[6] as DateTime?)?.toUtc().toIso8601String(),
+            })
+        .toList(growable: false);
+  }
+
+  Future<Map<String, Object?>> _timelineSummaryForOrg(String orgId) async {
+    if (_postgresProvider == null) {
+      final invoices = _invoiceByOrg[orgId] ?? const <Map<String, Object?>>[];
+      return <String, Object?>{
+        'events_total': invoices.length,
+        'source': 'in_memory_invoice_projection',
+      };
+    }
+
+    final rows = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT COUNT(*)
+        FROM marketplace_timeline_events t
+        INNER JOIN marketplace_purchases p ON p.id = t.purchase_id
+        WHERE p.org_id = @org_id
+        ''',
+        substitutionValues: <String, Object?>{'org_id': orgId},
+      ),
+    );
+    final eventsTotal = rows.isEmpty ? 0 : ((rows.first[0] as num?)?.toInt() ?? 0);
+    return <String, Object?>{
+      'events_total': eventsTotal,
+      'source': 'marketplace_timeline_events',
+    };
+  }
+
+  String _statusFromInvoice(String invoiceStatus) {
+    final normalized = invoiceStatus.trim().toLowerCase();
+    if (normalized == 'paid') {
+      return 'ACTIVE';
+    }
+    if (normalized == 'failed') {
+      return 'PAST_DUE';
+    }
+    if (normalized == 'refunded') {
+      return 'REFUNDED';
+    }
+    return 'PENDING';
   }
 }
 

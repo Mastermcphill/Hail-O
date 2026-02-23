@@ -29,6 +29,25 @@ class MarketplaceEntitlementRecord {
   final DateTime? effectiveTo;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  DateTime get effectiveFromUtc => effectiveFrom;
+  DateTime? get effectiveToUtc => effectiveTo;
+  Map<String, Object?> get valueJson => value;
+
+  Map<String, Object?> toMap() {
+    return <String, Object?>{
+      'id': id,
+      'purchase_id': purchaseId,
+      'user_id': userId,
+      'entitlement_type': entitlementType,
+      'value_json': value,
+      'status': status,
+      'effective_from': effectiveFrom.toIso8601String(),
+      'effective_to': effectiveTo?.toIso8601String(),
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
+  }
 }
 
 abstract class MarketplaceEntitlementRepository {
@@ -403,9 +422,13 @@ class PostgresMarketplaceEntitlementRepository
 
 class MarketplaceEntitlementService {
   MarketplaceEntitlementService({
-    required MarketplaceEntitlementRepository repository,
+    MarketplaceEntitlementRepository? repository,
+    MarketplaceEntitlementRepository? entitlementRepository,
     PostgresProvider? postgresProvider,
-  }) : _repository = repository,
+  }) : _repository =
+           repository ??
+           entitlementRepository ??
+           InMemoryMarketplaceEntitlementRepository(),
        _postgresProvider = postgresProvider;
 
   final MarketplaceEntitlementRepository _repository;
@@ -512,6 +535,18 @@ class MarketplaceEntitlementService {
     await syncPurchaseEntitlements(purchase: purchase, reason: reason);
   }
 
+  Future<void> syncPurchaseEntitlementsFromMap({
+    required Map<String, Object?> purchase,
+    String reason = 'purchase_state_sync',
+    DateTime? effectiveFrom,
+  }) {
+    return syncPurchaseEntitlements(
+      purchase: _purchaseFromMap(purchase),
+      reason: reason,
+      effectiveFrom: effectiveFrom,
+    );
+  }
+
   Future<void> revokeByPurchaseId({
     required String purchaseId,
     String reason = 'status_changed',
@@ -527,6 +562,12 @@ class MarketplaceEntitlementService {
     int limit = 200,
   }) {
     return _repository.listByPurchase(purchaseId: purchaseId, limit: limit);
+  }
+
+  Future<List<MarketplaceEntitlementRecord>> listActiveByPurchase(
+    String purchaseId,
+  ) {
+    return _repository.listActiveByPurchase(purchaseId: purchaseId);
   }
 
   bool _jsonEquivalent(Object? left, Object? right) {
@@ -550,5 +591,26 @@ class MarketplaceEntitlementService {
       }
     }
     return DateTime.now().toUtc();
+  }
+
+  MarketplacePurchaseRecord _purchaseFromMap(Map<String, Object?> purchase) {
+    final offerId = (purchase['offer_id'] as String?)?.trim() ?? '';
+    return MarketplacePurchaseRecord(
+      id: (purchase['id'] as String?)?.trim() ?? '',
+      userId: (purchase['user_id'] as String?)?.trim() ?? '',
+      offerId: offerId,
+      offerTitle: (purchase['offer_title'] as String?)?.trim().isNotEmpty == true
+          ? (purchase['offer_title'] as String).trim()
+          : offerId,
+      status: (purchase['status'] as String?)?.trim() ?? '',
+      currency: (purchase['currency'] as String?)?.trim().isNotEmpty == true
+          ? (purchase['currency'] as String).trim()
+          : 'NGN',
+      totalAmountMinor: (purchase['price_minor'] as num?)?.toInt() ?? 0,
+      seatCount: (purchase['seats_total'] as num?)?.toInt() ?? 0,
+      idempotencyKey: (purchase['idempotency_key'] as String?)?.trim() ?? '',
+      createdAt: _readDateTime(purchase['created_at']),
+      updatedAt: _readDateTime(purchase['updated_at']),
+    );
   }
 }

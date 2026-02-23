@@ -83,9 +83,11 @@ Middleware rateLimitMiddleware({
 
       int ipLimit;
       int userLimit;
+      String bucketScope;
       if (isWebhookPath) {
         ipLimit = maxWebhookRequestsPerIp;
         userLimit = webhookRequestsPerUser;
+        bucketScope = 'webhook';
       } else if (isMarketplacePath || isOrgPath) {
         ipLimit = isMarketplaceOfferRead
             ? maxMarketplaceReadRequestsPerIp
@@ -93,12 +95,18 @@ Middleware rateLimitMiddleware({
         userLimit = isMarketplaceOfferRead
             ? maxMarketplaceReadRequestsPerUser
             : maxMarketplaceWriteRequestsPerUser;
+        bucketScope = isMarketplaceOfferRead
+            ? 'marketplace_read'
+            : 'marketplace_write';
       } else {
         ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
         userLimit = isAuthPath ? maxAuthRequestsPerUser : maxRequestsPerUser;
+        bucketScope = isAuthPath ? 'auth' : 'general';
       }
+      final ipBucketKey = '$bucketScope::$ipKey';
+      final userBucketKey = '$bucketScope::$userId';
 
-      if (!consume(ipBuckets, ipKey, currentUtc, ipLimit)) {
+      if (!consume(ipBuckets, ipBucketKey, currentUtc, ipLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,
@@ -112,7 +120,7 @@ Middleware rateLimitMiddleware({
 
       if (userLimit > 0 &&
           userId.isNotEmpty &&
-          !consume(userBuckets, userId, currentUtc, userLimit)) {
+          !consume(userBuckets, userBucketKey, currentUtc, userLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,

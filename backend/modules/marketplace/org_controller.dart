@@ -457,7 +457,9 @@ class OrgController {
       if (purchaseId.isEmpty) {
         continue;
       }
-      final rows = await _billingLedgerRepository.listByPurchase(purchaseId);
+      final rows = await _billingLedgerRepository.listByPurchase(
+        purchaseId: purchaseId,
+      );
       for (final row in rows) {
         entries.add(row.toMap());
       }
@@ -492,7 +494,9 @@ class OrgController {
       if (purchaseId.isEmpty) {
         continue;
       }
-      final entitlements = await _entitlementService.listByPurchase(purchaseId);
+      final entitlements = await _entitlementService.listByPurchase(
+        purchaseId: purchaseId,
+      );
       for (final entitlement in entitlements) {
         rows.add(entitlement.toMap());
       }

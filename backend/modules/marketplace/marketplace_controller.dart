@@ -520,7 +520,9 @@ class MarketplaceController {
           purchaseId: purchaseId,
           seatCount: seatCount,
         );
-        await _entitlementService.syncPurchaseEntitlements(updated);
+        await _entitlementService.syncPurchaseEntitlementsFromMap(
+          purchase: updated,
+        );
         await _timelineService.appendEvent(
           purchaseId: purchaseId,
           type: 'seats_updated',
@@ -806,7 +808,9 @@ class MarketplaceController {
           purchaseId: purchaseId,
           offerId: newOfferId,
         );
-        await _entitlementService.syncPurchaseEntitlements(updated);
+        await _entitlementService.syncPurchaseEntitlementsFromMap(
+          purchase: updated,
+        );
         await _timelineService.appendEvent(
           purchaseId: purchaseId,
           type: 'plan_changed',

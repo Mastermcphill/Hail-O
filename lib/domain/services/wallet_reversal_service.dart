@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/idempotency_dao.dart';
 import '../../data/sqlite/dao/wallet_reversals_dao.dart';
@@ -296,3 +296,4 @@ class WalletReversalService {
     return text;
   }
 }
+

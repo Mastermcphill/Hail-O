@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:hailo_shared/sqlite_api.dart';
+import 'package:hail_o_finance_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/penalty_rules_dao.dart';
 import '../models/penalty_computation.dart';
@@ -194,3 +194,4 @@ class _PenaltyPolicy {
     );
   }
 }
+
