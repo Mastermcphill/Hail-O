@@ -6,31 +6,54 @@ import '../storage/token_storage.dart';
 import '../util/ids.dart';
 import 'api_config.dart';
 import 'api_errors.dart';
+import 'mock_backend_store.dart';
+
+const String _mockNextOfKinKey = 'rider_next_of_kin_local';
 
 class ApiClient {
-  ApiClient({
-    required TokenStorage tokenStorage,
-    http.Client? httpClient,
-  }) : _tokenStorage = tokenStorage,
-       _httpClient = httpClient ?? http.Client();
+  ApiClient({required TokenStorage tokenStorage, http.Client? httpClient})
+    : _tokenStorage = tokenStorage,
+      _httpClient = httpClient ?? http.Client();
 
   final TokenStorage _tokenStorage;
   final http.Client _httpClient;
 
   Future<Map<String, dynamic>> get(String path) async {
+    final normalizedPath = _normalizePath(path);
+    if (_shouldUseMockByConfig(normalizedPath)) {
+      return _mockResponse(method: 'GET', path: normalizedPath);
+    }
+
     final requestId = newRequestId();
     final headers = await _buildHeaders(requestId: requestId);
-    final response = await _httpClient.get(
-      _buildUri(path),
-      headers: headers,
-    );
-    return _decodeResponse(response);
+    try {
+      final response = await _httpClient.get(
+        _buildUri(normalizedPath),
+        headers: headers,
+      );
+      return _decodeResponse(response);
+    } on ApiException catch (error) {
+      if (_shouldFallbackToMock(error, normalizedPath)) {
+        return _mockResponse(method: 'GET', path: normalizedPath);
+      }
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> post(
     String path, {
     Map<String, dynamic>? body,
   }) async {
+    final normalizedPath = _normalizePath(path);
+    final requestBody = body ?? <String, dynamic>{};
+    if (_shouldUseMockByConfig(normalizedPath)) {
+      return _mockResponse(
+        method: 'POST',
+        path: normalizedPath,
+        body: requestBody,
+      );
+    }
+
     final requestId = newRequestId();
     final idempotencyKey = newIdempotencyKey();
     final headers = await _buildHeaders(
@@ -38,21 +61,35 @@ class ApiClient {
       idempotencyKey: idempotencyKey,
       includeJsonContentType: true,
     );
-    final response = await _httpClient.post(
-      _buildUri(path),
-      headers: headers,
-      body: jsonEncode(body ?? <String, dynamic>{}),
-    );
-    return _decodeResponse(response);
+    try {
+      final response = await _httpClient.post(
+        _buildUri(normalizedPath),
+        headers: headers,
+        body: jsonEncode(requestBody),
+      );
+      return _decodeResponse(response);
+    } on ApiException catch (error) {
+      if (_shouldFallbackToMock(error, normalizedPath)) {
+        return _mockResponse(
+          method: 'POST',
+          path: normalizedPath,
+          body: requestBody,
+        );
+      }
+      rethrow;
+    }
   }
 
   void close() {
     _httpClient.close();
   }
 
-  Uri _buildUri(String path) {
-    final normalizedPath = path.startsWith('/') ? path : '/$path';
+  Uri _buildUri(String normalizedPath) {
     return Uri.parse('${ApiConfig.baseUrl}$normalizedPath');
+  }
+
+  String _normalizePath(String path) {
+    return path.startsWith('/') ? path : '/$path';
   }
 
   Future<Map<String, String>> _buildHeaders({
@@ -78,6 +115,237 @@ class ApiClient {
       headers['Authorization'] = 'Bearer $token';
     }
     return headers;
+  }
+
+  bool _shouldUseMockByConfig(String path) {
+    return ApiConfig.mockMode && _isNewEndpointPath(path);
+  }
+
+  bool _shouldFallbackToMock(ApiException error, String path) {
+    return error.statusCode == 404 && _isNewEndpointPath(path);
+  }
+
+  bool _isNewEndpointPath(String path) {
+    final uri = Uri.parse(path);
+    final endpointPath = uri.path;
+    if (endpointPath == '/me/next-of-kin') {
+      return true;
+    }
+    if (endpointPath == '/routes' || endpointPath == '/routes/match') {
+      return true;
+    }
+    final routePatterns = <RegExp>[
+      RegExp(r'^/rides/[^/]+/offers$'),
+      RegExp(r'^/rides/[^/]+/accept-offer$'),
+      RegExp(r'^/rides/[^/]+/paywall/open$'),
+      RegExp(r'^/rides/[^/]+/paywall/pay$'),
+      RegExp(r'^/rides/[^/]+/seats$'),
+      RegExp(r'^/rides/[^/]+/seats/select$'),
+    ];
+    return routePatterns.any((pattern) => pattern.hasMatch(endpointPath));
+  }
+
+  Future<Map<String, dynamic>> _mockResponse({
+    required String method,
+    required String path,
+    Map<String, dynamic>? body,
+  }) async {
+    final uri = Uri.parse(path);
+    final endpointPath = uri.path;
+
+    if (endpointPath == '/me/next-of-kin') {
+      if (method == 'GET') {
+        final encoded = await _tokenStorage.readValue(_mockNextOfKinKey);
+        if (encoded == null || encoded.trim().isEmpty) {
+          throw ApiException(
+            statusCode: 404,
+            code: 'next_of_kin_not_found',
+            message: 'Next-of-kin not set',
+          );
+        }
+        final parsed = _tryParseJson(encoded);
+        final map = _mapFromDynamic(parsed);
+        return <String, dynamic>{'ok': true, 'next_of_kin': map};
+      }
+      final payload = body ?? <String, dynamic>{};
+      await _tokenStorage.writeValue(_mockNextOfKinKey, jsonEncode(payload));
+      return <String, dynamic>{'ok': true, 'next_of_kin': payload};
+    }
+
+    if (endpointPath == '/routes' && method == 'POST') {
+      final payload = body ?? <String, dynamic>{};
+      final route = <String, dynamic>{
+        ...payload,
+        'id': 'mock_route_${DateTime.now().millisecondsSinceEpoch}',
+      };
+      MockBackendStore.routeChains.add(route);
+      return <String, dynamic>{'ok': true, 'route': route};
+    }
+
+    if (endpointPath == '/routes/match' && method == 'GET') {
+      final from = uri.queryParameters['from'] ?? '';
+      final to = uri.queryParameters['to'] ?? '';
+      final matches = MockBackendStore.routeChains
+          .where((route) {
+            final nodes = route['nodes'];
+            if (nodes is! List) {
+              return true;
+            }
+            final lowered = nodes
+                .whereType<Map>()
+                .map((node) => (node['name'] ?? '').toString().toLowerCase())
+                .toList();
+            if (from.isEmpty || to.isEmpty) {
+              return true;
+            }
+            return lowered.any((name) => name.contains(from.toLowerCase())) &&
+                lowered.any((name) => name.contains(to.toLowerCase()));
+          })
+          .toList(growable: false);
+      return <String, dynamic>{'ok': true, 'matches': matches};
+    }
+
+    final offersRideId = _rideIdFromPath(endpointPath, '/offers');
+    if (offersRideId != null && method == 'GET') {
+      final offers =
+          MockBackendStore.offersByRideId[offersRideId] ?? _defaultMockOffers();
+      MockBackendStore.offersByRideId.putIfAbsent(offersRideId, () => offers);
+      return <String, dynamic>{'ok': true, 'offers': offers};
+    }
+    if (offersRideId != null && method == 'POST') {
+      final payload = body ?? <String, dynamic>{};
+      final offer = <String, dynamic>{
+        ...payload,
+        'offer_id': 'mock_offer_${DateTime.now().millisecondsSinceEpoch}',
+        'price_minor': _readInt(payload['price_minor']),
+        'vehicle_class': _readString(payload['vehicle_class']).isEmpty
+            ? 'sedan'
+            : _readString(payload['vehicle_class']),
+        'luggage_supported': true,
+      };
+      MockBackendStore.offersByRideId.putIfAbsent(
+        offersRideId,
+        () => <Map<String, dynamic>>[],
+      );
+      MockBackendStore.offersByRideId[offersRideId]!.add(offer);
+      return <String, dynamic>{'ok': true, 'offer': offer};
+    }
+
+    final acceptOfferRideId = _rideIdFromPath(endpointPath, '/accept-offer');
+    if (acceptOfferRideId != null && method == 'POST') {
+      final payload = body ?? <String, dynamic>{};
+      final offerId = _readString(payload['offer_id']);
+      final existingOffers =
+          MockBackendStore.offersByRideId[acceptOfferRideId] ??
+          _defaultMockOffers();
+      final accepted = existingOffers.firstWhere(
+        (offer) => _readString(offer['offer_id']) == offerId,
+        orElse: () => existingOffers.first,
+      );
+      MockBackendStore.acceptedOfferByRideId[acceptOfferRideId] = accepted;
+      return <String, dynamic>{
+        'ok': true,
+        'ride_id': acceptOfferRideId,
+        'offer_id': _readString(accepted['offer_id']),
+      };
+    }
+
+    final paywallOpenRideId = _rideIdFromPath(endpointPath, '/paywall/open');
+    if (paywallOpenRideId != null && method == 'POST') {
+      final paywall =
+          MockBackendStore.paywallByRideId[paywallOpenRideId] ??
+          <String, dynamic>{
+            'connection_fee_minor': 1500,
+            'deadline_at': DateTime.now()
+                .toUtc()
+                .add(const Duration(minutes: 10))
+                .toIso8601String(),
+          };
+      MockBackendStore.paywallByRideId[paywallOpenRideId] = paywall;
+      return <String, dynamic>{'ok': true, ...paywall};
+    }
+
+    final paywallPayRideId = _rideIdFromPath(endpointPath, '/paywall/pay');
+    if (paywallPayRideId != null && method == 'POST') {
+      return <String, dynamic>{
+        'ok': true,
+        'ride_id': paywallPayRideId,
+        'paid': true,
+      };
+    }
+
+    final seatsRideId = _rideIdFromPath(endpointPath, '/seats');
+    if (seatsRideId != null && method == 'GET') {
+      final seats =
+          MockBackendStore.seatsByRideId[seatsRideId] ??
+          <Map<String, dynamic>>[
+            <String, dynamic>{'seat_id': 'FRONT_RIGHT', 'is_available': true},
+            <String, dynamic>{'seat_id': 'BACK_LEFT', 'is_available': true},
+            <String, dynamic>{'seat_id': 'BACK_MIDDLE', 'is_available': true},
+            <String, dynamic>{'seat_id': 'BACK_RIGHT', 'is_available': true},
+          ];
+      MockBackendStore.seatsByRideId[seatsRideId] = seats;
+      return <String, dynamic>{'ok': true, 'seats': seats};
+    }
+
+    final seatSelectRideId = _rideIdFromPath(endpointPath, '/seats/select');
+    if (seatSelectRideId != null && method == 'POST') {
+      final payload = body ?? <String, dynamic>{};
+      final seatIds = (payload['seat_ids'] as List<dynamic>? ?? <dynamic>[])
+          .map((value) => value.toString())
+          .toList(growable: false);
+      MockBackendStore.selectedSeatIdsByRideId[seatSelectRideId] = seatIds;
+      return <String, dynamic>{
+        'ok': true,
+        'ride_id': seatSelectRideId,
+        'seat_ids': seatIds,
+        'pricing_minor': _readInt(payload['pricing_minor']),
+      };
+    }
+
+    throw ApiException(
+      statusCode: 404,
+      message: 'No mock handler configured for $path',
+      code: 'mock_not_found',
+    );
+  }
+
+  String? _rideIdFromPath(String path, String suffix) {
+    final pattern = RegExp('^/rides/([^/]+)${RegExp.escape(suffix)}\$');
+    final match = pattern.firstMatch(path);
+    return match?.group(1);
+  }
+
+  List<Map<String, dynamic>> _defaultMockOffers() {
+    return <Map<String, dynamic>>[
+      <String, dynamic>{
+        'offer_id': 'mock_offer_1',
+        'star_rating': 4.8,
+        'gender': 'male',
+        'tribe': 'yoruba',
+        'vehicle_class': 'sedan',
+        'luggage_supported': true,
+        'price_minor': 4200,
+      },
+      <String, dynamic>{
+        'offer_id': 'mock_offer_2',
+        'star_rating': 4.5,
+        'gender': 'female',
+        'tribe': 'igbo',
+        'vehicle_class': 'suv',
+        'luggage_supported': true,
+        'price_minor': 5600,
+      },
+      <String, dynamic>{
+        'offer_id': 'mock_offer_3',
+        'star_rating': 4.9,
+        'gender': 'male',
+        'tribe': 'hausa',
+        'vehicle_class': 'hatchback',
+        'luggage_supported': false,
+        'price_minor': 3900,
+      },
+    ];
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
@@ -165,5 +433,25 @@ class ApiClient {
       return value.trim();
     }
     return null;
+  }
+
+  String _readString(Object? value) {
+    if (value is String) {
+      return value.trim();
+    }
+    return '';
+  }
+
+  int _readInt(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value.trim()) ?? 0;
+    }
+    return 0;
   }
 }

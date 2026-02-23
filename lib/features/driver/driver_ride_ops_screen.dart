@@ -4,6 +4,7 @@ import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
 import '../shared/ride_snapshot_card.dart';
+import '../shared/ride_timeline_widget.dart';
 
 class DriverRideOpsScreen extends StatefulWidget {
   const DriverRideOpsScreen({
@@ -45,7 +46,9 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
     }
     await _run(
       operation: () async {
-        final response = await widget.apiClient.get(ApiPaths.rideSnapshot(rideId));
+        final response = await widget.apiClient.get(
+          ApiPaths.rideSnapshot(rideId),
+        );
         if (!mounted) {
           return;
         }
@@ -74,9 +77,7 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
   Future<void> _completeRide() async {
     await _postAndRefresh(
       pathBuilder: ApiPaths.rideComplete,
-      body: const <String, dynamic>{
-        'settlement_trigger': 'manual_override',
-      },
+      body: const <String, dynamic>{'settlement_trigger': 'manual_override'},
     );
   }
 
@@ -92,7 +93,9 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
     await _run(
       operation: () async {
         await widget.apiClient.post(pathBuilder(rideId), body: body);
-        final snapshot = await widget.apiClient.get(ApiPaths.rideSnapshot(rideId));
+        final snapshot = await widget.apiClient.get(
+          ApiPaths.rideSnapshot(rideId),
+        );
         if (!mounted) {
           return;
         }
@@ -104,9 +107,7 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
     );
   }
 
-  Future<void> _run({
-    required Future<void> Function() operation,
-  }) async {
+  Future<void> _run({required Future<void> Function() operation}) async {
     setState(() {
       _isBusy = true;
     });
@@ -187,7 +188,11 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-              if (_snapshot != null) RideSnapshotCard(snapshot: _snapshot!),
+              if (_snapshot != null) ...<Widget>[
+                RideTimelineWidget(snapshot: _snapshot!),
+                const SizedBox(height: 12),
+                RideSnapshotCard(snapshot: _snapshot!),
+              ],
             ],
           ),
         ),

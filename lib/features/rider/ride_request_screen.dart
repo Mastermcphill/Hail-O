@@ -7,6 +7,7 @@ import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
 import '../../core/storage/token_storage.dart';
+import '../../integrations/google/google_distance_service.dart';
 import 'next_of_kin_screen.dart';
 
 class RideRequestScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class RideRequestScreen extends StatefulWidget {
 }
 
 class _RideRequestScreenState extends State<RideRequestScreen> {
+  final GoogleDistanceService _distanceService = GoogleDistanceService();
   final TextEditingController _scheduledDepartureController =
       TextEditingController();
   final TextEditingController _pickupController = TextEditingController(
@@ -57,8 +59,10 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   String _tripScope = 'intra_city';
   bool _charterMode = false;
   bool _isSubmitting = false;
+  bool _isEstimatingDistance = false;
   bool _isCheckingNextOfKin = true;
   String? _gateErrorMessage;
+  String _distanceSource = 'stub';
 
   @override
   void initState() {
@@ -138,6 +142,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _isSubmitting = true;
     });
     try {
+      await _estimateDistance(silentErrors: true);
       final scheduledAt = DateTime.parse(
         _scheduledDepartureController.text.trim(),
       ).toUtc();
@@ -186,6 +191,39 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       if (mounted) {
         setState(() {
           _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _estimateDistance({bool silentErrors = false}) async {
+    if (mounted) {
+      setState(() {
+        _isEstimatingDistance = true;
+      });
+    }
+    try {
+      final estimate = await _distanceService.estimate(
+        origin: _pickupController.text,
+        destination: _dropoffController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _distanceMetersController.text = estimate.distanceMeters.toString();
+        _durationSecondsController.text = estimate.durationSeconds.toString();
+        _distanceSource = estimate.source;
+      });
+    } catch (error) {
+      if (silentErrors || !mounted) {
+        return;
+      }
+      _showErrorSnackBar(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEstimatingDistance = false;
         });
       }
     }
@@ -276,6 +314,23 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                 label: 'dropoff',
                 keyboardType: TextInputType.text,
               ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: (_isSubmitting || _isEstimatingDistance)
+                      ? null
+                      : () => _estimateDistance(),
+                  icon: _isEstimatingDistance
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.route_outlined),
+                  label: const Text('Estimate Distance'),
+                ),
+              ),
               const SizedBox(height: 12),
               _LabeledTextField(
                 controller: _passengersController,
@@ -339,13 +394,15 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
               const SizedBox(height: 12),
               _LabeledTextField(
                 controller: _distanceMetersController,
-                label: 'distance_meters (stubbed)',
+                label: 'distance_meters',
               ),
               const SizedBox(height: 12),
               _LabeledTextField(
                 controller: _durationSecondsController,
-                label: 'duration_seconds (stubbed)',
+                label: 'duration_seconds',
               ),
+              const SizedBox(height: 4),
+              Text('distance_source: $_distanceSource'),
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: _isSubmitting ? null : _submit,

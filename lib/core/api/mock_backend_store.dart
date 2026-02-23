@@ -1,4 +1,6 @@
 class MockBackendStore {
+  static final List<Map<String, dynamic>> routeChains =
+      <Map<String, dynamic>>[];
   static final Map<String, List<Map<String, dynamic>>> offersByRideId =
       <String, List<Map<String, dynamic>>>{};
   static final Map<String, Map<String, dynamic>> acceptedOfferByRideId =
