@@ -377,6 +377,7 @@ class PostgresMarketplaceReconciliationStore
 class MarketplaceReconciliationResult {
   const MarketplaceReconciliationResult({
     required this.purchaseId,
+    required this.purchase,
     required this.currentStatus,
     required this.expectedStatus,
     required this.finalStatus,
@@ -391,6 +392,7 @@ class MarketplaceReconciliationResult {
   });
 
   final String purchaseId;
+  final MarketplacePurchaseRecord purchase;
   final String currentStatus;
   final String expectedStatus;
   final String finalStatus;
@@ -536,6 +538,7 @@ class MarketplaceReconciliationService {
 
     return MarketplaceReconciliationResult(
       purchaseId: purchaseId,
+      purchase: purchase,
       currentStatus: purchase.status,
       expectedStatus: expectedStatus,
       finalStatus: dryRun ? purchase.status : finalStatus,

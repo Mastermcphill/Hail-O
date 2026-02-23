@@ -26,6 +26,7 @@ import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_handlers.dart';
 import '../modules/marketplace/marketplace_entitlement_service.dart';
 import '../modules/marketplace/marketplace_offer_repository.dart';
+import '../modules/marketplace/marketplace_reconciliation_service.dart';
 import '../modules/marketplace/marketplace_router.dart';
 import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
 import '../modules/payments/payment_service.dart';
@@ -68,11 +69,6 @@ Handler buildApiRouter({
   final disputesController = DisputesController(
     disputeService: DisputeService(db),
   );
-  final adminController = AdminController(
-    walletReversalService: WalletReversalService(db),
-    runtimeConfigSnapshot: runtimeConfigSnapshot,
-    buildInfo: buildInfo,
-  );
   final driversController = DriversController();
   final MarketplaceOfferRepository offerRepository = postgresProvider != null
       ? PostgresMarketplaceOfferRepository(postgresProvider)
@@ -89,6 +85,13 @@ Handler buildApiRouter({
     repository: entitlementRepository,
     postgresProvider: postgresProvider,
   );
+  final MarketplaceReconciliationService? reconciliationService =
+      postgresProvider != null
+      ? MarketplaceReconciliationService(
+          store: PostgresMarketplaceReconciliationStore(postgresProvider),
+          entitlementService: entitlementService,
+        )
+      : null;
   final paymentService = PaymentService.fromEnvironment(
     postgresProvider: postgresProvider,
     billingLedgerRepository: billingLedgerRepository,
@@ -110,6 +113,12 @@ Handler buildApiRouter({
     ),
   );
   final paymentsController = PaymentsController(paymentService: paymentService);
+  final adminController = AdminController(
+    walletReversalService: WalletReversalService(db),
+    runtimeConfigSnapshot: runtimeConfigSnapshot,
+    buildInfo: buildInfo,
+    reconciliationService: reconciliationService,
+  );
 
   final router = Router()
     ..get('/', (Request request) {
