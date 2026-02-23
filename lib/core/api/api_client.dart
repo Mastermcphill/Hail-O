@@ -560,7 +560,9 @@ class ApiClient {
     required Map<String, dynamic>? payload,
     required String rawBody,
   }) {
-    final code = _stringOrNull(payload?['code']);
+    final code =
+        _stringOrNull(payload?['error_code']) ??
+        _stringOrNull(payload?['code']);
     final traceId = _stringOrNull(payload?['trace_id']);
     final rawMessage = rawBody.trim();
     final message =

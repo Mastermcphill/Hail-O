@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "purchase_id": "purchase_created_001",
+    "offer_id": "offer_sedan_01",
+    "offer_title": "Budget Sedan",
+    "seat_count": 2,
+    "total_price_minor": 8400,
+    "status": "CONFIRMED",
+    "created_at": "2026-02-23T18:00:00.000Z",
+    "updated_at": "2026-02-23T18:00:05.000Z",
+    "assignments": [
+      {
+        "seat_number": 1,
+        "name": "Ada",
+        "email": "ada@test.dev"
+      },
+      {
+        "seat_number": 2,
+        "name": "Kunle",
+        "email": "kunle@test.dev"
+      }
+    ]
+  }
+}

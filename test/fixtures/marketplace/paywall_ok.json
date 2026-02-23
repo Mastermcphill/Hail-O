@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "offer_id": "offer_sedan_01",
+    "headline": "Secure this Budget Sedan offer now",
+    "bullets": [
+      "Connection fee reserves your selected capacity instantly.",
+      "Final routing and dispatch happen immediately after seat confirmation.",
+      "You can still change your plan after receipt."
+    ],
+    "legal_text": "By continuing, you agree to marketplace terms and ride matching policies.",
+    "cta_label": "Continue to Seats",
+    "connection_fee_minor": 420
+  }
+}

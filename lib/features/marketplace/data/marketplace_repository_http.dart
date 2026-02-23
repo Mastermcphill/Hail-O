@@ -6,6 +6,7 @@ import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_endpoints.dart';
+import 'marketplace_mappers.dart';
 import 'marketplace_repository.dart';
 
 class MarketplaceRepositoryHttp implements MarketplaceRepository {
@@ -18,8 +19,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   Future<List<Offer>> fetchOffers() async {
     try {
       final response = await _apiClient.get(MarketplaceEndpoints.offers);
-      final items = _extractList(response, listKey: 'offers');
-      return items.map(Offer.fromMap).toList(growable: false);
+      return mapOffersFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -34,8 +34,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.offerPaywall(offerId),
       );
-      final map = _extractMap(response, mapKey: 'paywall');
-      return PaywallCopy.fromMap(map);
+      return mapPaywallFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -55,21 +54,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         body: selection.toMap(),
         idempotencyKey: idempotencyKey,
       );
-      final purchaseId = _readString(response['purchase_id']);
-      if (purchaseId.isNotEmpty) {
-        return purchaseId;
-      }
-      final purchaseMap = _asMap(response['purchase']);
-      final nestedId = _readString(purchaseMap['id']).isNotEmpty
-          ? _readString(purchaseMap['id'])
-          : _readString(purchaseMap['purchase_id']);
-      if (nestedId.isNotEmpty) {
-        return nestedId;
-      }
-      throw const MarketplaceRepositoryException(
-        'Checkout completed but purchase id was missing.',
-        code: 'missing_purchase_id',
-      );
+      return mapPurchaseIdFromEnvelope(response);
     } on ApiException catch (error) {
       if (error.statusCode == 409) {
         final restored = await restorePurchaseByIdempotencyKey(idempotencyKey);
@@ -95,18 +80,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.restorePurchase(idempotencyKey),
       );
-      final direct = _readString(response['purchase_id']);
-      if (direct.isNotEmpty) {
-        return direct;
-      }
-      final purchaseMap = _asMap(response['purchase']);
-      final nested = _readString(purchaseMap['id']).isNotEmpty
-          ? _readString(purchaseMap['id'])
-          : _readString(purchaseMap['purchase_id']);
-      if (nested.isNotEmpty) {
-        return nested;
-      }
-      return null;
+      return mapRestoredPurchaseIdFromEnvelope(response);
     } on ApiException catch (error) {
       final code = (error.code ?? '').toLowerCase();
       if (error.statusCode == 404 || code == 'not_implemented') {
@@ -130,7 +104,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.purchase(purchaseId),
       );
-      return PurchaseReceipt.fromMap(response);
+      return mapPurchaseReceiptFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -149,7 +123,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         MarketplaceEndpoints.purchaseSeats(purchaseId),
         body: <String, dynamic>{'seat_count': seatCount},
       );
-      return PurchaseReceipt.fromMap(response);
+      return mapPurchaseReceiptFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -172,7 +146,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
               .toList(growable: false),
         },
       );
-      return PurchaseReceipt.fromMap(response);
+      return mapPurchaseReceiptFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -191,21 +165,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         MarketplaceEndpoints.changePlan(purchaseId),
         body: <String, dynamic>{'new_offer_id': newOfferId},
       );
-      final direct = _readString(response['purchase_id']);
-      if (direct.isNotEmpty) {
-        return direct;
-      }
-      final purchaseMap = _asMap(response['purchase']);
-      final nested = _readString(purchaseMap['id']).isNotEmpty
-          ? _readString(purchaseMap['id'])
-          : _readString(purchaseMap['purchase_id']);
-      if (nested.isNotEmpty) {
-        return nested;
-      }
-      throw const MarketplaceRepositoryException(
-        'Plan change completed but purchase id was missing.',
-        code: 'missing_purchase_id',
-      );
+      return mapPurchaseIdFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -220,8 +180,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.purchaseTimeline(purchaseId),
       );
-      final items = _extractList(response, listKey: 'events');
-      return items.map(TimelineEvent.fromMap).toList(growable: false);
+      return mapTimelineFromEnvelope(response);
     } catch (error) {
       throw _mapError(
         error,
@@ -258,70 +217,4 @@ MarketplaceRepositoryException _mapError(
     fallbackMessage,
     code: 'unknown_marketplace_error',
   );
-}
-
-List<Map<String, dynamic>> _extractList(
-  Map<String, dynamic> source, {
-  required String listKey,
-}) {
-  final direct = source[listKey];
-  if (direct is List) {
-    return _toMapList(direct);
-  }
-  final data = source['data'];
-  if (data is List) {
-    return _toMapList(data);
-  }
-  if (data is Map && data[listKey] is List) {
-    return _toMapList(data[listKey] as List<dynamic>);
-  }
-  return <Map<String, dynamic>>[];
-}
-
-Map<String, dynamic> _extractMap(
-  Map<String, dynamic> source, {
-  required String mapKey,
-}) {
-  final directMap = source[mapKey];
-  if (directMap is Map) {
-    return _asMap(directMap);
-  }
-  final data = source['data'];
-  if (data is Map) {
-    if (data[mapKey] is Map) {
-      return _asMap(data[mapKey]);
-    }
-    return _asMap(data);
-  }
-  return _asMap(source);
-}
-
-List<Map<String, dynamic>> _toMapList(List<dynamic> values) {
-  return values
-      .whereType<Map>()
-      .map(
-        (item) => item.map(
-          (key, value) => MapEntry<String, dynamic>(key.toString(), value),
-        ),
-      )
-      .toList(growable: false);
-}
-
-Map<String, dynamic> _asMap(dynamic value) {
-  if (value is Map<String, dynamic>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map(
-      (key, mapValue) => MapEntry<String, dynamic>(key.toString(), mapValue),
-    );
-  }
-  return <String, dynamic>{};
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
 }

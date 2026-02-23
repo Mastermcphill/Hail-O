@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "events": [
+      {
+        "id": "evt_001",
+        "title": "PURCHASE_CREATED",
+        "description": "Purchase was created successfully.",
+        "occurred_at": "2026-02-23T18:00:00.000Z",
+        "status": "success"
+      },
+      {
+        "id": "evt_002",
+        "title": "SEATS_SELECTED",
+        "description": "Initial seats were selected.",
+        "occurred_at": "2026-02-23T18:01:00.000Z",
+        "status": "success"
+      },
+      {
+        "id": "evt_003",
+        "title": "SEATS_UPDATED",
+        "description": "Seat count was updated.",
+        "occurred_at": "2026-02-23T18:02:00.000Z",
+        "status": "pending"
+      },
+      {
+        "id": "evt_004",
+        "title": "ASSIGNMENT_UPDATED",
+        "description": "Passenger assignments were updated.",
+        "occurred_at": "2026-02-23T18:03:00.000Z",
+        "status": "pending"
+      },
+      {
+        "id": "evt_005",
+        "title": "PLAN_CHANGED",
+        "description": "Plan was changed to a higher class.",
+        "occurred_at": "2026-02-23T18:04:00.000Z",
+        "status": "success"
+      }
+    ]
+  }
+}
