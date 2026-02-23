@@ -5,8 +5,10 @@ import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/driver/driver_home.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
+import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
+import '../../features/rider/next_of_kin_screen.dart';
 import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
@@ -14,20 +16,16 @@ import '../api/api_client.dart';
 import '../storage/token_storage.dart';
 
 class AppRouter {
-  AppRouter({
-    required ApiClient apiClient,
-    required TokenStorage tokenStorage,
-  }) : _apiClient = apiClient,
-       _tokenStorage = tokenStorage {
+  AppRouter({required ApiClient apiClient, required TokenStorage tokenStorage})
+    : _apiClient = apiClient,
+      _tokenStorage = tokenStorage {
     router = GoRouter(
       initialLocation: '/login',
       routes: <RouteBase>[
         GoRoute(
           path: '/login',
-          builder: (context, state) => LoginScreen(
-            apiClient: _apiClient,
-            tokenStorage: _tokenStorage,
-          ),
+          builder: (context, state) =>
+              LoginScreen(apiClient: _apiClient, tokenStorage: _tokenStorage),
         ),
         ShellRoute(
           builder: (context, state, child) {
@@ -57,6 +55,16 @@ class AppRouter {
               path: '/rider/request',
               builder: (context, state) => RideRequestScreen(
                 apiClient: _apiClient,
+                tokenStorage: _tokenStorage,
+              ),
+            ),
+            GoRoute(
+              path: '/rider/next-of-kin',
+              builder: (context, state) => NextOfKinScreen(
+                apiClient: _apiClient,
+                tokenStorage: _tokenStorage,
+                returnTo:
+                    state.uri.queryParameters['returnTo'] ?? '/rider/request',
               ),
             ),
             GoRoute(
@@ -71,10 +79,16 @@ class AppRouter {
               builder: (context, state) => const DriverHome(),
             ),
             GoRoute(
-              path: '/driver/ride-ops',
-              builder: (context, state) => DriverRideOpsScreen(
+              path: '/driver/route-chain',
+              builder: (context, state) => RouteChainScreen(
                 apiClient: _apiClient,
+                tokenStorage: _tokenStorage,
               ),
+            ),
+            GoRoute(
+              path: '/driver/ride-ops',
+              builder: (context, state) =>
+                  DriverRideOpsScreen(apiClient: _apiClient),
             ),
             GoRoute(
               path: '/driver/ride-ops/:rideId',
@@ -190,11 +204,7 @@ class RoleNavigationScaffold extends StatelessWidget {
 }
 
 class _NavItem {
-  const _NavItem({
-    required this.path,
-    required this.label,
-    required this.icon,
-  });
+  const _NavItem({required this.path, required this.label, required this.icon});
 
   final String path;
   final String label;
@@ -309,8 +319,14 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/rider/request')) {
     return 'Request Ride';
   }
+  if (_isSelectedPath(path, '/rider/next-of-kin')) {
+    return 'Next of Kin';
+  }
   if (_isSelectedPath(path, '/rider/status')) {
     return 'Ride Status';
+  }
+  if (_isSelectedPath(path, '/driver/route-chain')) {
+    return 'Route Chain';
   }
   if (_isSelectedPath(path, '/driver/ride-ops')) {
     return 'Driver Ride Ops';

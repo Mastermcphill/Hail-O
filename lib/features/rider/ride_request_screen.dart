@@ -1,17 +1,23 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
+import '../../core/storage/token_storage.dart';
+import 'next_of_kin_screen.dart';
 
 class RideRequestScreen extends StatefulWidget {
   const RideRequestScreen({
     super.key,
     required this.apiClient,
+    required this.tokenStorage,
   });
 
   final ApiClient apiClient;
+  final TokenStorage tokenStorage;
 
   @override
   State<RideRequestScreen> createState() => _RideRequestScreenState();
@@ -29,6 +35,8 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
 
   String _tripScope = 'intra_city';
   bool _isSubmitting = false;
+  bool _isCheckingNextOfKin = true;
+  String? _gateErrorMessage;
 
   @override
   void initState() {
@@ -37,6 +45,9 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         .toUtc()
         .add(const Duration(minutes: 10))
         .toIso8601String();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureNextOfKin();
+    });
   }
 
   @override
@@ -103,8 +114,111 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     }
   }
 
+  Future<void> _ensureNextOfKin() async {
+    if (mounted) {
+      setState(() {
+        _isCheckingNextOfKin = true;
+        _gateErrorMessage = null;
+      });
+    }
+
+    try {
+      final response = await widget.apiClient.get(ApiPaths.nextOfKin);
+      if (_containsNextOfKin(response) || await _hasLocalNextOfKin()) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _isCheckingNextOfKin = false;
+        });
+        return;
+      }
+      await _goToNextOfKin();
+    } catch (error) {
+      if (_isNotFound(error)) {
+        if (await _hasLocalNextOfKin()) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _isCheckingNextOfKin = false;
+          });
+          return;
+        }
+        await _goToNextOfKin();
+        return;
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isCheckingNextOfKin = false;
+        _gateErrorMessage = formatApiError(error);
+      });
+    }
+  }
+
+  Future<void> _goToNextOfKin() async {
+    if (!mounted) {
+      return;
+    }
+    final returnTo = Uri.encodeComponent('/rider/request');
+    context.go('/rider/next-of-kin?returnTo=$returnTo');
+  }
+
+  Future<bool> _hasLocalNextOfKin() async {
+    final encoded = await widget.tokenStorage.readValue(
+      kNextOfKinLocalStorageKey,
+    );
+    if (encoded == null || encoded.trim().isEmpty) {
+      return false;
+    }
+    try {
+      final decoded = jsonDecode(encoded);
+      final map = _asMap(decoded);
+      return _hasAllNextOfKinFields(map);
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isCheckingNextOfKin) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_gateErrorMessage != null) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  'Could not verify next-of-kin',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _gateErrorMessage!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _ensureNextOfKin,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -210,9 +324,9 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   }
 
   void _showErrorSnackBar(Object error) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_errorText(error))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_errorText(error))));
   }
 }
 
@@ -272,4 +386,52 @@ String? _resolveRideId(Map<String, dynamic> response) {
 
 String _errorText(Object error) {
   return formatApiError(error);
+}
+
+bool _containsNextOfKin(Map<String, dynamic> response) {
+  if (_hasAllNextOfKinFields(response)) {
+    return true;
+  }
+
+  final nextOfKinMap = _asMap(response['next_of_kin']);
+  if (_hasAllNextOfKinFields(nextOfKinMap)) {
+    return true;
+  }
+
+  final dataMap = _asMap(response['data']);
+  if (_hasAllNextOfKinFields(dataMap)) {
+    return true;
+  }
+
+  final nestedMap = _asMap(dataMap['next_of_kin']);
+  return _hasAllNextOfKinFields(nestedMap);
+}
+
+bool _hasAllNextOfKinFields(Map<String, dynamic> map) {
+  return _readString(map['full_name']).isNotEmpty &&
+      _readString(map['phone']).isNotEmpty &&
+      _readString(map['relationship']).isNotEmpty;
+}
+
+bool _isNotFound(Object error) {
+  return error is ApiException && error.statusCode == 404;
+}
+
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) {
+    return value;
+  }
+  if (value is Map) {
+    return value.map(
+      (key, mapValue) => MapEntry<String, dynamic>(key.toString(), mapValue),
+    );
+  }
+  return <String, dynamic>{};
+}
+
+String _readString(Object? value) {
+  if (value is String) {
+    return value.trim();
+  }
+  return '';
 }

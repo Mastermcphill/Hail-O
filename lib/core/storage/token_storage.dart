@@ -35,9 +35,18 @@ class TokenStorage {
   }
 
   Future<void> clearAuth() async {
-    await Future.wait<void>(<Future<void>>[
-      deleteToken(),
-      deleteRole(),
-    ]);
+    await Future.wait<void>(<Future<void>>[deleteToken(), deleteRole()]);
+  }
+
+  Future<void> writeValue(String key, String value) {
+    return _storage.write(key: key, value: value);
+  }
+
+  Future<String?> readValue(String key) {
+    return _storage.read(key: key);
+  }
+
+  Future<void> deleteValue(String key) {
+    return _storage.delete(key: key);
   }
 }

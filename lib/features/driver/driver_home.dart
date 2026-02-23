@@ -22,6 +22,13 @@ class DriverHome extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               FilledButton(
+                onPressed: () {
+                  context.go('/driver/route-chain');
+                },
+                child: const Text('Create Route Chain'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
                 onPressed: () async {
                   final rideId = await _promptForRideId(
                     context,

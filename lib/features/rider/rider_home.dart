@@ -41,6 +41,13 @@ class RiderHome extends StatelessWidget {
                 },
                 child: const Text('Open Ride Status (paste ride id)'),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: () {
+                  context.go('/rider/next-of-kin');
+                },
+                child: const Text('Next-of-kin'),
+              ),
             ],
           ),
         ),
