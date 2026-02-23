@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../marketplace/data/marketplace_dev_settings.dart';
+
 class RiderHome extends StatelessWidget {
   const RiderHome({super.key});
 
@@ -51,15 +53,94 @@ class RiderHome extends StatelessWidget {
               ),
               if (kDebugMode) ...<Widget>[
                 const SizedBox(height: 10),
-                OutlinedButton(
-                  onPressed: () {
-                    context.go('/marketplace/offers');
-                  },
-                  child: const Text('Marketplace (Debug)'),
-                ),
+                const _MarketplaceDebugSection(),
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarketplaceDebugSection extends StatefulWidget {
+  const _MarketplaceDebugSection();
+
+  @override
+  State<_MarketplaceDebugSection> createState() =>
+      _MarketplaceDebugSectionState();
+}
+
+class _MarketplaceDebugSectionState extends State<_MarketplaceDebugSection> {
+  final MarketplaceDevSettings _settings = const MarketplaceDevSettings();
+  bool _loading = true;
+  bool _saving = false;
+  bool _useLiveApi = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final value = await _settings.readUseLiveApi();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _useLiveApi = value;
+      _loading = false;
+    });
+  }
+
+  Future<void> _updateLiveApiPreference(bool value) async {
+    setState(() {
+      _useLiveApi = value;
+      _saving = true;
+    });
+
+    await _settings.writeUseLiveApi(value);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _saving = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              'Marketplace Debug',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Marketplace: Use Live API'),
+              subtitle: const Text('When off, mock repository stays primary.'),
+              value: _useLiveApi,
+              onChanged: (_loading || _saving)
+                  ? null
+                  : (value) {
+                      _updateLiveApiPreference(value);
+                    },
+            ),
+            const SizedBox(height: 4),
+            OutlinedButton(
+              onPressed: () {
+                context.go('/marketplace/offers');
+              },
+              child: const Text('Marketplace (Debug)'),
+            ),
+          ],
         ),
       ),
     );

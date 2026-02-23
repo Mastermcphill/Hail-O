@@ -4,6 +4,7 @@ import '../models/offer.dart';
 import '../models/paywall_copy.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
+import 'marketplace_endpoints.dart';
 import 'marketplace_repository.dart';
 
 class MarketplaceRepositoryHttp implements MarketplaceRepository {
@@ -15,7 +16,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   @override
   Future<List<Offer>> fetchOffers() async {
     try {
-      final response = await _apiClient.get('/marketplace/offers');
+      final response = await _apiClient.get(MarketplaceEndpoints.offers);
       final items = _extractList(response, listKey: 'offers');
       return items.map(Offer.fromMap).toList(growable: false);
     } catch (error) {
@@ -29,7 +30,9 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   @override
   Future<PaywallCopy> fetchPaywallCopy(String offerId) async {
     try {
-      final response = await _apiClient.get('/marketplace/paywall/$offerId');
+      final response = await _apiClient.get(
+        MarketplaceEndpoints.offerPaywall(offerId),
+      );
       final map = _extractMap(response, mapKey: 'paywall');
       return PaywallCopy.fromMap(map);
     } catch (error) {
@@ -47,7 +50,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   }) async {
     try {
       final response = await _apiClient.post(
-        '/marketplace/checkout',
+        MarketplaceEndpoints.purchases,
         body: selection.toMap(),
         idempotencyKey: idempotencyKey,
       );
@@ -87,10 +90,9 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
 
   @override
   Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey) async {
-    final queryKey = Uri.encodeQueryComponent(idempotencyKey);
     try {
       final response = await _apiClient.get(
-        '/marketplace/purchases/restore?idempotencyKey=$queryKey',
+        MarketplaceEndpoints.restorePurchase(idempotencyKey),
       );
       final direct = _readString(response['purchase_id']);
       if (direct.isNotEmpty) {
@@ -125,7 +127,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   Future<List<TimelineEvent>> fetchTimeline(String purchaseId) async {
     try {
       final response = await _apiClient.get(
-        '/marketplace/timeline/$purchaseId',
+        MarketplaceEndpoints.purchaseTimeline(purchaseId),
       );
       final items = _extractList(response, listKey: 'events');
       return items.map(TimelineEvent.fromMap).toList(growable: false);
@@ -146,14 +148,18 @@ MarketplaceRepositoryException _mapError(
     return error;
   }
   if (error is ApiException) {
-    if (error.statusCode == 404) {
+    final code = (error.code ?? '').trim().toLowerCase();
+    if (error.statusCode == 404 || code == 'not_implemented') {
       return MarketplaceRepositoryException(
         'Marketplace endpoint is not available on this backend yet.',
-        code: error.code ?? 'endpoint_not_available',
+        code: code.isEmpty ? 'endpoint_not_available' : code,
       );
     }
+    final message = error.message.trim().isEmpty
+        ? fallbackMessage
+        : error.message;
     return MarketplaceRepositoryException(
-      error.message,
+      message,
       code: error.code ?? 'http_${error.statusCode}',
     );
   }
