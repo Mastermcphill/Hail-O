@@ -6,7 +6,9 @@ import 'package:uuid/uuid.dart';
 import '../../infra/postgres_provider.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import 'manual_payment_provider.dart';
+import 'paystack_payment_provider.dart';
 import 'payment_provider.dart';
+import 'stripe_payment_provider.dart';
 
 class PaymentWebhookProcessResult {
   const PaymentWebhookProcessResult({
@@ -42,11 +44,21 @@ class PaymentService {
   factory PaymentService.fromEnvironment({
     required PostgresProvider? postgresProvider,
     String? configuredProvider,
+    String? paystackSecretKey,
+    String? stripeWebhookSecret,
     Uuid? uuid,
     DateTime Function()? nowUtc,
   }) {
     final providerName = (configuredProvider ?? 'manual').trim().toLowerCase();
     final provider = switch (providerName) {
+      'paystack' => PaystackPaymentProvider(
+        secretKey: (paystackSecretKey ?? '').trim(),
+        uuid: uuid,
+      ),
+      'stripe' => StripePaymentProvider(
+        webhookSecret: (stripeWebhookSecret ?? '').trim(),
+        uuid: uuid,
+      ),
       'manual' => ManualPaymentProvider(uuid: uuid),
       _ => ManualPaymentProvider(uuid: uuid),
     };

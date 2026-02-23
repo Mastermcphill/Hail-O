@@ -78,6 +78,12 @@ Handler buildApiRouter({
   final paymentService = PaymentService.fromEnvironment(
     postgresProvider: postgresProvider,
     configuredProvider: Platform.environment['PAYMENT_PROVIDER'],
+    paystackSecretKey:
+        Platform.environment['PAYSTACK_SECRET_KEY'] ??
+        Platform.environment['PAYMENT_PROVIDER_SECRET'],
+    stripeWebhookSecret:
+        Platform.environment['STRIPE_WEBHOOK_SECRET'] ??
+        Platform.environment['PAYMENT_PROVIDER_SECRET'],
   );
   final marketplaceRouter = MarketplaceRouter(
     handlers: MarketplaceHandlers(
