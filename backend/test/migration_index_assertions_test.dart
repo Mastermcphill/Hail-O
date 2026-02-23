@@ -24,6 +24,8 @@ void main() {
       final opsSql = sqlByName['004_operational_records.sql'] ?? '';
       final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
       final ledgerSql = sqlByName['006_billing_ledger_entries.sql'] ?? '';
+      final entitlementsSql =
+          sqlByName['007_marketplace_entitlements.sql'] ?? '';
 
       expect(
         authSql.contains(
@@ -62,6 +64,13 @@ void main() {
         ),
         isTrue,
         reason: 'billing ledger replay dedupe index must exist',
+      );
+      expect(
+        entitlementsSql.contains(
+          'CREATE UNIQUE INDEX IF NOT EXISTS ux_marketplace_entitlements_active_type',
+        ),
+        isTrue,
+        reason: 'single active entitlement row per type must exist',
       );
     },
   );
