@@ -24,6 +24,7 @@ void main() {
     final marketplaceWebhookSql =
         sqlByName['006_marketplace_webhooks.sql'] ?? '';
     final billingLedgerSql = sqlByName['007_billing_ledger_entries.sql'] ?? '';
+    final entitlementSql = sqlByName['008_marketplace_entitlements.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -103,6 +104,34 @@ void main() {
       ),
       isTrue,
       reason: 'billing ledger user timeline index must exist',
+    );
+    expect(
+      entitlementSql.contains(
+        'CREATE TABLE IF NOT EXISTS marketplace_entitlements',
+      ),
+      isTrue,
+      reason: 'marketplace entitlements table must exist',
+    );
+    expect(
+      entitlementSql.contains(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_marketplace_entitlements_active_unique',
+      ),
+      isTrue,
+      reason: 'active entitlement uniqueness must exist',
+    );
+    expect(
+      entitlementSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_marketplace_entitlements_purchase_effective_desc',
+      ),
+      isTrue,
+      reason: 'entitlement purchase timeline index must exist',
+    );
+    expect(
+      entitlementSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_marketplace_entitlements_user_effective_desc',
+      ),
+      isTrue,
+      reason: 'entitlement user timeline index must exist',
     );
   });
 }
