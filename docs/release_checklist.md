@@ -30,6 +30,11 @@ Bash:
 bash tool/release_gate.sh
 ```
 
+Backend compile/boot gate:
+```bash
+bash backend/ops/compile_gate.sh
+```
+
 Convenience wrapper (staging-first + optional production):
 ```powershell
 powershell -ExecutionPolicy Bypass -File tool/release.ps1
@@ -56,14 +61,22 @@ INCLUDE_PROD=1 bash tool/release.sh
 Production:
 ```bash
 curl -i https://hail-o-api.onrender.com/health
+curl -i https://hail-o-api.onrender.com/healthz
 curl -i https://hail-o-api.onrender.com/api/healthz
 ```
 
 Staging:
 ```bash
 curl -i https://hail-o-api-staging.onrender.com/health
+curl -i https://hail-o-api-staging.onrender.com/healthz
 curl -i https://hail-o-api-staging.onrender.com/api/healthz
 ```
+
+Expected Render startup logs:
+- exactly one line:
+  - `{"event":"server_listen","host":"0.0.0.0","port":<resolved>}`
+- optional bind check line:
+  - `{"event":"bind_check_ok","path":"/api/healthz","port":<resolved>}`
 
 ## 5) Run Smoke Scripts
 Staging (default):
