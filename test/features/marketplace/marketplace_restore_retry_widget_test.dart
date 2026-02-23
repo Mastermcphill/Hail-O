@@ -15,10 +15,13 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('navigates offers -> paywall -> seats -> timeline', (
+  testWidgets('failed checkout can resume via persisted idempotency key', (
     tester,
   ) async {
-    final repository = MarketplaceRepositoryMock();
+    final repository = MarketplaceRepositoryMock(
+      failFirstCreateCheckout: true,
+      delayFirstRestore: true,
+    );
 
     final router = GoRouter(
       initialLocation: '/marketplace/offers',
@@ -61,15 +64,8 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('marketplace_offer_continue_0')),
-      findsOneWidget,
-    );
-
     await tester.tap(find.byKey(const Key('marketplace_offer_continue_0')));
     await tester.pumpAndSettle();
-
-    expect(find.text('Connection Fee Paywall'), findsOneWidget);
 
     await tester.tap(
       find.byKey(const Key('marketplace_paywall_continue_button')),
@@ -77,19 +73,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Seat Selection'), findsOneWidget);
-    expect(find.byType(MarketplaceSeatsScreen), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('marketplace_seat_count_increment')));
+    await tester.tap(find.byKey(const Key('marketplace_confirm_seats_button')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('marketplace_seat_count_increment')));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    final confirmButton = find.byKey(
-      const Key('marketplace_confirm_seats_button'),
+    expect(find.text('Seat Selection'), findsOneWidget);
+    expect(
+      find.byKey(const Key('marketplace_resume_purchase_button')),
+      findsOneWidget,
     );
-    expect(confirmButton, findsOneWidget);
-    await tester.ensureVisible(confirmButton);
-    await tester.tap(confirmButton);
+
+    await tester.tap(
+      find.byKey(const Key('marketplace_resume_purchase_button')),
+    );
     await tester.pump();
     await tester.pumpAndSettle();
 

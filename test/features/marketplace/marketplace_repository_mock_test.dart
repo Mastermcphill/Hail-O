@@ -35,6 +35,7 @@ void main() {
             ),
           ],
         ),
+        idempotencyKey: 'idem_checkout_1',
       );
 
       expect(purchaseId, isNotEmpty);
@@ -45,6 +46,32 @@ void main() {
         timeline.map((event) => event.title),
         containsAll(<String>['Offer accepted', 'Seats locked']),
       );
+    });
+
+    test('keeps purchase id stable for the same idempotency key', () async {
+      final offers = await repository.fetchOffers();
+      final offerId = offers.first.id;
+      final selection = SeatSelection(
+        offerId: offerId,
+        seatCount: 3,
+        assignments: const <SeatAssignment>[
+          SeatAssignment(seatNumber: 1, name: 'Ada', email: 'ada@test.dev'),
+          SeatAssignment(seatNumber: 2, name: 'Kunle', email: 'kunle@test.dev'),
+          SeatAssignment(seatNumber: 3, name: 'Tobi', email: 'tobi@test.dev'),
+        ],
+      );
+
+      final first = await repository.createCheckout(
+        selection,
+        idempotencyKey: 'stable_idem_key',
+      );
+      final second = await repository.createCheckout(
+        selection,
+        idempotencyKey: 'stable_idem_key',
+      );
+
+      expect(first, isNotEmpty);
+      expect(second, first);
     });
   });
 }

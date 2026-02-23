@@ -41,11 +41,15 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   }
 
   @override
-  Future<String> createCheckout(SeatSelection selection) async {
+  Future<String> createCheckout(
+    SeatSelection selection, {
+    required String idempotencyKey,
+  }) async {
     try {
       final response = await _apiClient.post(
         '/marketplace/checkout',
         body: selection.toMap(),
+        idempotencyKey: idempotencyKey,
       );
       final purchaseId = _readString(response['purchase_id']);
       if (purchaseId.isNotEmpty) {
@@ -62,10 +66,57 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         'Checkout completed but purchase id was missing.',
         code: 'missing_purchase_id',
       );
+    } on ApiException catch (error) {
+      if (error.statusCode == 409) {
+        final restored = await restorePurchaseByIdempotencyKey(idempotencyKey);
+        if (restored != null && restored.isNotEmpty) {
+          return restored;
+        }
+      }
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to create checkout at this time.',
+      );
     } catch (error) {
       throw _mapError(
         error,
         fallbackMessage: 'Unable to create checkout at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey) async {
+    final queryKey = Uri.encodeQueryComponent(idempotencyKey);
+    try {
+      final response = await _apiClient.get(
+        '/marketplace/purchases/restore?idempotencyKey=$queryKey',
+      );
+      final direct = _readString(response['purchase_id']);
+      if (direct.isNotEmpty) {
+        return direct;
+      }
+      final purchaseMap = _asMap(response['purchase']);
+      final nested = _readString(purchaseMap['id']).isNotEmpty
+          ? _readString(purchaseMap['id'])
+          : _readString(purchaseMap['purchase_id']);
+      if (nested.isNotEmpty) {
+        return nested;
+      }
+      return null;
+    } on ApiException catch (error) {
+      final code = (error.code ?? '').toLowerCase();
+      if (error.statusCode == 404 || code == 'not_implemented') {
+        return null;
+      }
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to restore purchase at this time.',
+      );
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to restore purchase at this time.',
       );
     }
   }

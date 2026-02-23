@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -26,23 +28,62 @@ class ApiClient {
 
     final requestId = newRequestId();
     final headers = await _buildHeaders(requestId: requestId);
-    try {
-      final response = await _httpClient.get(
-        _buildUri(normalizedPath),
-        headers: headers,
-      );
-      return _decodeResponse(response);
-    } on ApiException catch (error) {
-      if (_shouldFallbackToMock(error, normalizedPath)) {
-        return _mockResponse(method: 'GET', path: normalizedPath);
+    for (var attempt = 0; ; attempt++) {
+      try {
+        final response = await _httpClient
+            .get(_buildUri(normalizedPath), headers: headers)
+            .timeout(_requestTimeout);
+        return _decodeResponse(response);
+      } on ApiException catch (error) {
+        if (_shouldFallbackToMock(error, normalizedPath)) {
+          return _mockResponse(method: 'GET', path: normalizedPath);
+        }
+        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        rethrow;
+      } on TimeoutException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'request_timeout',
+          message: 'Request timed out.',
+          rawBody: error.toString(),
+        );
+      } on SocketException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'network_error',
+          message: 'Network request failed.',
+          rawBody: error.toString(),
+        );
+      } on http.ClientException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'client_error',
+          message: 'HTTP client request failed.',
+          rawBody: error.toString(),
+        );
       }
-      rethrow;
     }
   }
 
   Future<Map<String, dynamic>> post(
     String path, {
     Map<String, dynamic>? body,
+    String? idempotencyKey,
   }) async {
     final normalizedPath = _normalizePath(path);
     final requestBody = body ?? <String, dynamic>{};
@@ -55,28 +96,72 @@ class ApiClient {
     }
 
     final requestId = newRequestId();
-    final idempotencyKey = newIdempotencyKey();
+    final resolvedIdempotencyKey =
+        (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
+        ? idempotencyKey.trim()
+        : newIdempotencyKey();
     final headers = await _buildHeaders(
       requestId: requestId,
-      idempotencyKey: idempotencyKey,
+      idempotencyKey: resolvedIdempotencyKey,
       includeJsonContentType: true,
     );
-    try {
-      final response = await _httpClient.post(
-        _buildUri(normalizedPath),
-        headers: headers,
-        body: jsonEncode(requestBody),
-      );
-      return _decodeResponse(response);
-    } on ApiException catch (error) {
-      if (_shouldFallbackToMock(error, normalizedPath)) {
-        return _mockResponse(
-          method: 'POST',
-          path: normalizedPath,
-          body: requestBody,
+    for (var attempt = 0; ; attempt++) {
+      try {
+        final response = await _httpClient
+            .post(
+              _buildUri(normalizedPath),
+              headers: headers,
+              body: jsonEncode(requestBody),
+            )
+            .timeout(_requestTimeout);
+        return _decodeResponse(response);
+      } on ApiException catch (error) {
+        if (_shouldFallbackToMock(error, normalizedPath)) {
+          return _mockResponse(
+            method: 'POST',
+            path: normalizedPath,
+            body: requestBody,
+          );
+        }
+        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        rethrow;
+      } on TimeoutException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'request_timeout',
+          message: 'Request timed out.',
+          rawBody: error.toString(),
+        );
+      } on SocketException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'network_error',
+          message: 'Network request failed.',
+          rawBody: error.toString(),
+        );
+      } on http.ClientException catch (error) {
+        if (attempt < _maxRetryAttempts) {
+          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+          continue;
+        }
+        throw ApiException(
+          statusCode: 0,
+          code: 'client_error',
+          message: 'HTTP client request failed.',
+          rawBody: error.toString(),
         );
       }
-      rethrow;
     }
   }
 
@@ -464,4 +549,22 @@ class ApiClient {
     }
     return 0;
   }
+}
+
+const int _maxRetryAttempts = 2;
+const Duration _requestTimeout = Duration(seconds: 12);
+const List<Duration> _retryBackoff = <Duration>[
+  Duration(milliseconds: 250),
+  Duration(milliseconds: 750),
+];
+
+Duration _retryDelayForAttempt(int attempt) {
+  if (attempt >= 0 && attempt < _retryBackoff.length) {
+    return _retryBackoff[attempt];
+  }
+  return _retryBackoff.last;
+}
+
+bool _isRetryableApiException(ApiException error) {
+  return error.statusCode >= 500;
 }

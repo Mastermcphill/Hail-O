@@ -4,10 +4,28 @@ import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
 
-class MarketplaceSeatsScreen extends StatelessWidget {
+class MarketplaceSeatsScreen extends StatefulWidget {
   const MarketplaceSeatsScreen({super.key, required this.offerId});
 
   final String offerId;
+
+  @override
+  State<MarketplaceSeatsScreen> createState() => _MarketplaceSeatsScreenState();
+}
+
+class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      context.read<MarketplaceController>().loadPendingCheckoutForOffer(
+        widget.offerId,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +43,7 @@ class MarketplaceSeatsScreen extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 6),
-                SelectableText('offer_id: $offerId'),
+                SelectableText('offer_id: ${widget.offerId}'),
                 const SizedBox(height: 12),
                 _SeatCountCard(
                   seatCount: controller.seatCount,
@@ -53,27 +71,62 @@ class MarketplaceSeatsScreen extends StatelessWidget {
                 )
                   _AssignmentCard(index: index),
                 const SizedBox(height: 12),
+                if (controller.hasPendingCheckoutForOffer(
+                  widget.offerId,
+                )) ...<Widget>[
+                  FilledButton.tonal(
+                    key: const Key('marketplace_resume_purchase_button'),
+                    onPressed: controller.submittingCheckout
+                        ? null
+                        : () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            final router = GoRouter.of(context);
+                            final purchaseId = await controller
+                                .resumePendingCheckout(offerId: widget.offerId);
+                            if (!mounted) {
+                              return;
+                            }
+                            if (purchaseId == null || purchaseId.isEmpty) {
+                              final message =
+                                  controller.errorMessage ??
+                                  'Unable to resume purchase.';
+                              messenger.showSnackBar(
+                                SnackBar(content: Text(message)),
+                              );
+                              return;
+                            }
+                            router.push(
+                              '/marketplace/timeline?purchaseId='
+                              '${Uri.encodeQueryComponent(purchaseId)}',
+                            );
+                          },
+                    child: const Text('Resume purchase'),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 FilledButton(
                   key: const Key('marketplace_confirm_seats_button'),
                   onPressed: controller.submittingCheckout
                       ? null
                       : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final router = GoRouter.of(context);
                           final purchaseId = await controller.createCheckout(
-                            offerId: offerId,
+                            offerId: widget.offerId,
                           );
-                          if (!context.mounted) {
+                          if (!mounted) {
                             return;
                           }
                           if (purchaseId == null || purchaseId.isEmpty) {
                             final message =
                                 controller.errorMessage ??
                                 'Could not create checkout.';
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text(message)));
+                            messenger.showSnackBar(
+                              SnackBar(content: Text(message)),
+                            );
                             return;
                           }
-                          context.push(
+                          router.push(
                             '/marketplace/timeline?purchaseId='
                             '${Uri.encodeQueryComponent(purchaseId)}',
                           );
@@ -179,7 +232,7 @@ class _AssignmentCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
               'Seat ${index + 1}',

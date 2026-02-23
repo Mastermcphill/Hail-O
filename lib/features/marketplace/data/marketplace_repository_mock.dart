@@ -8,8 +8,18 @@ import '../models/timeline_event.dart';
 import 'marketplace_repository.dart';
 
 class MarketplaceRepositoryMock implements MarketplaceRepository {
+  MarketplaceRepositoryMock({
+    this.failFirstCreateCheckout = false,
+    this.delayFirstRestore = false,
+  });
+
+  final bool failFirstCreateCheckout;
+  final bool delayFirstRestore;
   final Map<String, List<TimelineEvent>> _timelineByPurchaseId =
       <String, List<TimelineEvent>>{};
+  final Map<String, String> _purchaseIdByIdempotencyKey = <String, String>{};
+  final Set<String> _failedCreateKeys = <String>{};
+  final Set<String> _firstRestoreAttempted = <String>{};
 
   @override
   Future<List<Offer>> fetchOffers() async {
@@ -31,15 +41,48 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   }
 
   @override
-  Future<String> createCheckout(SeatSelection selection) async {
+  Future<String> createCheckout(
+    SeatSelection selection, {
+    required String idempotencyKey,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 220));
+    final existingPurchase = _purchaseIdByIdempotencyKey[idempotencyKey];
+    if (existingPurchase != null && existingPurchase.isNotEmpty) {
+      return existingPurchase;
+    }
+
     final purchaseId = 'purchase_${newRequestId().replaceAll('-', '')}';
+    _purchaseIdByIdempotencyKey[idempotencyKey] = purchaseId;
     _timelineByPurchaseId[purchaseId] = _buildTimeline(
       purchaseId: purchaseId,
       offerId: selection.offerId,
       seatCount: selection.seatCount,
       priceMinor: _priceForOffer(selection.offerId, selection.seatCount),
     );
+    if (failFirstCreateCheckout &&
+        !_failedCreateKeys.contains(idempotencyKey)) {
+      _failedCreateKeys.add(idempotencyKey);
+      throw const MarketplaceRepositoryException(
+        'Transient checkout failure in mock mode.',
+        code: 'checkout_temporary_unavailable',
+      );
+    }
+    return purchaseId;
+  }
+
+  @override
+  Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey) async {
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+    final purchaseId = _purchaseIdByIdempotencyKey[idempotencyKey];
+    if (purchaseId == null || purchaseId.isEmpty) {
+      return null;
+    }
+    if (delayFirstRestore &&
+        _failedCreateKeys.contains(idempotencyKey) &&
+        !_firstRestoreAttempted.contains(idempotencyKey)) {
+      _firstRestoreAttempted.add(idempotencyKey);
+      return null;
+    }
     return purchaseId;
   }
 

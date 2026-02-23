@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
+import '../../../core/util/ids.dart';
+import '../data/marketplace_local_store.dart';
 import '../data/marketplace_repository.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
@@ -7,10 +11,14 @@ import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 
 class MarketplaceController extends ChangeNotifier {
-  MarketplaceController({required MarketplaceRepository repository})
-    : _repository = repository;
+  MarketplaceController({
+    required MarketplaceRepository repository,
+    MarketplaceLocalStore? localStore,
+  }) : _repository = repository,
+       _localStore = localStore ?? const MarketplaceLocalStore();
 
   final MarketplaceRepository _repository;
+  final MarketplaceLocalStore _localStore;
 
   List<Offer> _offers = <Offer>[];
   PaywallCopy? _paywallCopy;
@@ -21,6 +29,8 @@ class MarketplaceController extends ChangeNotifier {
   bool _loadingTimeline = false;
   bool _submittingCheckout = false;
   int _seatCount = 1;
+  String? _pendingCheckoutOfferId;
+  String? _pendingCheckoutIdempotencyKey;
   List<SeatAssignment> _assignments = <SeatAssignment>[
     const SeatAssignment(seatNumber: 1, name: '', email: ''),
   ];
@@ -35,6 +45,13 @@ class MarketplaceController extends ChangeNotifier {
   bool get submittingCheckout => _submittingCheckout;
   int get seatCount => _seatCount;
   List<SeatAssignment> get assignments => _assignments;
+  String? get pendingCheckoutIdempotencyKey => _pendingCheckoutIdempotencyKey;
+
+  bool hasPendingCheckoutForOffer(String offerId) {
+    return _pendingCheckoutOfferId == offerId &&
+        _pendingCheckoutIdempotencyKey != null &&
+        _pendingCheckoutIdempotencyKey!.isNotEmpty;
+  }
 
   Future<void> loadOffers() async {
     if (_loadingOffers) {
@@ -89,6 +106,18 @@ class MarketplaceController extends ChangeNotifier {
     }
   }
 
+  Future<void> loadPendingCheckoutForOffer(String offerId) async {
+    String? pending;
+    try {
+      pending = await _localStore.readPendingCheckoutKeyForOffer(offerId);
+    } catch (_) {
+      pending = null;
+    }
+    _pendingCheckoutOfferId = offerId;
+    _pendingCheckoutIdempotencyKey = pending;
+    notifyListeners();
+  }
+
   void setSeatCount(int value) {
     _seatCount = _clampSeatCount(value);
     _syncAssignmentsToSeatCount();
@@ -117,19 +146,80 @@ class MarketplaceController extends ChangeNotifier {
     if (_submittingCheckout) {
       return null;
     }
+
     _submittingCheckout = true;
     _errorMessage = null;
     notifyListeners();
+
+    final selection = SeatSelection(
+      offerId: offerId,
+      seatCount: _seatCount,
+      assignments: _assignments.take(_seatCount).toList(growable: false),
+    );
+    String? idempotencyKey;
+
     try {
-      final selection = SeatSelection(
+      idempotencyKey = await _resolveIdempotencyKey(
         offerId: offerId,
-        seatCount: _seatCount,
-        assignments: _assignments.take(_seatCount).toList(growable: false),
+        selection: selection,
       );
-      return await _repository.createCheckout(selection);
+      final purchaseId = await _repository.createCheckout(
+        selection,
+        idempotencyKey: idempotencyKey,
+      );
+      await _finalizeCheckoutSuccess(
+        offerId: offerId,
+        idempotencyKey: idempotencyKey,
+        purchaseId: purchaseId,
+      );
+      return purchaseId;
     } catch (error) {
+      if (idempotencyKey != null && idempotencyKey.isNotEmpty) {
+        final restored = await _tryRestoreCheckout(idempotencyKey);
+        if (restored != null && restored.isNotEmpty) {
+          await _finalizeCheckoutSuccess(
+            offerId: offerId,
+            idempotencyKey: idempotencyKey,
+            purchaseId: restored,
+          );
+          return restored;
+        }
+      }
       _errorMessage = error.toString();
       return null;
+    } finally {
+      _submittingCheckout = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> resumePendingCheckout({required String offerId}) async {
+    if (_submittingCheckout) {
+      return null;
+    }
+    _submittingCheckout = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final key = await _resolvePendingKeyForOffer(offerId);
+      if (key == null || key.isEmpty) {
+        _errorMessage = 'No pending purchase found to resume.';
+        return null;
+      }
+
+      final restored = await _tryRestoreCheckout(key);
+      if (restored == null || restored.isEmpty) {
+        _errorMessage = 'Unable to resume purchase yet. Please retry.';
+        return null;
+      }
+
+      await _finalizeCheckoutSuccess(
+        offerId: offerId,
+        idempotencyKey: key,
+        purchaseId: restored,
+      );
+      return restored;
     } finally {
       _submittingCheckout = false;
       notifyListeners();
@@ -139,6 +229,93 @@ class MarketplaceController extends ChangeNotifier {
   void clearError() {
     _errorMessage = null;
     notifyListeners();
+  }
+
+  Future<String> _resolveIdempotencyKey({
+    required String offerId,
+    required SeatSelection selection,
+  }) async {
+    final signature = _selectionSignature(selection);
+    final bySignature = await _localStore.readCheckoutIdempotencyKey(signature);
+    final byOffer = await _resolvePendingKeyForOffer(offerId);
+
+    final resolved = (bySignature != null && bySignature.isNotEmpty)
+        ? bySignature
+        : ((byOffer != null && byOffer.isNotEmpty)
+              ? byOffer
+              : newIdempotencyKey());
+
+    await _localStore.writeCheckoutIdempotencyKey(
+      signature: signature,
+      idempotencyKey: resolved,
+    );
+    await _localStore.writePendingCheckoutKeyForOffer(
+      offerId: offerId,
+      idempotencyKey: resolved,
+    );
+
+    _pendingCheckoutOfferId = offerId;
+    _pendingCheckoutIdempotencyKey = resolved;
+    return resolved;
+  }
+
+  Future<String?> _resolvePendingKeyForOffer(String offerId) async {
+    if (_pendingCheckoutOfferId == offerId &&
+        _pendingCheckoutIdempotencyKey != null &&
+        _pendingCheckoutIdempotencyKey!.isNotEmpty) {
+      return _pendingCheckoutIdempotencyKey;
+    }
+
+    final fromStore = await _localStore.readPendingCheckoutKeyForOffer(offerId);
+    _pendingCheckoutOfferId = offerId;
+    _pendingCheckoutIdempotencyKey = fromStore;
+    return fromStore;
+  }
+
+  Future<String?> _tryRestoreCheckout(String idempotencyKey) async {
+    try {
+      final restored = await _repository.restorePurchaseByIdempotencyKey(
+        idempotencyKey,
+      );
+      if (restored != null && restored.isNotEmpty) {
+        return restored;
+      }
+    } catch (_) {
+      // Continue to local restoration map fallback.
+    }
+    return _localStore.readPurchaseIdByIdempotencyKey(idempotencyKey);
+  }
+
+  Future<void> _finalizeCheckoutSuccess({
+    required String offerId,
+    required String idempotencyKey,
+    required String purchaseId,
+  }) async {
+    await _localStore.writePurchaseIdByIdempotencyKey(
+      idempotencyKey: idempotencyKey,
+      purchaseId: purchaseId,
+    );
+    await _localStore.clearPendingCheckoutKeyForOffer(offerId);
+    _pendingCheckoutOfferId = offerId;
+    _pendingCheckoutIdempotencyKey = null;
+    _errorMessage = null;
+  }
+
+  String _selectionSignature(SeatSelection selection) {
+    final payload = <String, dynamic>{
+      'offer_id': selection.offerId,
+      'seat_count': selection.seatCount,
+      'assignments': selection.assignments
+          .map(
+            (assignment) => <String, dynamic>{
+              'seat_number': assignment.seatNumber,
+              'name': assignment.name,
+              'email': assignment.email,
+            },
+          )
+          .toList(growable: false),
+    };
+    return jsonEncode(payload);
   }
 
   void _syncAssignmentsToSeatCount() {

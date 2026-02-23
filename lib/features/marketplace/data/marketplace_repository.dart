@@ -12,7 +12,12 @@ abstract class MarketplaceRepository {
 
   Future<PaywallCopy> fetchPaywallCopy(String offerId);
 
-  Future<String> createCheckout(SeatSelection selection);
+  Future<String> createCheckout(
+    SeatSelection selection, {
+    required String idempotencyKey,
+  });
+
+  Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey);
 
   Future<List<TimelineEvent>> fetchTimeline(String purchaseId);
 }
