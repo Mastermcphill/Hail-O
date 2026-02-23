@@ -22,19 +22,6 @@ void main() {
 
     final notImplementedCases = <_EndpointCase>[
       const _EndpointCase(
-        method: 'PATCH',
-        path: '/marketplace/purchases/p-123/seats',
-      ),
-      const _EndpointCase(
-        method: 'PATCH',
-        path: '/marketplace/purchases/p-123/assignments',
-      ),
-      const _EndpointCase(
-        method: 'POST',
-        path: '/marketplace/purchases/p-123/change-plan',
-        headers: <String, String>{'idempotency-key': 'change-plan-key'},
-      ),
-      const _EndpointCase(
         method: 'GET',
         path: '/marketplace/purchases/p-123/timeline',
       ),
@@ -48,7 +35,6 @@ void main() {
             handler,
             method: endpoint.method,
             path: endpoint.path,
-            headers: endpoint.headers,
           );
 
           expect(response.statusCode, 501);
@@ -228,6 +214,66 @@ void main() {
         );
         expect(fetchedData['purchaseId'], firstData['purchaseId']);
         expect(fetchedData['assignments'], isA<List<dynamic>>());
+
+        final seatUpdateResponse = await _send(
+          handler,
+          method: 'PATCH',
+          path: '/marketplace/purchases/${firstData['purchaseId']}/seats',
+          userId: 'user-rider-1',
+          body: const <String, Object?>{'seat_count': 4},
+        );
+        expect(seatUpdateResponse.statusCode, 200);
+        final seatUpdatePayload = await _decodeJsonMap(seatUpdateResponse);
+        final seatUpdateData = Map<String, Object?>.from(
+          seatUpdatePayload['data'] as Map,
+        );
+        expect(seatUpdateData['seatCount'], 4);
+        expect(seatUpdateData['status'], 'SEATS_UPDATED');
+
+        final assignmentUpdateResponse = await _send(
+          handler,
+          method: 'PATCH',
+          path: '/marketplace/purchases/${firstData['purchaseId']}/assignments',
+          userId: 'user-rider-1',
+          body: const <String, Object?>{
+            'assignments': <Map<String, Object?>>[
+              <String, Object?>{
+                'seatIndex': 1,
+                'name': 'Ada',
+                'email': 'ada@test.dev',
+              },
+              <String, Object?>{
+                'seatIndex': 2,
+                'name': 'Kunle',
+                'email': 'kunle@test.dev',
+              },
+            ],
+          },
+        );
+        expect(assignmentUpdateResponse.statusCode, 200);
+        final assignmentUpdatePayload = await _decodeJsonMap(
+          assignmentUpdateResponse,
+        );
+        final assignmentUpdateData = Map<String, Object?>.from(
+          assignmentUpdatePayload['data'] as Map,
+        );
+        expect(assignmentUpdateData['status'], 'ASSIGNMENT_UPDATED');
+
+        final planChangeResponse = await _send(
+          handler,
+          method: 'POST',
+          path: '/marketplace/purchases/${firstData['purchaseId']}/change-plan',
+          userId: 'user-rider-1',
+          headers: const <String, String>{'idempotency-key': 'change-plan-key'},
+          body: const <String, Object?>{'new_offer_id': 'offer_suv_02'},
+        );
+        expect(planChangeResponse.statusCode, 200);
+        final planChangePayload = await _decodeJsonMap(planChangeResponse);
+        final planChangeData = Map<String, Object?>.from(
+          planChangePayload['data'] as Map,
+        );
+        expect(planChangeData['offerId'], 'offer_suv_02');
+        expect(planChangeData['status'], 'PLAN_CHANGED');
       },
     );
 
@@ -355,11 +401,10 @@ Future<Map<String, Object?>> _decodeJsonMap(Response response) async {
 }
 
 class _EndpointCase {
-  const _EndpointCase({required this.method, required this.path, this.headers});
+  const _EndpointCase({required this.method, required this.path});
 
   final String method;
   final String path;
-  final Map<String, String>? headers;
 }
 
 class _NoopDatabase implements Database {

@@ -20,6 +20,29 @@ abstract class MarketplaceOfferRepository {
     required String userId,
     required String purchaseId,
   });
+
+  Future<MarketplacePurchaseRecord> updateSeatCount({
+    required String userId,
+    required String purchaseId,
+    required int seatCount,
+  });
+
+  Future<MarketplacePurchaseRecord> replaceAssignments({
+    required String userId,
+    required String purchaseId,
+    required List<MarketplaceSeatAssignmentInput> assignments,
+  });
+
+  Future<MarketplacePurchaseRecord> changePlan({
+    required String userId,
+    required String purchaseId,
+    required String newOfferId,
+  });
+
+  Future<List<MarketplaceSeatAssignmentRecord>> listAssignments({
+    required String userId,
+    required String purchaseId,
+  });
 }
 
 class MarketplaceOfferRecord {
@@ -70,6 +93,42 @@ class MarketplacePurchaseRecord {
   final String idempotencyKey;
   final DateTime createdAt;
   final DateTime updatedAt;
+}
+
+class MarketplaceSeatAssignmentRecord {
+  const MarketplaceSeatAssignmentRecord({
+    required this.id,
+    required this.purchaseId,
+    required this.seatIndex,
+    required this.assigneeUserId,
+    required this.role,
+    required this.name,
+    required this.email,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String purchaseId;
+  final int seatIndex;
+  final String assigneeUserId;
+  final String role;
+  final String name;
+  final String email;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class MarketplaceSeatAssignmentInput {
+  const MarketplaceSeatAssignmentInput({
+    required this.seatIndex,
+    required this.name,
+    required this.email,
+  });
+
+  final int seatIndex;
+  final String name;
+  final String email;
 }
 
 class MarketplaceRepositoryStateException implements Exception {

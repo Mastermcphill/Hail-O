@@ -210,36 +210,201 @@ class MarketplaceHandlers {
         message: 'Purchase not found',
       );
     }
+    final assignments = await _offerRepository.listAssignments(
+      userId: userId,
+      purchaseId: purchaseId,
+    );
 
     return _ok(
       request,
       data: <String, Object?>{
         ..._purchasePayload(purchase),
-        'assignments': const <Map<String, Object?>>[],
+        'assignments': assignments
+            .map(
+              (assignment) => <String, Object?>{
+                'seatIndex': assignment.seatIndex,
+                'name': assignment.name,
+                'email': assignment.email,
+              },
+            )
+            .toList(growable: false),
       },
       headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
     );
   }
 
-  Response updateSeats(Request request, String purchaseId) {
-    return _notImplemented(
-      request,
-      message: 'Marketplace seat updates are not implemented yet.',
-    );
+  Future<Response> updateSeats(Request request, String purchaseId) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    final payload = body.payload!;
+    final seatCount =
+        _toInt(payload['seat_count']) ?? _toInt(payload['seatCount']);
+    if (seatCount == null || seatCount < 1 || seatCount > 50) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'seat_count must be between 1 and 50',
+      );
+    }
+
+    try {
+      final purchase = await _offerRepository.updateSeatCount(
+        userId: userId,
+        purchaseId: purchaseId,
+        seatCount: seatCount,
+      );
+      return _ok(
+        request,
+        data: _purchasePayload(purchase),
+        headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRepositoryStateException catch (error) {
+      if (error.code == 'purchase_not_found') {
+        return _error(
+          request,
+          404,
+          errorCode: 'NOT_FOUND',
+          message: 'Purchase not found',
+        );
+      }
+      return _error(request, 409, errorCode: 'CONFLICT', message: error.code);
+    }
   }
 
-  Response updateAssignments(Request request, String purchaseId) {
-    return _notImplemented(
-      request,
-      message: 'Marketplace assignment updates are not implemented yet.',
-    );
+  Future<Response> updateAssignments(Request request, String purchaseId) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    final payload = body.payload!;
+    final rawAssignments = payload['assignments'];
+    if (rawAssignments is! List) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'assignments must be an array',
+      );
+    }
+    final assignments = <MarketplaceSeatAssignmentInput>[];
+    for (final item in rawAssignments) {
+      if (item is! Map) {
+        continue;
+      }
+      final map = Map<String, Object?>.from(
+        item.map((key, value) => MapEntry(key.toString(), value)),
+      );
+      final seatIndex =
+          _toInt(map['seatIndex']) ?? _toInt(map['seat_number']) ?? 0;
+      assignments.add(
+        MarketplaceSeatAssignmentInput(
+          seatIndex: seatIndex,
+          name: (map['name'] as String?)?.trim() ?? '',
+          email: (map['email'] as String?)?.trim() ?? '',
+        ),
+      );
+    }
+
+    try {
+      final purchase = await _offerRepository.replaceAssignments(
+        userId: userId,
+        purchaseId: purchaseId,
+        assignments: assignments,
+      );
+      return _ok(
+        request,
+        data: _purchasePayload(purchase),
+        headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRepositoryStateException catch (error) {
+      if (error.code == 'purchase_not_found') {
+        return _error(
+          request,
+          404,
+          errorCode: 'NOT_FOUND',
+          message: 'Purchase not found',
+        );
+      }
+      return _error(request, 409, errorCode: 'CONFLICT', message: error.code);
+    }
   }
 
-  Response changePlan(Request request, String purchaseId) {
-    return _notImplemented(
-      request,
-      message: 'Marketplace plan change is not implemented yet.',
-    );
+  Future<Response> changePlan(Request request, String purchaseId) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final payload = body.payload!;
+    final newOfferId =
+        (payload['new_offer_id'] as String?)?.trim() ??
+        (payload['newOfferId'] as String?)?.trim() ??
+        '';
+    if (newOfferId.isEmpty) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'new_offer_id is required',
+      );
+    }
+
+    try {
+      final purchase = await _offerRepository.changePlan(
+        userId: userId,
+        purchaseId: purchaseId,
+        newOfferId: newOfferId,
+      );
+      return _ok(
+        request,
+        data: _purchasePayload(purchase),
+        headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
+      );
+    } on MarketplaceRepositoryStateException catch (error) {
+      if (error.code == 'purchase_not_found' ||
+          error.code == 'offer_not_found') {
+        return _error(
+          request,
+          404,
+          errorCode: 'NOT_FOUND',
+          message: error.code == 'offer_not_found'
+              ? 'Offer not found'
+              : 'Purchase not found',
+        );
+      }
+      return _error(request, 409, errorCode: 'CONFLICT', message: error.code);
+    }
   }
 
   Response getTimeline(Request request, String purchaseId) {
