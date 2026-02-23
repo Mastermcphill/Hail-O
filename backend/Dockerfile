@@ -4,6 +4,8 @@ WORKDIR /app
 
 COPY . /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/*
+
 RUN chmod +x /app/backend/entrypoint.sh
 
 WORKDIR /app/backend
