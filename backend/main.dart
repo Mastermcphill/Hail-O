@@ -208,8 +208,7 @@ Future<void> main() async {
     environmentMap: env,
   ).buildHandler();
 
-  final configuredPortRaw = (env['PORT'] ?? '').trim();
-  final port = int.tryParse(configuredPortRaw) ?? 8080;
+  final port = int.parse(Platform.environment['PORT'] ?? '8080');
   const listenHost = '0.0.0.0';
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
