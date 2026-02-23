@@ -26,6 +26,8 @@ import '../modules/marketplace/marketplace_handlers.dart';
 import '../modules/marketplace/marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_router.dart';
 import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
+import '../modules/payments/payment_service.dart';
+import '../modules/payments/payments_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -73,9 +75,17 @@ Handler buildApiRouter({
   final MarketplaceOfferRepository offerRepository = postgresProvider != null
       ? PostgresMarketplaceOfferRepository(postgresProvider)
       : InMemoryMarketplaceOfferRepository();
-  final marketplaceRouter = MarketplaceRouter(
-    handlers: MarketplaceHandlers(offerRepository: offerRepository),
+  final paymentService = PaymentService.fromEnvironment(
+    postgresProvider: postgresProvider,
+    configuredProvider: Platform.environment['PAYMENT_PROVIDER'],
   );
+  final marketplaceRouter = MarketplaceRouter(
+    handlers: MarketplaceHandlers(
+      offerRepository: offerRepository,
+      paymentService: paymentService,
+    ),
+  );
+  final paymentsController = PaymentsController(paymentService: paymentService);
 
   final router = Router()
     ..get('/', (Request request) {
@@ -108,6 +118,7 @@ Handler buildApiRouter({
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
     ..mount('/marketplace/', marketplaceRouter.router.call)
+    ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
     ..mount('/admin/', adminController.router.call)

@@ -3,16 +3,20 @@ import 'package:uuid/uuid.dart';
 
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
+import '../payments/payment_service.dart';
 import 'marketplace_offer_repository.dart';
 
 class MarketplaceHandlers {
   MarketplaceHandlers({
     required MarketplaceOfferRepository offerRepository,
+    PaymentService? paymentService,
     Uuid? uuid,
   }) : _offerRepository = offerRepository,
+       _paymentService = paymentService,
        _uuid = uuid ?? const Uuid();
 
   final MarketplaceOfferRepository _offerRepository;
+  final PaymentService? _paymentService;
   final Uuid _uuid;
 
   Future<Response> listOffers(Request request) async {
@@ -107,13 +111,24 @@ class MarketplaceHandlers {
     }
 
     try {
-      final purchase = await _offerRepository.createOrGetPurchase(
+      var purchase = await _offerRepository.createOrGetPurchase(
         userId: userId,
         offerId: offerId,
         seatCount: seatCount,
         idempotencyKey: idempotencyKey,
-        provider: 'manual',
+        provider: _paymentService?.providerName ?? 'manual',
       );
+      final paymentService = _paymentService;
+      if (paymentService != null) {
+        await paymentService.createCheckoutOrIntent(purchase: purchase);
+        final refreshed = await _offerRepository.findPurchaseById(
+          userId: userId,
+          purchaseId: purchase.id,
+        );
+        if (refreshed != null) {
+          purchase = refreshed;
+        }
+      }
       return _ok(
         request,
         data: _purchasePayload(purchase),
@@ -627,7 +642,9 @@ class MarketplaceHandlers {
         final newOffer = (eventData['new_offer_id'] ?? '').toString();
         return 'Plan changed from $oldOffer to $newOffer.';
       default:
-        return eventData.isEmpty ? 'No additional details.' : eventData.toString();
+        return eventData.isEmpty
+            ? 'No additional details.'
+            : eventData.toString();
     }
   }
 }

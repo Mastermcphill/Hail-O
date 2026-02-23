@@ -279,8 +279,9 @@ void main() {
         expect(timelineResponse.statusCode, 200);
         final timelinePayload = await _decodeJsonMap(timelineResponse);
         expect(timelinePayload['ok'], isTrue);
-        final timelineEvents =
-            (timelinePayload['data'] as List<dynamic>).whereType<Map>().toList();
+        final timelineEvents = (timelinePayload['data'] as List<dynamic>)
+            .whereType<Map>()
+            .toList();
         expect(timelineEvents, isNotEmpty);
         final eventTypes = timelineEvents
             .map((event) => (event['type'] ?? '').toString())
@@ -339,6 +340,46 @@ void main() {
       expect(payload['db_mode'], 'postgres');
       expect(payload['db_ok'], isTrue);
     });
+
+    test(
+      'POST /webhooks/payments accepts payload and deduplicates events',
+      () async {
+        const webhookBody = <String, Object?>{
+          'provider_event_id': 'evt-marketplace-1',
+          'event_type': 'payment_succeeded',
+          'purchase_id': '2f15644e-74d1-4952-b45c-55c3695d58dc',
+        };
+
+        final first = await _send(
+          handler,
+          method: 'POST',
+          path: '/webhooks/payments',
+          body: webhookBody,
+        );
+        expect(first.statusCode, 200);
+        final firstPayload = await _decodeJsonMap(first);
+        expect(firstPayload['ok'], isTrue);
+        final firstData = Map<String, Object?>.from(
+          firstPayload['data'] as Map,
+        );
+        expect(firstData['action'], isNotNull);
+        expect(firstData['duplicate'], isFalse);
+
+        final second = await _send(
+          handler,
+          method: 'POST',
+          path: '/webhooks/payments',
+          body: webhookBody,
+        );
+        expect(second.statusCode, 200);
+        final secondPayload = await _decodeJsonMap(second);
+        final secondData = Map<String, Object?>.from(
+          secondPayload['data'] as Map,
+        );
+        expect(secondData['duplicate'], isTrue);
+        expect(secondData['action'], 'duplicate_ignored');
+      },
+    );
   });
 
   group('DbProvider postgres branch', () {

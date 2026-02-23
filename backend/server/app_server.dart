@@ -86,6 +86,7 @@ class AppServer {
       'auth/login',
       'health',
       'api/healthz',
+      'webhooks/payments',
       if (metricsPublic) 'metrics',
     };
     return Pipeline()

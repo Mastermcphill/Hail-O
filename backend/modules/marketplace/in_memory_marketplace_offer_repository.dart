@@ -60,8 +60,8 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       <String, String>{};
   final Map<String, List<MarketplaceSeatAssignmentRecord>>
   _assignmentsByPurchase = <String, List<MarketplaceSeatAssignmentRecord>>{};
-  final Map<String, List<MarketplaceTimelineEventRecord>> _timelineByPurchaseId =
-      <String, List<MarketplaceTimelineEventRecord>>{};
+  final Map<String, List<MarketplaceTimelineEventRecord>>
+  _timelineByPurchaseId = <String, List<MarketplaceTimelineEventRecord>>{};
 
   @override
   Future<MarketplaceOfferRecord?> findActiveOfferById(String offerId) async {
@@ -100,13 +100,15 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       throw const MarketplaceRepositoryStateException(code: 'offer_not_found');
     }
 
+    final normalizedProvider = provider.trim().toLowerCase();
+    final initialStatus = normalizedProvider == 'manual' ? 'ACTIVE' : 'PENDING';
     final now = _nowUtc();
     final purchase = MarketplacePurchaseRecord(
       id: _uuid.v4(),
       userId: userId,
       offerId: offer.id,
       offerTitle: offer.title,
-      status: 'PENDING',
+      status: initialStatus,
       currency: offer.currency,
       totalAmountMinor: offer.priceMinor * seatCount,
       seatCount: seatCount,
@@ -126,6 +128,16 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
         'idempotency_key': purchase.idempotencyKey,
       },
     );
+    if (initialStatus == 'ACTIVE') {
+      _appendTimeline(
+        purchaseId: purchase.id,
+        eventType: 'payment_succeeded',
+        eventData: <String, Object?>{
+          'provider': normalizedProvider,
+          'source': 'create_purchase_manual',
+        },
+      );
+    }
     return purchase;
   }
 
@@ -320,7 +332,8 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       return const <MarketplaceTimelineEventRecord>[];
     }
     final events =
-        _timelineByPurchaseId[purchaseId] ?? const <MarketplaceTimelineEventRecord>[];
+        _timelineByPurchaseId[purchaseId] ??
+        const <MarketplaceTimelineEventRecord>[];
     if (events.isEmpty) {
       return const <MarketplaceTimelineEventRecord>[];
     }

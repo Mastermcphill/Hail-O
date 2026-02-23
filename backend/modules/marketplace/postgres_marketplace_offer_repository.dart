@@ -83,6 +83,10 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
         );
       }
 
+      final normalizedProvider = provider.trim().toLowerCase();
+      final initialStatus = normalizedProvider == 'manual'
+          ? 'ACTIVE'
+          : 'PENDING';
       final now = _nowUtc();
       final purchaseId = _uuid.v4();
       final insertRows = await txn.query(
@@ -131,11 +135,11 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           'id': purchaseId,
           'user_id': userId,
           'offer_id': offer.id,
-          'status': 'PENDING',
+          'status': initialStatus,
           'currency': offer.currency,
           'price_minor': offer.priceMinor * seatCount,
           'seats_total': seatCount,
-          'provider': provider,
+          'provider': normalizedProvider,
           'idempotency_key': idempotencyKey,
           'created_at': now,
           'updated_at': now,
@@ -150,10 +154,21 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           eventData: <String, Object?>{
             'offer_id': offer.id,
             'seat_count': seatCount,
-            'status': 'PENDING',
+            'status': initialStatus,
             'idempotency_key': idempotencyKey,
           },
         );
+        if (initialStatus == 'ACTIVE') {
+          await _appendTimeline(
+            txn,
+            purchaseId: purchaseId,
+            eventType: 'payment_succeeded',
+            eventData: <String, Object?>{
+              'provider': normalizedProvider,
+              'source': 'create_purchase_manual',
+            },
+          );
+        }
         return _rowToPurchase(insertRows.first, offerTitle: offer.title);
       }
 
@@ -783,17 +798,13 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
 
   Map<String, Object?> _parseEventData(Object? raw) {
     if (raw is Map) {
-      return raw.map(
-        (key, value) => MapEntry(key.toString(), value),
-      );
+      return raw.map((key, value) => MapEntry(key.toString(), value));
     }
     if (raw is String && raw.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is Map) {
-          return decoded.map(
-            (key, value) => MapEntry(key.toString(), value),
-          );
+          return decoded.map((key, value) => MapEntry(key.toString(), value));
         }
       } catch (_) {
         return <String, Object?>{};

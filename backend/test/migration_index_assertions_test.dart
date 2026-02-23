@@ -23,6 +23,8 @@ void main() {
       final rideSql = sqlByName['003_ride_request_metadata.sql'] ?? '';
       final opsSql = sqlByName['004_operational_records.sql'] ?? '';
       final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
+      final marketplaceWebhookSql =
+          sqlByName['006_marketplace_webhooks.sql'] ?? '';
 
       expect(
         authSql.contains(
@@ -68,6 +70,18 @@ void main() {
         ),
         isTrue,
         reason: 'timeline query index must exist',
+      );
+      expect(
+        marketplaceWebhookSql.contains(
+          'CREATE TABLE IF NOT EXISTS marketplace_webhook_events',
+        ),
+        isTrue,
+        reason: 'marketplace webhook events table must exist',
+      );
+      expect(
+        marketplaceWebhookSql.contains('UNIQUE(provider, provider_event_id)'),
+        isTrue,
+        reason: 'webhook dedupe uniqueness must exist',
       );
     },
   );
