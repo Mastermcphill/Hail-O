@@ -1,0 +1,7 @@
+name: hail_o_finance_core
+description: Backend-compatible pure Dart compatibility package.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.10.8
