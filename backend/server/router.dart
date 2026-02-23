@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:hail_o_finance_core/sqlite_api.dart';
@@ -62,6 +65,20 @@ Handler buildApiRouter({
   final driversController = DriversController();
 
   final router = Router()
+    ..get('/', (Request request) {
+      return Response.ok(
+        jsonEncode({
+          'ok': true,
+          'service': 'hail-o-backend',
+          'env':
+              Platform.environment['FLIPTRYBE_ENV'] ??
+              Platform.environment['ENV'] ??
+              'unknown',
+          'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'unknown',
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    })
     ..get(
       '/health',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
