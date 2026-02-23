@@ -159,6 +159,7 @@ Future<void> main() async {
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
+    postgresProvider: postgresProvider,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,

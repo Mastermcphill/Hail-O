@@ -20,11 +20,6 @@ void main() {
     });
 
     final notImplementedCases = <_EndpointCase>[
-      const _EndpointCase(method: 'GET', path: '/marketplace/offers'),
-      const _EndpointCase(
-        method: 'GET',
-        path: '/marketplace/offers/offer-basic/paywall',
-      ),
       const _EndpointCase(
         method: 'GET',
         path: '/marketplace/purchases/restore?idempotencyKey=test-key',
@@ -74,6 +69,69 @@ void main() {
         },
       );
     }
+
+    test(
+      'GET /marketplace/offers returns seeded offer list envelope',
+      () async {
+        final response = await _send(
+          handler,
+          method: 'GET',
+          path: '/marketplace/offers',
+        );
+
+        expect(response.statusCode, 200);
+        expect(response.headers['content-type'], contains('application/json'));
+        final payload = await _decodeJsonMap(response);
+        expect(payload['ok'], isTrue);
+        expect((payload['trace_id'] as String?)?.isNotEmpty, isTrue);
+        final data = payload['data'];
+        expect(data, isA<List<dynamic>>());
+        final offers = (data as List<dynamic>).whereType<Map>().toList();
+        expect(offers.length, greaterThanOrEqualTo(3));
+        expect(
+          offers.any(
+            (offer) => (offer['id'] ?? '').toString() == 'offer_sedan_01',
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'GET /marketplace/offers/{offerId}/paywall returns paywall envelope',
+      () async {
+        final response = await _send(
+          handler,
+          method: 'GET',
+          path: '/marketplace/offers/offer_sedan_01/paywall',
+        );
+
+        expect(response.statusCode, 200);
+        final payload = await _decodeJsonMap(response);
+        expect(payload['ok'], isTrue);
+        expect((payload['trace_id'] as String?)?.isNotEmpty, isTrue);
+        final data = Map<String, dynamic>.from(payload['data'] as Map);
+        expect(data['offerId'], 'offer_sedan_01');
+        expect((data['headline'] as String?)?.isNotEmpty, isTrue);
+        expect((data['bullets'] as List?)?.isNotEmpty, isTrue);
+      },
+    );
+
+    test(
+      'GET /marketplace/offers/{offerId}/paywall unknown offer returns NOT_FOUND',
+      () async {
+        final response = await _send(
+          handler,
+          method: 'GET',
+          path: '/marketplace/offers/unknown_offer/paywall',
+        );
+
+        expect(response.statusCode, 404);
+        final payload = await _decodeJsonMap(response);
+        expect(payload['ok'], isFalse);
+        expect(payload['error_code'], 'NOT_FOUND');
+      },
+    );
 
     test(
       'POST /marketplace/purchases without Idempotency-Key still returns envelope',

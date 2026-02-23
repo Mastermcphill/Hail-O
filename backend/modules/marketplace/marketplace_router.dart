@@ -3,8 +3,8 @@ import 'package:shelf_router/shelf_router.dart';
 import 'marketplace_handlers.dart';
 
 class MarketplaceRouter {
-  MarketplaceRouter({MarketplaceHandlers? handlers})
-    : _handlers = handlers ?? MarketplaceHandlers();
+  MarketplaceRouter({required MarketplaceHandlers handlers})
+    : _handlers = handlers;
 
   final MarketplaceHandlers _handlers;
 

@@ -1,6 +1,7 @@
 import 'package:shelf/shelf.dart';
 import 'package:hail_o_finance_core/sqlite_api.dart';
 
+import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
@@ -36,6 +37,7 @@ class AppServer {
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
+    this.postgresProvider,
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
@@ -59,6 +61,7 @@ class AppServer {
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
+  final PostgresProvider? postgresProvider;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
@@ -76,6 +79,7 @@ class AppServer {
       requestMetrics: requestMetrics,
       metricsPublic: metricsPublic,
       runtimeConfigSnapshot: runtimeConfigSnapshot,
+      postgresProvider: postgresProvider,
     );
     final authPublicPaths = <String>{
       'auth/register',

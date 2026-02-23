@@ -14,13 +14,18 @@ import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../infra/request_context.dart';
 import '../infra/request_metrics.dart';
+import '../infra/postgres_provider.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/drivers/drivers_controller.dart';
+import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
+import '../modules/marketplace/marketplace_handlers.dart';
+import '../modules/marketplace/marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_router.dart';
+import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -34,6 +39,7 @@ Handler buildApiRouter({
   required Map<String, Object?> buildInfo,
   required RequestMetrics requestMetrics,
   required Map<String, Object?> runtimeConfigSnapshot,
+  PostgresProvider? postgresProvider,
   bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
@@ -64,7 +70,12 @@ Handler buildApiRouter({
     buildInfo: buildInfo,
   );
   final driversController = DriversController();
-  final marketplaceRouter = MarketplaceRouter();
+  final MarketplaceOfferRepository offerRepository = postgresProvider != null
+      ? PostgresMarketplaceOfferRepository(postgresProvider)
+      : InMemoryMarketplaceOfferRepository();
+  final marketplaceRouter = MarketplaceRouter(
+    handlers: MarketplaceHandlers(offerRepository: offerRepository),
+  );
 
   final router = Router()
     ..get('/', (Request request) {

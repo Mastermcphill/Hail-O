@@ -3,23 +3,63 @@ import 'package:uuid/uuid.dart';
 
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
+import 'marketplace_offer_repository.dart';
 
 class MarketplaceHandlers {
-  MarketplaceHandlers({Uuid? uuid}) : _uuid = uuid ?? const Uuid();
+  MarketplaceHandlers({
+    required MarketplaceOfferRepository offerRepository,
+    Uuid? uuid,
+  }) : _offerRepository = offerRepository,
+       _uuid = uuid ?? const Uuid();
 
+  final MarketplaceOfferRepository _offerRepository;
   final Uuid _uuid;
 
-  Response listOffers(Request request) {
-    return _notImplemented(
-      request,
-      message: 'Marketplace offers endpoint is not implemented yet.',
-    );
+  Future<Response> listOffers(Request request) async {
+    final offers = await _offerRepository.listActiveOffers();
+    final data = offers
+        .map(
+          (offer) => <String, Object?>{
+            'id': offer.id,
+            'title': offer.title,
+            'subtitle': offer.description,
+            'price': offer.priceMinor,
+            'currency': offer.currency,
+            'interval': offer.interval,
+            'perks': offer.perks,
+          },
+        )
+        .toList(growable: false);
+    return _ok(request, data: data);
   }
 
-  Response getOfferPaywall(Request request, String offerId) {
-    return _notImplemented(
+  Future<Response> getOfferPaywall(Request request, String offerId) async {
+    final offer = await _offerRepository.findActiveOfferById(offerId);
+    if (offer == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Offer not found',
+      );
+    }
+
+    return _ok(
       request,
-      message: 'Marketplace paywall endpoint is not implemented yet.',
+      data: <String, Object?>{
+        'offerId': offer.id,
+        'headline': 'Secure this ${offer.title} offer now',
+        'subhead':
+            'Connection fee confirms your driver match and seat capacity.',
+        'bullets': <String>[
+          'Connection fee reserves your selected capacity instantly.',
+          'Final routing and dispatch happen immediately after seat confirmation.',
+          if (offer.perks.isNotEmpty)
+            'Offer highlights: ${offer.perks.join(', ')}',
+        ],
+        'legalText':
+            'By continuing, you agree to marketplace terms and ride matching policies.',
+      },
     );
   }
 
@@ -157,6 +197,19 @@ class MarketplaceHandlers {
       },
       headers: <String, String>{...?headers, 'x-error-code': errorCode},
     );
+  }
+
+  Response _ok(
+    Request request, {
+    required Object? data,
+    int statusCode = 200,
+    Map<String, String>? headers,
+  }) {
+    return jsonResponse(statusCode, <String, Object?>{
+      'ok': true,
+      'trace_id': _resolveTraceId(request),
+      'data': data,
+    }, headers: headers);
   }
 
   String _resolveTraceId(Request request) {
