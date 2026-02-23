@@ -23,6 +23,7 @@ void main() {
       final rideSql = sqlByName['003_ride_request_metadata.sql'] ?? '';
       final opsSql = sqlByName['004_operational_records.sql'] ?? '';
       final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
+      final ledgerSql = sqlByName['006_billing_ledger_entries.sql'] ?? '';
 
       expect(
         authSql.contains(
@@ -54,6 +55,13 @@ void main() {
         ),
         isTrue,
         reason: 'webhook replay dedupe index must exist',
+      );
+      expect(
+        ledgerSql.contains(
+          'CREATE UNIQUE INDEX IF NOT EXISTS ux_billing_ledger_provider_ref_type',
+        ),
+        isTrue,
+        reason: 'billing ledger replay dedupe index must exist',
       );
     },
   );
