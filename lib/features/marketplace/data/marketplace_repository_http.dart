@@ -19,7 +19,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   Future<List<Offer>> fetchOffers() async {
     try {
       final response = await _apiClient.get(MarketplaceEndpoints.offers);
-      return mapOffersFromEnvelope(response);
+      return mapOffersPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -34,7 +34,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.offerPaywall(offerId),
       );
-      return mapPaywallFromEnvelope(response);
+      return mapPaywallPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -54,7 +54,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         body: selection.toMap(),
         idempotencyKey: idempotencyKey,
       );
-      return mapPurchaseIdFromEnvelope(response);
+      return mapPurchaseIdPayload(extractEnvelopeData(response));
     } on ApiException catch (error) {
       if (error.statusCode == 409) {
         final restored = await restorePurchaseByIdempotencyKey(idempotencyKey);
@@ -80,7 +80,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.restorePurchase(idempotencyKey),
       );
-      return mapRestoredPurchaseIdFromEnvelope(response);
+      return mapRestoredPurchaseIdPayload(extractEnvelopeData(response));
     } on ApiException catch (error) {
       final code = (error.code ?? '').toLowerCase();
       if (error.statusCode == 404 || code == 'not_implemented') {
@@ -104,7 +104,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.purchase(purchaseId),
       );
-      return mapPurchaseReceiptFromEnvelope(response);
+      return mapPurchaseReceiptPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -123,7 +123,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         MarketplaceEndpoints.purchaseSeats(purchaseId),
         body: <String, dynamic>{'seat_count': seatCount},
       );
-      return mapPurchaseReceiptFromEnvelope(response);
+      return mapPurchaseReceiptPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -146,7 +146,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
               .toList(growable: false),
         },
       );
-      return mapPurchaseReceiptFromEnvelope(response);
+      return mapPurchaseReceiptPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -165,7 +165,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
         MarketplaceEndpoints.changePlan(purchaseId),
         body: <String, dynamic>{'new_offer_id': newOfferId},
       );
-      return mapPurchaseIdFromEnvelope(response);
+      return mapPurchaseIdPayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,
@@ -180,7 +180,7 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       final response = await _apiClient.get(
         MarketplaceEndpoints.purchaseTimeline(purchaseId),
       );
-      return mapTimelineFromEnvelope(response);
+      return mapTimelinePayload(extractEnvelopeData(response));
     } catch (error) {
       throw _mapError(
         error,

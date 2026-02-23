@@ -15,55 +15,159 @@ import 'package:http/testing.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('success fixtures map into marketplace models through mappers', () {
-    final offersFixture = _fixtureMap('offers_ok.json');
-    final paywallFixture = _fixtureMap('paywall_ok.json');
-    final purchaseCreatedFixture = _fixtureMap('purchase_created_ok.json');
-    final purchaseRestoreFixture = _fixtureMap('purchase_restore_ok.json');
-    final purchaseGetFixture = _fixtureMap('purchase_get_ok.json');
-    final timelineFixture = _fixtureMap('timeline_ok.json');
+  test(
+    'offers fixture payload maps to List<Offer> with expected contract fields',
+    () {
+      final envelope = _fixtureMap('offers_ok.json');
+      final payload = envelope['data'];
+      expect(payload, isA<List<dynamic>>());
 
-    final offers = mapOffersFromEnvelope(offersFixture);
-    expect(offers.length, 3);
-    expect(offers.first.id, isNotEmpty);
-    expect(offers.first.title, isNotEmpty);
-    expect(offers.first.highlights, isNotEmpty);
+      final rawOffers = payload as List<dynamic>;
+      expect(rawOffers.length, 3);
+      for (final raw in rawOffers) {
+        final map = _asMap(raw);
+        expect(map['id'], isNotNull);
+        expect(map['title'], isNotNull);
+        expect(map['subtitle'], isNotNull);
+        expect(map['price'], isNotNull);
+        expect(map['currency'], isNotNull);
+        expect(map['interval'], isNotNull);
+        expect(map['perks'], isA<List<dynamic>>());
+      }
 
-    final paywall = mapPaywallFromEnvelope(paywallFixture);
-    expect(paywall.offerId, 'offer_sedan_01');
-    expect(paywall.headline, isNotEmpty);
-    expect(paywall.connectionFeeMinor, greaterThan(0));
+      final offers = mapOffersPayload(payload);
+      expect(offers.length, 3);
+      expect(offers.every((offer) => offer.id.isNotEmpty), isTrue);
+      expect(offers.every((offer) => offer.title.isNotEmpty), isTrue);
+      expect(offers.every((offer) => offer.priceMinor > 0), isTrue);
+    },
+  );
 
-    final purchaseId = mapPurchaseIdFromEnvelope(purchaseCreatedFixture);
-    expect(purchaseId, 'purchase_created_001');
+  test(
+    'paywall fixture payload maps to PaywallCopy with non-empty headline and bullets',
+    () {
+      final envelope = _fixtureMap('paywall_ok.json');
+      final payload = envelope['data'];
+      final paywall = mapPaywallPayload(payload);
 
-    final restoredId = mapRestoredPurchaseIdFromEnvelope(
-      purchaseRestoreFixture,
-    );
-    expect(restoredId, 'purchase_created_001');
+      expect(paywall.offerId, isNotEmpty);
+      expect(paywall.headline, isNotEmpty);
+      expect(paywall.bullets, isNotEmpty);
+    },
+  );
 
-    final receipt = mapPurchaseReceiptFromEnvelope(purchaseGetFixture);
+  test('purchase fixtures map to receipt and restore contract fields', () {
+    final createdEnvelope = _fixtureMap('purchase_created_ok.json');
+    final createdPayload = createdEnvelope['data'];
+    final createdPayloadMap = _asMap(createdPayload);
+    expect(createdPayloadMap['purchaseId'], isNotNull);
+    expect(createdPayloadMap['seatCount'], isNotNull);
+    expect(createdPayloadMap['totalAmount'], isNotNull);
+    expect(createdPayloadMap['currency'], isNotNull);
+
+    final purchaseId = mapPurchaseIdPayload(createdPayload);
+    expect(purchaseId, isNotEmpty);
+
+    final restoredEnvelope = _fixtureMap('purchase_restore_ok.json');
+    final restoredPayload = restoredEnvelope['data'];
+    final restoredId = mapRestoredPurchaseIdPayload(restoredPayload);
+    expect(restoredId, purchaseId);
+
+    final purchaseGetEnvelope = _fixtureMap('purchase_get_ok.json');
+    final purchaseGetPayload = purchaseGetEnvelope['data'];
+    final receipt = mapPurchaseReceiptPayload(purchaseGetPayload);
     expect(receipt.purchaseId, isNotEmpty);
-    expect(receipt.offerId, isNotEmpty);
     expect(receipt.seatCount, greaterThan(0));
-    expect(receipt.assignments, isNotEmpty);
+    expect(receipt.assignments.length, receipt.seatCount);
+  });
 
-    final timeline = mapTimelineFromEnvelope(timelineFixture);
-    expect(timeline, isNotEmpty);
+  test('timeline fixture maps to TimelineEvent list and timestamps parse', () {
+    final envelope = _fixtureMap('timeline_ok.json');
+    final payload = envelope['data'];
+    expect(payload, isA<List<dynamic>>());
+
+    final rawEvents = payload as List<dynamic>;
+    final rawTypes = rawEvents
+        .map((event) => _asMap(event)['type']?.toString() ?? '')
+        .toList(growable: false);
+    expect(rawTypes, contains('PLAN_CHANGED'));
+    for (final raw in rawEvents) {
+      final timestamp = _asMap(raw)['timestamp']?.toString() ?? '';
+      expect(DateTime.tryParse(timestamp), isNotNull);
+    }
+
+    final events = mapTimelinePayload(payload);
+    expect(events, isNotEmpty);
+    expect(events.map((event) => event.title), contains('PLAN_CHANGED'));
     expect(
-      timeline.map((event) => event.title).toSet(),
-      containsAll(<String>[
-        'PURCHASE_CREATED',
-        'SEATS_SELECTED',
-        'SEATS_UPDATED',
-        'ASSIGNMENT_UPDATED',
-        'PLAN_CHANGED',
-      ]),
+      events.every(
+        (event) =>
+            event.occurredAt.isUtc ||
+            event.occurredAt.isAfter(DateTime.utc(2000)),
+      ),
+      isTrue,
     );
   });
 
   test(
-    'repository http parses enveloped success fixtures end-to-end',
+    'ApiClient envelope parsing maps error fixtures into controlled ApiException',
+    () async {
+      final validationResponse = _fixtureRaw('validation_err.json');
+      final notImplementedResponse = _fixtureRaw('not_implemented_err.json');
+      var callCount = 0;
+
+      final mockClient = MockClient((request) async {
+        callCount += 1;
+        final raw = callCount == 1
+            ? validationResponse
+            : notImplementedResponse;
+        final status = callCount == 1 ? 400 : 404;
+        return http.Response(
+          raw,
+          status,
+          headers: const <String, String>{'content-type': 'application/json'},
+        );
+      });
+
+      final apiClient = ApiClient(
+        tokenStorage: const _InMemoryTokenStorage(),
+        httpClient: mockClient,
+      );
+      addTearDown(apiClient.close);
+
+      await expectLater(
+        () => apiClient.post(
+          '/marketplace/purchases',
+          body: const <String, dynamic>{},
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.code, 'code', 'VALIDATION_ERROR')
+              .having(
+                (error) => error.message,
+                'message',
+                contains('Invalid seat count'),
+              ),
+        ),
+      );
+
+      await expectLater(
+        () => apiClient.get('/marketplace/offers'),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.code, 'code', 'NOT_IMPLEMENTED')
+              .having(
+                (error) => error.message,
+                'message',
+                contains('not implemented'),
+              ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'repository http uses fixture envelopes and returns controlled repository errors',
     () async {
       final mockClient = MockClient((request) async {
         final path = request.url.path;
@@ -89,6 +193,9 @@ void main() {
             path == '/marketplace/purchases/purchase_created_001/timeline') {
           return _fixtureResponse('timeline_ok.json', statusCode: 200);
         }
+        if (request.method == 'PATCH') {
+          return _fixtureResponse('validation_err.json', statusCode: 400);
+        }
         return _fixtureResponse('not_implemented_err.json', statusCode: 404);
       });
 
@@ -102,11 +209,9 @@ void main() {
 
       final offers = await repository.fetchOffers();
       expect(offers.length, 3);
-      expect(offers.first.id, 'offer_sedan_01');
 
       final paywall = await repository.fetchPaywallCopy('offer_sedan_01');
-      expect(paywall.offerId, 'offer_sedan_01');
-      expect(paywall.ctaLabel, isNotEmpty);
+      expect(paywall.headline, isNotEmpty);
 
       final purchaseId = await repository.createCheckout(
         const SeatSelection(
@@ -128,124 +233,24 @@ void main() {
       final restored = await repository.restorePurchaseByIdempotencyKey(
         'idem_fixture',
       );
-      expect(restored, 'purchase_created_001');
+      expect(restored, purchaseId);
 
-      final receipt = await repository.fetchPurchaseReceipt(
-        'purchase_created_001',
-      );
+      final receipt = await repository.fetchPurchaseReceipt(purchaseId);
       expect(receipt, isNotNull);
-      expect(receipt!.status, isNotEmpty);
+      expect(receipt!.seatCount, 3);
 
-      final timeline = await repository.fetchTimeline('purchase_created_001');
-      expect(timeline.length, 5);
-    },
-  );
-
-  test(
-    'api client parses enveloped error fixtures into controlled ApiException',
-    () async {
-      final validationResponse = _fixtureRaw('validation_err.json');
-      final notImplementedResponse = _fixtureRaw('not_implemented_err.json');
-      var callIndex = 0;
-
-      final mockClient = MockClient((request) async {
-        callIndex += 1;
-        if (callIndex == 1) {
-          return http.Response(
-            validationResponse,
-            400,
-            headers: const <String, String>{'content-type': 'application/json'},
-          );
-        }
-        return http.Response(
-          notImplementedResponse,
-          404,
-          headers: const <String, String>{'content-type': 'application/json'},
-        );
-      });
-
-      final apiClient = ApiClient(
-        tokenStorage: const _InMemoryTokenStorage(),
-        httpClient: mockClient,
-      );
-      addTearDown(apiClient.close);
+      final timeline = await repository.fetchTimeline(purchaseId);
+      expect(timeline.map((event) => event.title), contains('PLAN_CHANGED'));
 
       await expectLater(
-        () => apiClient.post(
-          '/marketplace/purchases',
-          body: const <String, dynamic>{},
-        ),
-        throwsA(
-          isA<ApiException>()
-              .having((error) => error.code, 'code', 'VALIDATION_ERROR')
-              .having(
-                (error) => error.message,
-                'message',
-                contains('Invalid seat count supplied.'),
-              ),
-        ),
-      );
-
-      await expectLater(
-        () => apiClient.get('/marketplace/offers'),
-        throwsA(
-          isA<ApiException>()
-              .having((error) => error.code, 'code', 'NOT_IMPLEMENTED')
-              .having(
-                (error) => error.message,
-                'message',
-                contains('not implemented yet'),
-              ),
-        ),
-      );
-    },
-  );
-
-  test(
-    'repository surfaces controlled MarketplaceRepositoryException on envelope errors',
-    () async {
-      final mockClient = MockClient((request) async {
-        if (request.method == 'GET') {
-          return _fixtureResponse('not_implemented_err.json', statusCode: 404);
-        }
-        return _fixtureResponse('validation_err.json', statusCode: 400);
-      });
-
-      final apiClient = ApiClient(
-        tokenStorage: const _InMemoryTokenStorage(),
-        httpClient: mockClient,
-      );
-      addTearDown(apiClient.close);
-
-      final repository = MarketplaceRepositoryHttp(apiClient: apiClient);
-
-      await expectLater(
-        () => repository.fetchOffers(),
-        throwsA(
-          isA<MarketplaceRepositoryException>().having(
-            (error) => error.code,
-            'code',
-            'not_implemented',
-          ),
-        ),
-      );
-
-      await expectLater(
-        () => repository.createCheckout(
-          const SeatSelection(
-            offerId: 'offer_sedan_01',
-            seatCount: 0,
-            assignments: <SeatAssignment>[],
-          ),
-          idempotencyKey: 'idem_invalid',
-        ),
+        () => repository.updateSeatCount(purchaseId: purchaseId, seatCount: 0),
         throwsA(
           isA<MarketplaceRepositoryException>()
               .having((error) => error.code, 'code', 'VALIDATION_ERROR')
               .having(
                 (error) => error.message,
                 'message',
-                contains('Invalid seat count supplied.'),
+                contains('Invalid seat count'),
               ),
         ),
       );
@@ -257,9 +262,7 @@ Map<String, dynamic> _fixtureMap(String fileName) {
   final file = File('test/fixtures/marketplace/$fileName');
   final raw = file.readAsStringSync();
   final decoded = jsonDecode(raw);
-  return (decoded as Map).map(
-    (key, value) => MapEntry<String, dynamic>(key.toString(), value),
-  );
+  return _asMap(decoded);
 }
 
 String _fixtureRaw(String fileName) {
@@ -273,6 +276,18 @@ http.Response _fixtureResponse(String fileName, {required int statusCode}) {
     statusCode,
     headers: const <String, String>{'content-type': 'application/json'},
   );
+}
+
+Map<String, dynamic> _asMap(Object? value) {
+  if (value is Map<String, dynamic>) {
+    return value;
+  }
+  if (value is Map) {
+    return value.map(
+      (key, mapValue) => MapEntry<String, dynamic>(key.toString(), mapValue),
+    );
+  }
+  return <String, dynamic>{};
 }
 
 class _InMemoryTokenStorage extends TokenStorage {

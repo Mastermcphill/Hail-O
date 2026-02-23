@@ -1,50 +1,45 @@
 {
   "ok": true,
   "trace_id": "test-trace",
-  "data": {
-    "offers": [
-      {
-        "id": "offer_sedan_01",
-        "title": "Budget Sedan",
-        "vehicle_class": "sedan",
-        "price_minor": 4200,
-        "rating": 4.5,
-        "seats_available": 4,
-        "eta_minutes": 8,
-        "highlights": [
-          "Air conditioning",
-          "Verified driver",
-          "Cashless payment"
-        ]
-      },
-      {
-        "id": "offer_suv_02",
-        "title": "Comfort SUV",
-        "vehicle_class": "suv",
-        "price_minor": 5900,
-        "rating": 4.8,
-        "seats_available": 6,
-        "eta_minutes": 6,
-        "highlights": [
-          "Large luggage space",
-          "Premium interior",
-          "Priority support"
-        ]
-      },
-      {
-        "id": "offer_van_03",
-        "title": "Family Van",
-        "vehicle_class": "van",
-        "price_minor": 7100,
-        "rating": 4.7,
-        "seats_available": 8,
-        "eta_minutes": 12,
-        "highlights": [
-          "Group-friendly",
-          "Accessible boarding",
-          "Child seat options"
-        ]
-      }
-    ]
-  }
+  "data": [
+    {
+      "id": "offer_sedan_01",
+      "title": "Budget Sedan",
+      "subtitle": "Sedan Essentials",
+      "price": 4200,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Air conditioning",
+        "Verified driver",
+        "Cashless payment"
+      ]
+    },
+    {
+      "id": "offer_suv_02",
+      "title": "Comfort SUV",
+      "subtitle": "SUV Plus",
+      "price": 5900,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Large luggage space",
+        "Premium interior",
+        "Priority support"
+      ]
+    },
+    {
+      "id": "offer_van_03",
+      "title": "Family Van",
+      "subtitle": "Van Group",
+      "price": 7100,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Group-friendly",
+        "Accessible boarding",
+        "Child seat options"
+      ]
+    }
+  ]
 }
