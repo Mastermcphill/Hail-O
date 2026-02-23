@@ -1,4 +1,4 @@
-import 'package:hailo_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../data/sqlite/dao/operation_journal_dao.dart';
 import '../models/operation_journal_entry.dart';

@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:hailo_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../data/sqlite/dao/dispute_events_dao.dart';
 import '../../data/sqlite/dao/disputes_dao.dart';

@@ -1,4 +1,4 @@
-import 'package:hailo_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../../domain/models/ride_request_metadata.dart';
 import '../table_names.dart';
