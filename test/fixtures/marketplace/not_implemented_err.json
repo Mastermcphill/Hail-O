@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "trace_id": "test-trace",
+  "error_code": "NOT_IMPLEMENTED",
+  "message": "Marketplace endpoint is not implemented yet."
+}

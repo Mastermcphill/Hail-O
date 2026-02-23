@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "purchaseId": "purchase_created_001",
+    "offerId": "offer_sedan_01",
+    "seatCount": 2,
+    "status": "CONFIRMED",
+    "createdAt": "2026-02-23T18:00:00.000Z",
+    "totalAmount": 8400,
+    "currency": "NGN"
+  }
+}

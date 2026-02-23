@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:hail_o_finance_core/sqlite_api.dart';
@@ -12,6 +15,7 @@ import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../infra/postgres_provider.dart';
 import '../infra/request_context.dart';
 import '../infra/request_metrics.dart';
+import '../infra/postgres_provider.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
@@ -42,6 +46,7 @@ Handler buildApiRouter({
   required Map<String, Object?> buildInfo,
   required RequestMetrics requestMetrics,
   required Map<String, Object?> runtimeConfigSnapshot,
+  PostgresProvider? postgresProvider,
   bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
@@ -127,8 +132,43 @@ Handler buildApiRouter({
     reconciliationService: reconciliationService,
   );
   final driversController = DriversController();
+  final MarketplaceOfferRepository offerRepository = postgresProvider != null
+      ? PostgresMarketplaceOfferRepository(postgresProvider)
+      : InMemoryMarketplaceOfferRepository();
+  final paymentService = PaymentService.fromEnvironment(
+    postgresProvider: postgresProvider,
+    configuredProvider: Platform.environment['PAYMENT_PROVIDER'],
+    paystackSecretKey:
+        Platform.environment['PAYSTACK_SECRET_KEY'] ??
+        Platform.environment['PAYMENT_PROVIDER_SECRET'],
+    stripeWebhookSecret:
+        Platform.environment['STRIPE_WEBHOOK_SECRET'] ??
+        Platform.environment['PAYMENT_PROVIDER_SECRET'],
+    metrics: requestMetrics,
+  );
+  final marketplaceRouter = MarketplaceRouter(
+    handlers: MarketplaceHandlers(
+      offerRepository: offerRepository,
+      paymentService: paymentService,
+    ),
+  );
+  final paymentsController = PaymentsController(paymentService: paymentService);
 
   final router = Router()
+    ..get('/', (Request request) {
+      return Response.ok(
+        jsonEncode({
+          'ok': true,
+          'service': 'hail-o-backend',
+          'env':
+              Platform.environment['FLIPTRYBE_ENV'] ??
+              Platform.environment['ENV'] ??
+              'unknown',
+          'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'unknown',
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    })
     ..get(
       '/health',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
@@ -151,6 +191,8 @@ Handler buildApiRouter({
     ..mount('/orgs', orgController.router.call)
     ..mount('/webhooks/', paymentsWebhookController.router.call)
     ..mount('/drivers/', driversController.router.call)
+    ..mount('/marketplace/', marketplaceRouter.router.call)
+    ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
     ..mount('/admin/', adminController.router.call)

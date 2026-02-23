@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "purchaseId": "purchase_created_001",
+    "offerId": "offer_sedan_01",
+    "seatCount": 3,
+    "assignments": [
+      {
+        "seatIndex": 1,
+        "name": "Ada",
+        "email": "ada@test.dev"
+      },
+      {
+        "seatIndex": 2,
+        "name": "Kunle",
+        "email": "kunle@test.dev"
+      },
+      {
+        "seatIndex": 3,
+        "name": "Tobi",
+        "email": "tobi@test.dev"
+      }
+    ],
+    "status": "SEATS_UPDATED",
+    "createdAt": "2026-02-23T18:00:00.000Z",
+    "totalAmount": 12600,
+    "currency": "NGN"
+  }
+}

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +12,7 @@ class RideRequestScreen extends StatefulWidget {
   const RideRequestScreen({super.key, required this.apiClient});
 
   final ApiClient apiClient;
+  final TokenStorage tokenStorage;
 
   @override
   State<RideRequestScreen> createState() => _RideRequestScreenState();
@@ -125,7 +128,6 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     setState(() {
       _isSubmitting = true;
     });
-
     try {
       final pickup = _pickupController.text.trim();
       final dropoff = _dropoffController.text.trim();
@@ -159,6 +161,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         'base_fare_minor': _parseInt(_baseFareMinorController.text),
         'premium_markup_minor': _parseInt(_premiumMarkupMinorController.text),
         'connection_fee_minor': _parseInt(_connectionFeeMinorController.text),
+        'charter_mode': _charterMode,
       };
 
       final response = await widget.apiClient.post(
@@ -192,6 +195,63 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     }
   }
 
+  Future<void> _estimateDistance({bool silentErrors = false}) async {
+    if (mounted) {
+      setState(() {
+        _isEstimatingDistance = true;
+      });
+    }
+    try {
+      final estimate = await _distanceService.estimate(
+        origin: _pickupController.text,
+        destination: _dropoffController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _distanceMetersController.text = estimate.distanceMeters.toString();
+        _durationSecondsController.text = estimate.durationSeconds.toString();
+        _distanceSource = estimate.source;
+      });
+    } catch (error) {
+      if (silentErrors || !mounted) {
+        return;
+      }
+      _showErrorSnackBar(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEstimatingDistance = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _hasLocalNextOfKin() async {
+    final encoded = await widget.tokenStorage.readValue(
+      kNextOfKinLocalStorageKey,
+    );
+    if (encoded == null || encoded.trim().isEmpty) {
+      return false;
+    }
+    try {
+      final decoded = jsonDecode(encoded);
+      final map = _asMap(decoded);
+      return _hasAllNextOfKinFields(map);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _goToNextOfKin() {
+    if (!mounted) {
+      return;
+    }
+    final returnTo = Uri.encodeComponent('/rider/request');
+    context.go('/rider/next-of-kin?returnTo=$returnTo');
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isCheckingGate) {
@@ -202,12 +262,12 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: 680),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'Create Ride Request',
+                'Request Ride',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 16),

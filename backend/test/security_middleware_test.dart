@@ -138,6 +138,116 @@ void main() {
       expect(general.statusCode, 200);
     });
 
+    test(
+      'marketplace routes use dedicated read/write buckets and RATE_LIMITED envelope',
+      () async {
+        final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
+        final handler = Pipeline()
+            .addMiddleware(
+              rateLimitMiddleware(
+                window: const Duration(minutes: 1),
+                maxRequestsPerIp: 1,
+                maxRequestsPerUser: 1,
+                maxMarketplaceReadRequestsPerIp: 3,
+                maxMarketplaceReadRequestsPerUser: 3,
+                maxMarketplaceWriteRequestsPerIp: 1,
+                maxMarketplaceWriteRequestsPerUser: 1,
+                nowProvider: () => fixedNow,
+              ),
+            )
+            .addHandler((request) async => Response.ok('ok'));
+
+        final readOne = await handler(
+          Request(
+            'GET',
+            Uri.parse('http://localhost/marketplace/offers'),
+            headers: const <String, String>{'x-forwarded-for': '10.0.0.8'},
+          ),
+        );
+        final readTwo = await handler(
+          Request(
+            'GET',
+            Uri.parse('http://localhost/marketplace/offers'),
+            headers: const <String, String>{'x-forwarded-for': '10.0.0.8'},
+          ),
+        );
+        final writeOne = await handler(
+          Request(
+            'POST',
+            Uri.parse('http://localhost/marketplace/purchases'),
+            headers: const <String, String>{'x-forwarded-for': '10.0.0.8'},
+          ),
+        );
+        final writeTwo = await handler(
+          Request(
+            'POST',
+            Uri.parse('http://localhost/marketplace/purchases'),
+            headers: const <String, String>{'x-forwarded-for': '10.0.0.8'},
+          ),
+        );
+
+        expect(readOne.statusCode, 200);
+        expect(readTwo.statusCode, 200);
+        expect(writeOne.statusCode, 200);
+        expect(writeTwo.statusCode, 429);
+
+        final body =
+            jsonDecode(await writeTwo.readAsString()) as Map<String, dynamic>;
+        expect(body['error_code'], 'RATE_LIMITED');
+        expect(body['code'], 'rate_limited');
+      },
+    );
+
+    test('webhook routes use high burst bucket', () async {
+      final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
+      final handler = Pipeline()
+          .addMiddleware(
+            rateLimitMiddleware(
+              window: const Duration(minutes: 1),
+              maxRequestsPerIp: 1,
+              maxRequestsPerUser: 1,
+              maxWebhookRequestsPerIp: 3,
+              maxWebhookRequestsPerUser: 3,
+              nowProvider: () => fixedNow,
+            ),
+          )
+          .addHandler((request) async => Response.ok('ok'));
+
+      final first = await handler(
+        Request(
+          'POST',
+          Uri.parse('http://localhost/webhooks/payments'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.0.9'},
+        ),
+      );
+      final second = await handler(
+        Request(
+          'POST',
+          Uri.parse('http://localhost/webhooks/payments'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.0.9'},
+        ),
+      );
+      final third = await handler(
+        Request(
+          'POST',
+          Uri.parse('http://localhost/webhooks/payments'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.0.9'},
+        ),
+      );
+      final fourth = await handler(
+        Request(
+          'POST',
+          Uri.parse('http://localhost/webhooks/payments'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.0.9'},
+        ),
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 200);
+      expect(third.statusCode, 200);
+      expect(fourth.statusCode, 429);
+    });
+
     test('trust proxy headers toggle controls X-Forwarded-For usage', () async {
       final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
 

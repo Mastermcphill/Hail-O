@@ -42,6 +42,7 @@ class AppServer {
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
+    this.postgresProvider,
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
@@ -72,6 +73,7 @@ class AppServer {
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
+  final PostgresProvider? postgresProvider;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
@@ -100,6 +102,7 @@ class AppServer {
       'health',
       'healthz',
       'api/healthz',
+      'webhooks/payments',
       if (metricsPublic) 'metrics',
     };
     return Pipeline()

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
+import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_home.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
@@ -303,6 +305,26 @@ class RoleNavigationScaffold extends StatelessWidget {
               label: item.label,
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _MissingRouteParamScreen extends StatelessWidget {
+  const _MissingRouteParamScreen({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
       ),
     );
   }

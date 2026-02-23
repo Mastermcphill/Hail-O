@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:shelf/shelf.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../infra/request_context.dart';
 import '../http_utils.dart';
@@ -12,6 +13,18 @@ class _CounterBucket {
 
   DateTime windowStartUtc;
   int count;
+}
+
+class _RateLimitRule {
+  const _RateLimitRule({
+    required this.maxRequestsPerIp,
+    required this.maxRequestsPerUser,
+    required this.bucket,
+  });
+
+  final int maxRequestsPerIp;
+  final int maxRequestsPerUser;
+  final String bucket;
 }
 
 Middleware rateLimitMiddleware({
@@ -28,10 +41,12 @@ Middleware rateLimitMiddleware({
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
   NowProvider? nowProvider,
+  Uuid? uuid,
 }) {
   final ipBuckets = <String, _CounterBucket>{};
   final userBuckets = <String, _CounterBucket>{};
   final now = nowProvider ?? () => DateTime.now().toUtc();
+  final traceUuid = uuid ?? const Uuid();
 
   bool consume(
     Map<String, _CounterBucket> buckets,
@@ -54,6 +69,60 @@ Middleware rateLimitMiddleware({
     return true;
   }
 
+  _RateLimitRule ruleFor(Request request) {
+    final path = request.url.path;
+    final method = request.method.toUpperCase();
+
+    if (path.startsWith('webhooks/')) {
+      return _RateLimitRule(
+        maxRequestsPerIp: maxWebhookRequestsPerIp,
+        maxRequestsPerUser: maxWebhookRequestsPerUser,
+        bucket: 'webhooks',
+      );
+    }
+
+    if (path.startsWith('marketplace/offers')) {
+      return _RateLimitRule(
+        maxRequestsPerIp: maxMarketplaceReadRequestsPerIp,
+        maxRequestsPerUser: maxMarketplaceReadRequestsPerUser,
+        bucket: 'marketplace_read',
+      );
+    }
+
+    if (path.startsWith('marketplace/purchases')) {
+      final isWriteMethod =
+          method == 'POST' ||
+          method == 'PATCH' ||
+          method == 'PUT' ||
+          method == 'DELETE';
+      return isWriteMethod
+          ? _RateLimitRule(
+              maxRequestsPerIp: maxMarketplaceWriteRequestsPerIp,
+              maxRequestsPerUser: maxMarketplaceWriteRequestsPerUser,
+              bucket: 'marketplace_write',
+            )
+          : _RateLimitRule(
+              maxRequestsPerIp: maxMarketplaceReadRequestsPerIp,
+              maxRequestsPerUser: maxMarketplaceReadRequestsPerUser,
+              bucket: 'marketplace_read',
+            );
+    }
+
+    if (path.startsWith('auth/')) {
+      return _RateLimitRule(
+        maxRequestsPerIp: maxAuthRequestsPerIp,
+        maxRequestsPerUser: maxAuthRequestsPerUser,
+        bucket: 'auth',
+      );
+    }
+
+    return _RateLimitRule(
+      maxRequestsPerIp: maxRequestsPerIp,
+      maxRequestsPerUser: maxRequestsPerUser,
+      bucket: 'default',
+    );
+  }
+
   return (Handler innerHandler) {
     return (Request request) {
       final path = request.url.path;
@@ -62,6 +131,8 @@ Middleware rateLimitMiddleware({
       }
 
       final currentUtc = now();
+      final userId = request.requestContext.userId?.trim() ?? '';
+      final isAuthenticated = userId.isNotEmpty;
       final ipKey = _extractClientIp(
         request,
         trustProxyHeaders: trustProxyHeaders,
@@ -124,6 +195,41 @@ Middleware rateLimitMiddleware({
       return innerHandler(request);
     };
   };
+}
+
+Response _rateLimitedResponse(
+  Request request,
+  Uuid uuid, {
+  required String message,
+  required int retryAfterSeconds,
+}) {
+  final traceId = _resolveTraceId(request, uuid);
+  return jsonResponse(
+    429,
+    <String, Object?>{
+      'ok': false,
+      'trace_id': traceId,
+      'error_code': 'RATE_LIMITED',
+      'code': 'rate_limited',
+      'message': message,
+    },
+    headers: <String, String>{
+      'retry-after': '$retryAfterSeconds',
+      'x-error-code': 'RATE_LIMITED',
+    },
+  );
+}
+
+String _resolveTraceId(Request request, Uuid uuid) {
+  final traceFromContext = request.requestContext.traceId.trim();
+  if (traceFromContext.isNotEmpty && traceFromContext != 'trace-unset') {
+    return traceFromContext;
+  }
+  final traceFromHeader = (request.headers['x-trace-id'] ?? '').trim();
+  if (traceFromHeader.isNotEmpty) {
+    return traceFromHeader;
+  }
+  return uuid.v4();
 }
 
 String _extractClientIp(Request request, {required bool trustProxyHeaders}) {

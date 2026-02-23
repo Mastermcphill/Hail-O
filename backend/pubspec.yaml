@@ -3,6 +3,12 @@ description: Hail-O backend Shelf API package.
 publish_to: none
 version: 1.0.0
 
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name: sqlite3
+
 environment:
   sdk: ^3.10.8
 

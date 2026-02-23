@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": [
+    {
+      "id": "offer_sedan_01",
+      "title": "Budget Sedan",
+      "subtitle": "Sedan Essentials",
+      "price": 4200,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Air conditioning",
+        "Verified driver",
+        "Cashless payment"
+      ]
+    },
+    {
+      "id": "offer_suv_02",
+      "title": "Comfort SUV",
+      "subtitle": "SUV Plus",
+      "price": 5900,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Large luggage space",
+        "Premium interior",
+        "Priority support"
+      ]
+    },
+    {
+      "id": "offer_van_03",
+      "title": "Family Van",
+      "subtitle": "Van Group",
+      "price": 7100,
+      "currency": "NGN",
+      "interval": "per trip",
+      "perks": [
+        "Group-friendly",
+        "Accessible boarding",
+        "Child seat options"
+      ]
+    }
+  ]
+}

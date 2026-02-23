@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": {
+    "offerId": "offer_sedan_01",
+    "headline": "Secure this Budget Sedan offer now",
+    "subhead": "Connection fee confirms your driver match and seat capacity.",
+    "bullets": [
+      "Connection fee reserves your selected capacity instantly.",
+      "Final routing and dispatch happen immediately after seat confirmation.",
+      "You can still change your plan after receipt."
+    ],
+    "legalText": "By continuing, you agree to marketplace terms and ride matching policies."
+  }
+}

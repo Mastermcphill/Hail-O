@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "trace_id": "test-trace",
+  "data": [
+    {
+      "type": "PURCHASE_CREATED",
+      "title": "Purchase created",
+      "description": "Purchase was created successfully.",
+      "timestamp": "2026-02-23T18:00:00.000Z",
+      "status": "success"
+    },
+    {
+      "type": "SEATS_SELECTED",
+      "title": "Seats selected",
+      "description": "Initial seats were selected.",
+      "timestamp": "2026-02-23T18:01:00.000Z",
+      "status": "success"
+    },
+    {
+      "type": "SEATS_UPDATED",
+      "title": "Seats updated",
+      "description": "Seat count was updated.",
+      "timestamp": "2026-02-23T18:02:00.000Z",
+      "status": "pending"
+    },
+    {
+      "type": "ASSIGNMENT_UPDATED",
+      "title": "Assignments updated",
+      "description": "Passenger assignments were updated.",
+      "timestamp": "2026-02-23T18:03:00.000Z",
+      "status": "pending"
+    },
+    {
+      "type": "PLAN_CHANGED",
+      "title": "Plan changed",
+      "description": "Plan was changed to a higher class.",
+      "timestamp": "2026-02-23T18:04:00.000Z",
+      "status": "success"
+    }
+  ]
+}

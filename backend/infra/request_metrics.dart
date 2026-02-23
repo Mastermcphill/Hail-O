@@ -74,6 +74,56 @@ class RequestMetrics {
     if (applied && !dryRun) {
       _marketplaceReconciliationApplied += 1;
     }
+
+    final routeKey = '$path|${method.toUpperCase()}|$statusCode';
+    _marketplaceRequestsTotal[routeKey] =
+        (_marketplaceRequestsTotal[routeKey] ?? 0) + 1;
+
+    final latencyStats = _marketplaceHandlerLatencyByRoute.putIfAbsent(
+      path,
+      () => _LatencyStats(),
+    );
+    latencyStats.record(latencyMs);
+
+    if (path == 'marketplace/purchases' && method.toUpperCase() == 'POST') {
+      final statusKey = statusCode >= 200 && statusCode < 300
+          ? 'success'
+          : 'error';
+      _marketplacePurchaseCreatesTotal[statusKey] =
+          (_marketplacePurchaseCreatesTotal[statusKey] ?? 0) + 1;
+    }
+
+    if ((errorCode ?? '').toUpperCase() == 'RATE_LIMITED') {
+      _marketplaceRateLimitedCount += 1;
+    }
+  }
+
+  void recordMarketplaceWebhookEvent({
+    required String provider,
+    required String action,
+  }) {
+    final key =
+        '${provider.trim().toLowerCase()}|${action.trim().toLowerCase()}';
+    _marketplaceWebhookEventsTotal[key] =
+        (_marketplaceWebhookEventsTotal[key] ?? 0) + 1;
+    if (action.trim().toLowerCase() == 'signature_invalid') {
+      _marketplaceWebhookVerificationFailures += 1;
+    }
+  }
+
+  void recordMarketplaceDbQueryLatency({
+    required String op,
+    required int latencyMs,
+  }) {
+    final stats = _marketplaceDbLatencyByOp.putIfAbsent(
+      op,
+      () => _LatencyStats(),
+    );
+    stats.record(latencyMs);
+  }
+
+  void recordMarketplacePaymentFailure() {
+    _marketplacePaymentFailures += 1;
   }
 
   Map<String, Object?> snapshot() {
@@ -109,5 +159,34 @@ class RequestMetrics {
         'payment_failures': _marketplacePaymentFailures,
       },
     };
+  }
+
+  void _recordBase({required int statusCode, String? errorCode}) {
+    _requestsTotal += 1;
+    final family = '${statusCode ~/ 100}xx';
+    _statusFamilies[family] = (_statusFamilies[family] ?? 0) + 1;
+    if (errorCode != null && errorCode.isNotEmpty) {
+      _errorsByCode[errorCode] = (_errorsByCode[errorCode] ?? 0) + 1;
+    }
+  }
+}
+
+class _LatencyStats {
+  int _count = 0;
+  int _totalMs = 0;
+  int _maxMs = 0;
+
+  void record(int latencyMs) {
+    final safeLatency = latencyMs < 0 ? 0 : latencyMs;
+    _count += 1;
+    _totalMs += safeLatency;
+    if (safeLatency > _maxMs) {
+      _maxMs = safeLatency;
+    }
+  }
+
+  Map<String, Object?> toMap() {
+    final avg = _count == 0 ? 0 : (_totalMs / _count);
+    return <String, Object?>{'count': _count, 'avg_ms': avg, 'max_ms': _maxMs};
   }
 }

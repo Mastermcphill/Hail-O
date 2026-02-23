@@ -24,7 +24,10 @@ import 'server/app_server.dart';
 Future<void> main() async {
   final env = Platform.environment;
   final config = BackendRuntimeConfig.fromEnvironment();
-  final db = await DbProvider.instance.open(databasePath: config.sqlitePath);
+  final db = await DbProvider.instance.open(
+    databasePath: config.sqlitePath,
+    dbMode: config.dbMode,
+  );
   final requestMetrics = RequestMetrics();
   final environment = (env['ENV'] ?? 'development').trim();
   final dbQueryTimeoutMs =
@@ -190,6 +193,7 @@ Future<void> main() async {
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
+    postgresProvider: postgresProvider,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,
@@ -203,7 +207,10 @@ Future<void> main() async {
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
   );
   stdout.writeln(
-    'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser trust_proxy_headers=$trustProxyHeaders',
+    'Port config: PORT=$configuredPortRaw resolved_port=$port bind_host=0.0.0.0',
+  );
+  stdout.writeln(
+    'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
   );
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
