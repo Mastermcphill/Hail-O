@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-const String apiContractVersion = 'v1';
+const String apiContractVersion = 'v2';
 
-const Map<String, Object?> _apiContractV1 = <String, Object?>{
+const Map<String, Object?> _apiContractV2 = <String, Object?>{
   'version': apiContractVersion,
   'endpoints': <String, Object?>{
     'health': <String, Object?>{
@@ -35,10 +35,10 @@ const Map<String, Object?> _apiContractV1 = <String, Object?>{
       },
     },
     'error': <String, Object?>{
-      'required_keys': <String>['ok', 'code', 'message', 'trace_id'],
+      'required_keys': <String>['ok', 'error_code', 'message', 'trace_id'],
       'field_types': <String, String>{
         'ok': 'bool',
-        'code': 'string',
+        'error_code': 'string',
         'message': 'string',
         'trace_id': 'string',
       },
@@ -47,11 +47,11 @@ const Map<String, Object?> _apiContractV1 = <String, Object?>{
 };
 
 Map<String, Object?> apiContractGoldenSnapshot() {
-  return _deepCopyMap(_apiContractV1);
+  return _deepCopyMap(_apiContractV2);
 }
 
 String apiContractHash() {
-  final canonical = jsonEncode(_canonicalize(_apiContractV1));
+  final canonical = jsonEncode(_canonicalize(_apiContractV2));
   return sha256.convert(utf8.encode(canonical)).toString();
 }
 

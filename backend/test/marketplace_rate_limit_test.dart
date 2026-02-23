@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
@@ -49,7 +49,7 @@ void main() {
     expect(second.statusCode, 429);
     final body =
         jsonDecode(await second.readAsString()) as Map<String, dynamic>;
-    expect(body['code'], 'rate_limited');
+    expect(body['error_code'], 'RATE_LIMITED');
     expect((body['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 }

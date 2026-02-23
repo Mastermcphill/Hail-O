@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -41,7 +41,7 @@ void main() {
       expect(response.statusCode, 400);
       final envelope = await _decodeEnvelope(response);
       expect(envelope['ok'], isFalse);
-      expect(envelope['code'], 'invalid_json');
+      expect(envelope['error_code'], 'INVALID_JSON');
       expect((envelope['message'] as String?)?.isNotEmpty, isTrue);
       expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
     },
@@ -61,7 +61,7 @@ void main() {
       expect(response.statusCode, 401);
       final envelope = await _decodeEnvelope(response);
       expect(envelope['ok'], isFalse);
-      expect(envelope['code'], 'unauthorized');
+      expect(envelope['error_code'], 'UNAUTHORIZED');
       expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
     },
   );
@@ -90,7 +90,7 @@ void main() {
     expect(response.statusCode, 409);
     final envelope = await _decodeEnvelope(response);
     expect(envelope['ok'], isFalse);
-    expect(envelope['code'], 'invalid_email');
+    expect(envelope['error_code'], 'INVALID_EMAIL');
     expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 
@@ -106,7 +106,7 @@ void main() {
     expect(response.statusCode, 404);
     final envelope = await _decodeEnvelope(response);
     expect(envelope['ok'], isFalse);
-    expect(envelope['code'], 'route_not_found');
+    expect(envelope['error_code'], 'ROUTE_NOT_FOUND');
     expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 }

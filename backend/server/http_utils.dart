@@ -29,7 +29,6 @@ Map<String, Object?> errorEnvelope(
       : (headerTraceId.isNotEmpty ? headerTraceId : const Uuid().v4());
   return <String, Object?>{
     'ok': false,
-    'code': code,
     'error_code': code.toUpperCase(),
     'message': message,
     'trace_id': traceId,
@@ -46,7 +45,7 @@ Response jsonErrorResponse(
   return jsonResponse(
     statusCode,
     errorEnvelope(request, code: code, message: message),
-    headers: <String, String>{'x-error-code': code, ...?headers},
+    headers: <String, String>{'x-error-code': code.toUpperCase(), ...?headers},
   );
 }
 

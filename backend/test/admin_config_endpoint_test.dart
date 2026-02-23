@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -48,7 +48,7 @@ void main() {
       );
       expect(unauthorized.statusCode, 403);
       final unauthorizedBody = await _decodeBody(unauthorized);
-      expect(unauthorizedBody['code'], 'admin_only');
+      expect(unauthorizedBody['error_code'], 'ADMIN_ONLY');
 
       final authed = await _request(
         handler,
@@ -79,7 +79,7 @@ void main() {
       );
       expect(contractForbidden.statusCode, 403);
       final contractForbiddenBody = await _decodeBody(contractForbidden);
-      expect(contractForbiddenBody['code'], 'admin_only');
+      expect(contractForbiddenBody['error_code'], 'ADMIN_ONLY');
 
       final contractAuthed = await _request(
         handler,

@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -45,7 +45,7 @@ void main() {
       );
       expect(response.statusCode, 403);
       final envelope = await _decodeBody(response);
-      expect(envelope['code'], 'forbidden');
+      expect(envelope['error_code'], 'FORBIDDEN');
       expect((envelope['trace_id'] as String?)?.isNotEmpty, isTrue);
     }
   });
@@ -74,7 +74,7 @@ void main() {
     );
     expect(adminReversal.statusCode, 403);
     final reversalBody = await _decodeBody(adminReversal);
-    expect(reversalBody['code'], 'admin_only');
+    expect(reversalBody['error_code'], 'ADMIN_ONLY');
 
     final adminConfig = await _request(
       handler,
@@ -84,7 +84,7 @@ void main() {
     );
     expect(adminConfig.statusCode, 403);
     final configBody = await _decodeBody(adminConfig);
-    expect(configBody['code'], 'admin_only');
+    expect(configBody['error_code'], 'ADMIN_ONLY');
 
     final settlementRun = await _postJson(
       handler,
@@ -98,7 +98,7 @@ void main() {
     );
     expect(settlementRun.statusCode, 403);
     final settlementBody = await _decodeBody(settlementRun);
-    expect(settlementBody['code'], 'admin_only');
+    expect(settlementBody['error_code'], 'ADMIN_ONLY');
   });
 }
 

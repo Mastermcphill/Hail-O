@@ -21,7 +21,7 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
-  test('api contract matches v1 golden snapshot', () async {
+  test('api contract matches v2 golden snapshot', () async {
     final db = await HailODatabase().openInMemory();
     addTearDown(() async => db.close());
 
@@ -127,12 +127,12 @@ void main() {
       requiredKeys: _requiredKeys(endpoints['error'] as Map<String, dynamic>),
     );
     expect(errorBody['ok'], false);
-    expect(errorBody['code'], 'missing_idempotency_key');
+    expect(errorBody['error_code'], 'MISSING_IDEMPOTENCY_KEY');
   });
 }
 
 Map<String, dynamic> _loadGolden() {
-  final file = File('test/golden/api_contract_v1.json');
+  final file = File('test/golden/api_contract_v2.json');
   final raw = file.readAsStringSync();
   return Map<String, dynamic>.from(jsonDecode(raw) as Map<String, dynamic>);
 }

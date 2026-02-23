@@ -4,7 +4,7 @@ import 'dart:io';
 import '../infra/api_contract.dart';
 
 void main() {
-  final file = File('test/golden/api_contract_v1.json');
+  final file = File('test/golden/api_contract_v2.json');
   if (!file.existsSync()) {
     stderr.writeln('Missing golden contract file at ${file.path}');
     exitCode = 1;

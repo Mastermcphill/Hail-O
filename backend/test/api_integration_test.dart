@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -47,7 +47,7 @@ void main() {
     );
     expect(missingIdempotency.statusCode, 400);
     final missingBody = await _decodeBody(missingIdempotency);
-    expect(missingBody['code'], 'missing_idempotency_key');
+    expect(missingBody['error_code'], 'MISSING_IDEMPOTENCY_KEY');
 
     final register = await _postJson(
       handler,

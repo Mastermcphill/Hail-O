@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -39,7 +39,7 @@ void main() {
     expect(response.statusCode, 400);
     final decoded =
         jsonDecode(await response.readAsString()) as Map<String, dynamic>;
-    expect(decoded['code'], 'invalid_json');
+    expect(decoded['error_code'], 'INVALID_JSON');
     expect((decoded['trace_id'] as String?)?.isNotEmpty, isTrue);
   });
 
@@ -55,7 +55,7 @@ void main() {
     expect(response.statusCode, 401);
     final decoded =
         jsonDecode(await response.readAsString()) as Map<String, dynamic>;
-    expect(decoded['code'], 'unauthorized');
+    expect(decoded['error_code'], 'UNAUTHORIZED');
   });
 
   test('trace middleware preserves caller supplied x-trace-id', () async {

@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
@@ -51,7 +51,7 @@ void main() {
       expect(third.statusCode, 429);
       final body =
           jsonDecode(await third.readAsString()) as Map<String, dynamic>;
-      expect(body['code'], 'rate_limited');
+      expect(body['error_code'], 'RATE_LIMITED');
     });
 
     test(
@@ -89,7 +89,7 @@ void main() {
         expect(second.statusCode, 429);
         final body =
             jsonDecode(await second.readAsString()) as Map<String, dynamic>;
-        expect(body['code'], 'rate_limited');
+        expect(body['error_code'], 'RATE_LIMITED');
         final traceId = (body['trace_id'] as String?) ?? '';
         expect(traceId.isNotEmpty, isTrue);
         expect(traceId, isNot('trace-unset'));
@@ -194,7 +194,7 @@ void main() {
         final body =
             jsonDecode(await writeTwo.readAsString()) as Map<String, dynamic>;
         expect(body['error_code'], 'RATE_LIMITED');
-        expect(body['code'], 'rate_limited');
+        expect(body['error_code'], 'RATE_LIMITED');
       },
     );
 
@@ -344,7 +344,7 @@ void main() {
       expect(denied.statusCode, 403);
       final body =
           jsonDecode(await denied.readAsString()) as Map<String, dynamic>;
-      expect(body['code'], 'cors_origin_denied');
+      expect(body['error_code'], 'CORS_ORIGIN_DENIED');
     });
   });
 
@@ -410,7 +410,7 @@ void main() {
       expect(response.statusCode, 413);
       final body =
           jsonDecode(await response.readAsString()) as Map<String, dynamic>;
-      expect(body['code'], 'request_body_too_large');
+      expect(body['error_code'], 'REQUEST_BODY_TOO_LARGE');
       expect((body['trace_id'] as String?)?.isNotEmpty, isTrue);
     });
   });
