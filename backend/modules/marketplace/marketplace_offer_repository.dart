@@ -43,6 +43,12 @@ abstract class MarketplaceOfferRepository {
     required String userId,
     required String purchaseId,
   });
+
+  Future<List<MarketplaceTimelineEventRecord>> listTimelineEvents({
+    required String userId,
+    required String purchaseId,
+    int limit = 100,
+  });
 }
 
 class MarketplaceOfferRecord {
@@ -129,6 +135,22 @@ class MarketplaceSeatAssignmentInput {
   final int seatIndex;
   final String name;
   final String email;
+}
+
+class MarketplaceTimelineEventRecord {
+  const MarketplaceTimelineEventRecord({
+    required this.id,
+    required this.purchaseId,
+    required this.eventType,
+    required this.eventData,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String purchaseId;
+  final String eventType;
+  final Map<String, Object?> eventData;
+  final DateTime createdAt;
 }
 
 class MarketplaceRepositoryStateException implements Exception {

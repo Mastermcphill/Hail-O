@@ -60,6 +60,8 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       <String, String>{};
   final Map<String, List<MarketplaceSeatAssignmentRecord>>
   _assignmentsByPurchase = <String, List<MarketplaceSeatAssignmentRecord>>{};
+  final Map<String, List<MarketplaceTimelineEventRecord>> _timelineByPurchaseId =
+      <String, List<MarketplaceTimelineEventRecord>>{};
 
   @override
   Future<MarketplaceOfferRecord?> findActiveOfferById(String offerId) async {
@@ -114,6 +116,16 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
     );
     _purchasesById[purchase.id] = purchase;
     _purchaseIdByUserAndIdempotency[key] = purchase.id;
+    _appendTimeline(
+      purchaseId: purchase.id,
+      eventType: 'purchase_created',
+      eventData: <String, Object?>{
+        'offer_id': purchase.offerId,
+        'seat_count': purchase.seatCount,
+        'status': purchase.status,
+        'idempotency_key': purchase.idempotencyKey,
+      },
+    );
     return purchase;
   }
 
@@ -172,6 +184,18 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       updatedAt: _nowUtc(),
     );
     _purchasesById[purchaseId] = updated;
+    final delta = seatCount - existing.seatCount;
+    _appendTimeline(
+      purchaseId: purchaseId,
+      eventType: delta > 0
+          ? 'seat_added'
+          : (delta < 0 ? 'seat_removed' : 'seats_updated'),
+      eventData: <String, Object?>{
+        'previous_seat_count': existing.seatCount,
+        'seat_count': seatCount,
+        'delta': delta,
+      },
+    );
     return updated;
   }
 
@@ -220,6 +244,11 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       updatedAt: now,
     );
     _purchasesById[purchaseId] = updated;
+    _appendTimeline(
+      purchaseId: purchaseId,
+      eventType: 'assignment_updated',
+      eventData: <String, Object?>{'assignment_count': assignments.length},
+    );
     return updated;
   }
 
@@ -253,6 +282,15 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       updatedAt: _nowUtc(),
     );
     _purchasesById[purchaseId] = updated;
+    _appendTimeline(
+      purchaseId: purchaseId,
+      eventType: 'plan_changed',
+      eventData: <String, Object?>{
+        'old_offer_id': existing.offerId,
+        'new_offer_id': offer.id,
+        'seat_count': existing.seatCount,
+      },
+    );
     return updated;
   }
 
@@ -268,6 +306,46 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
     return List<MarketplaceSeatAssignmentRecord>.from(
       _assignmentsByPurchase[purchaseId] ??
           const <MarketplaceSeatAssignmentRecord>[],
+    );
+  }
+
+  @override
+  Future<List<MarketplaceTimelineEventRecord>> listTimelineEvents({
+    required String userId,
+    required String purchaseId,
+    int limit = 100,
+  }) async {
+    final existing = _purchasesById[purchaseId];
+    if (existing == null || existing.userId != userId) {
+      return const <MarketplaceTimelineEventRecord>[];
+    }
+    final events =
+        _timelineByPurchaseId[purchaseId] ?? const <MarketplaceTimelineEventRecord>[];
+    if (events.isEmpty) {
+      return const <MarketplaceTimelineEventRecord>[];
+    }
+    final safeLimit = limit < 1 ? 1 : limit;
+    final start = events.length > safeLimit ? events.length - safeLimit : 0;
+    return List<MarketplaceTimelineEventRecord>.from(events.sublist(start));
+  }
+
+  void _appendTimeline({
+    required String purchaseId,
+    required String eventType,
+    required Map<String, Object?> eventData,
+  }) {
+    final events = _timelineByPurchaseId.putIfAbsent(
+      purchaseId,
+      () => <MarketplaceTimelineEventRecord>[],
+    );
+    events.add(
+      MarketplaceTimelineEventRecord(
+        id: _uuid.v4(),
+        purchaseId: purchaseId,
+        eventType: eventType,
+        eventData: Map<String, Object?>.from(eventData),
+        createdAt: _nowUtc(),
+      ),
     );
   }
 }

@@ -20,12 +20,7 @@ void main() {
       handler = _buildHandler();
     });
 
-    final notImplementedCases = <_EndpointCase>[
-      const _EndpointCase(
-        method: 'GET',
-        path: '/marketplace/purchases/p-123/timeline',
-      ),
-    ];
+    final notImplementedCases = <_EndpointCase>[];
 
     for (final endpoint in notImplementedCases) {
       test(
@@ -274,6 +269,34 @@ void main() {
         );
         expect(planChangeData['offerId'], 'offer_suv_02');
         expect(planChangeData['status'], 'PLAN_CHANGED');
+
+        final timelineResponse = await _send(
+          handler,
+          method: 'GET',
+          path: '/marketplace/purchases/${firstData['purchaseId']}/timeline',
+          userId: 'user-rider-1',
+        );
+        expect(timelineResponse.statusCode, 200);
+        final timelinePayload = await _decodeJsonMap(timelineResponse);
+        expect(timelinePayload['ok'], isTrue);
+        final timelineEvents =
+            (timelinePayload['data'] as List<dynamic>).whereType<Map>().toList();
+        expect(timelineEvents, isNotEmpty);
+        final eventTypes = timelineEvents
+            .map((event) => (event['type'] ?? '').toString())
+            .toSet();
+        expect(eventTypes.contains('PURCHASE_CREATED'), isTrue);
+        expect(
+          eventTypes.any(
+            (type) =>
+                type == 'SEAT_ADDED' ||
+                type == 'SEAT_REMOVED' ||
+                type == 'SEATS_UPDATED',
+          ),
+          isTrue,
+        );
+        expect(eventTypes.contains('ASSIGNMENT_UPDATED'), isTrue);
+        expect(eventTypes.contains('PLAN_CHANGED'), isTrue);
       },
     );
 

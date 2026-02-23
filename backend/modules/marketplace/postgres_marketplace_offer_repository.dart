@@ -534,6 +534,40 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     return rows.map(_rowToAssignment).toList(growable: false);
   }
 
+  @override
+  Future<List<MarketplaceTimelineEventRecord>> listTimelineEvents({
+    required String userId,
+    required String purchaseId,
+    int limit = 100,
+  }) async {
+    final safeLimit = limit < 1 ? 1 : limit;
+    final rows = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT
+          e.id::text,
+          e.purchase_id::text,
+          e.event_type,
+          e.event_data::text,
+          e.created_at
+        FROM marketplace_timeline_events e
+        JOIN marketplace_purchases p
+          ON p.id = e.purchase_id
+        WHERE p.user_id = @user_id
+          AND e.purchase_id = CAST(@purchase_id AS UUID)
+        ORDER BY e.created_at ASC
+        LIMIT @limit
+        ''',
+        substitutionValues: <String, Object?>{
+          'user_id': userId,
+          'purchase_id': purchaseId,
+          'limit': safeLimit,
+        },
+      ),
+    );
+    return rows.map(_rowToTimelineEvent).toList(growable: false);
+  }
+
   Future<MarketplacePurchaseRecord?> _findPurchaseByIdempotencyInternal({
     required PostgreSQLExecutionContext txn,
     required String userId,
@@ -718,6 +752,16 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     );
   }
 
+  MarketplaceTimelineEventRecord _rowToTimelineEvent(List<Object?> row) {
+    return MarketplaceTimelineEventRecord(
+      id: _readString(row[0]),
+      purchaseId: _readString(row[1]),
+      eventType: _readString(row[2]),
+      eventData: _parseEventData(row[3]),
+      createdAt: _readDateTime(row[4]),
+    );
+  }
+
   List<String> _parsePerks(Object? raw) {
     if (raw is List) {
       return raw.map((entry) => entry.toString()).toList(growable: false);
@@ -735,6 +779,27 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
       }
     }
     return <String>[];
+  }
+
+  Map<String, Object?> _parseEventData(Object? raw) {
+    if (raw is Map) {
+      return raw.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return decoded.map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+        }
+      } catch (_) {
+        return <String, Object?>{};
+      }
+    }
+    return <String, Object?>{};
   }
 
   String _readString(Object? value) {

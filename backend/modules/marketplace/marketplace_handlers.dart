@@ -407,10 +407,58 @@ class MarketplaceHandlers {
     }
   }
 
-  Response getTimeline(Request request, String purchaseId) {
-    return _notImplemented(
+  Future<Response> getTimeline(Request request, String purchaseId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    final limit = _toInt(request.url.queryParameters['limit']) ?? 100;
+    final events = await _offerRepository.listTimelineEvents(
+      userId: userId,
+      purchaseId: purchaseId,
+      limit: limit,
+    );
+    if (events.isEmpty) {
+      final purchase = await _offerRepository.findPurchaseById(
+        userId: userId,
+        purchaseId: purchaseId,
+      );
+      if (purchase == null) {
+        return _error(
+          request,
+          404,
+          errorCode: 'NOT_FOUND',
+          message: 'Purchase not found',
+        );
+      }
+    }
+
+    final timeline = events
+        .map(
+          (event) => <String, Object?>{
+            'type': _timelineEventTypeLabel(event.eventType),
+            'title': _timelineEventTitle(event.eventType),
+            'description': _timelineEventDescription(
+              eventType: event.eventType,
+              eventData: event.eventData,
+            ),
+            'timestamp': event.createdAt.toUtc().toIso8601String(),
+            'status': _timelineStatus(event.eventType),
+            'eventData': event.eventData,
+          },
+        )
+        .toList(growable: false);
+
+    return _ok(
       request,
-      message: 'Marketplace timeline endpoint is not implemented yet.',
+      data: timeline,
+      headers: <String, String>{'x-marketplace-purchase-id': purchaseId},
     );
   }
 
@@ -432,20 +480,6 @@ class MarketplaceHandlers {
         ),
       );
     }
-  }
-
-  Response _notImplemented(
-    Request request, {
-    required String message,
-    Map<String, String>? headers,
-  }) {
-    return _error(
-      request,
-      501,
-      errorCode: 'NOT_IMPLEMENTED',
-      message: message,
-      headers: headers,
-    );
   }
 
   Response _error(
@@ -501,6 +535,9 @@ class MarketplaceHandlers {
     if (value is num) {
       return value.toInt();
     }
+    if (value is String) {
+      return int.tryParse(value.trim());
+    }
     return null;
   }
 
@@ -523,6 +560,75 @@ class MarketplaceHandlers {
       'currency': purchase.currency,
       'offerTitle': purchase.offerTitle,
     };
+  }
+
+  String _timelineEventTypeLabel(String eventType) {
+    if (eventType.trim().isEmpty) {
+      return 'UNKNOWN';
+    }
+    return eventType.trim().toUpperCase();
+  }
+
+  String _timelineEventTitle(String eventType) {
+    switch (eventType.trim().toLowerCase()) {
+      case 'purchase_created':
+        return 'Purchase created';
+      case 'seat_added':
+        return 'Seat added';
+      case 'seat_removed':
+        return 'Seat removed';
+      case 'seats_updated':
+        return 'Seats updated';
+      case 'assignment_updated':
+        return 'Assignments updated';
+      case 'plan_changed':
+        return 'Plan changed';
+      case 'payment_succeeded':
+        return 'Payment succeeded';
+      case 'payment_failed':
+        return 'Payment failed';
+      case 'webhook_received':
+        return 'Webhook received';
+      default:
+        return eventType.replaceAll('_', ' ');
+    }
+  }
+
+  String _timelineStatus(String eventType) {
+    switch (eventType.trim().toLowerCase()) {
+      case 'payment_failed':
+        return 'ERROR';
+      case 'purchase_created':
+        return 'PENDING';
+      default:
+        return 'SUCCESS';
+    }
+  }
+
+  String _timelineEventDescription({
+    required String eventType,
+    required Map<String, Object?> eventData,
+  }) {
+    switch (eventType.trim().toLowerCase()) {
+      case 'purchase_created':
+        final seatCount = _toInt(eventData['seat_count']) ?? 0;
+        return 'Purchase initialized for $seatCount seat(s).';
+      case 'seat_added':
+      case 'seat_removed':
+      case 'seats_updated':
+        final currentSeatCount = _toInt(eventData['seat_count']) ?? 0;
+        final delta = _toInt(eventData['delta']) ?? 0;
+        return 'Seat count updated to $currentSeatCount (delta $delta).';
+      case 'assignment_updated':
+        final assignments = _toInt(eventData['assignment_count']) ?? 0;
+        return '$assignments assignment(s) updated.';
+      case 'plan_changed':
+        final oldOffer = (eventData['old_offer_id'] ?? '').toString();
+        final newOffer = (eventData['new_offer_id'] ?? '').toString();
+        return 'Plan changed from $oldOffer to $newOffer.';
+      default:
+        return eventData.isEmpty ? 'No additional details.' : eventData.toString();
+    }
   }
 }
 
