@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../infra/request_metrics.dart';
 import '../../infra/postgres_provider.dart';
+import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import 'manual_payment_provider.dart';
 import 'paystack_payment_provider.dart';
@@ -35,12 +36,15 @@ class PaymentService {
   PaymentService({
     required PaymentProvider provider,
     PostgresProvider? postgresProvider,
+    BillingLedgerRepository? billingLedgerRepository,
     RequestMetrics? metrics,
     void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
   }) : _provider = provider,
        _postgresProvider = postgresProvider,
+       _billingLedgerRepository =
+           billingLedgerRepository ?? InMemoryBillingLedgerRepository(),
        _metrics = metrics,
        _logSink = logSink ?? print,
        _uuid = uuid ?? const Uuid(),
@@ -48,6 +52,7 @@ class PaymentService {
 
   factory PaymentService.fromEnvironment({
     required PostgresProvider? postgresProvider,
+    BillingLedgerRepository? billingLedgerRepository,
     String? configuredProvider,
     String? paystackSecretKey,
     String? stripeWebhookSecret,
@@ -72,6 +77,7 @@ class PaymentService {
     return PaymentService(
       provider: provider,
       postgresProvider: postgresProvider,
+      billingLedgerRepository: billingLedgerRepository,
       metrics: metrics,
       logSink: logSink,
       uuid: uuid,
@@ -81,6 +87,7 @@ class PaymentService {
 
   final PaymentProvider _provider;
   final PostgresProvider? _postgresProvider;
+  final BillingLedgerRepository _billingLedgerRepository;
   final RequestMetrics? _metrics;
   final void Function(String line) _logSink;
   final Uuid _uuid;
@@ -97,7 +104,38 @@ class PaymentService {
     required MarketplacePurchaseRecord purchase,
   }) async {
     final checkout = await _provider.createCheckoutOrIntent(purchase: purchase);
+    final providerRef = checkout.providerPaymentIntentId.trim().isEmpty
+        ? 'purchase_${purchase.id}'
+        : checkout.providerPaymentIntentId.trim();
+    await _billingLedgerRepository.appendEntry(
+      purchaseId: purchase.id,
+      userId: purchase.userId,
+      entryType: 'charge_authorized',
+      provider: checkout.provider,
+      providerRef: providerRef,
+      amountMinor: purchase.totalAmountMinor,
+      currency: purchase.currency,
+      metadata: <String, Object?>{
+        'checkout_status': checkout.status,
+        ...checkout.raw,
+      },
+      occurredAt: _nowUtc(),
+    );
     if (checkout.status.toUpperCase() == 'SUCCEEDED') {
+      await _billingLedgerRepository.appendEntry(
+        purchaseId: purchase.id,
+        userId: purchase.userId,
+        entryType: 'charge_captured',
+        provider: checkout.provider,
+        providerRef: providerRef,
+        amountMinor: purchase.totalAmountMinor,
+        currency: purchase.currency,
+        metadata: <String, Object?>{
+          'checkout_status': checkout.status,
+          ...checkout.raw,
+        },
+        occurredAt: _nowUtc(),
+      );
       await _activatePurchase(
         purchaseId: purchase.id,
         providerPaymentIntentId: checkout.providerPaymentIntentId,
@@ -286,6 +324,29 @@ class PaymentService {
     final purchaseId = _looksLikeUuid(event.purchaseId)
         ? event.purchaseId
         : null;
+    final financialContext = await _resolveFinancialContext(
+      purchaseId: purchaseId,
+      payload: event.payload,
+    );
+    final mappedEntryType = _mapLedgerEntryType(eventType);
+    final mappedAmount = _mapLedgerAmount(
+      entryType: mappedEntryType,
+      amountMinor: financialContext.amountMinor,
+    );
+    await _billingLedgerRepository.appendEntry(
+      purchaseId: purchaseId,
+      userId: financialContext.userId,
+      entryType: mappedEntryType,
+      provider: event.provider,
+      providerRef: event.providerEventId,
+      amountMinor: mappedAmount,
+      currency: financialContext.currency,
+      metadata: <String, Object?>{
+        'event_type': event.eventType,
+        ...event.payload,
+      },
+      occurredAt: _nowUtc(),
+    );
 
     if (_postgresProvider == null || purchaseId == null) {
       return eventType.isEmpty ? 'webhook_recorded' : eventType;
@@ -357,6 +418,132 @@ class PaymentService {
     });
   }
 
+  Future<_FinancialContext> _resolveFinancialContext({
+    required String? purchaseId,
+    required Map<String, Object?> payload,
+  }) async {
+    final payloadAmount =
+        _toInt(payload['amount_minor']) ??
+        _toInt(payload['amount']) ??
+        _toInt(_nestedValue(payload, const <String>['data', 'amount_minor'])) ??
+        _toInt(_nestedValue(payload, const <String>['data', 'amount'])) ??
+        0;
+    final payloadCurrency =
+        (_nestedValue(payload, const <String>['data', 'currency']) ??
+                payload['currency'])
+            ?.toString()
+            .trim() ??
+        '';
+    final defaultCurrency = payloadCurrency.isEmpty ? 'NGN' : payloadCurrency;
+    if (_postgresProvider == null || purchaseId == null) {
+      return _FinancialContext(
+        userId: _extractUserIdFromPayload(payload) ?? 'unknown',
+        amountMinor: payloadAmount,
+        currency: defaultCurrency,
+      );
+    }
+
+    final watch = Stopwatch()..start();
+    final rows = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT user_id, price_minor, currency
+        FROM marketplace_purchases
+        WHERE id = CAST(@purchase_id AS UUID)
+        LIMIT 1
+        ''',
+        substitutionValues: <String, Object?>{'purchase_id': purchaseId},
+      ),
+    );
+    watch.stop();
+    _metrics?.recordMarketplaceDbQueryLatency(
+      op: 'lookup_purchase_financials',
+      latencyMs: watch.elapsedMilliseconds,
+    );
+    if (rows.isEmpty) {
+      return _FinancialContext(
+        userId: _extractUserIdFromPayload(payload) ?? 'unknown',
+        amountMinor: payloadAmount,
+        currency: defaultCurrency,
+      );
+    }
+    final row = rows.first;
+    return _FinancialContext(
+      userId: (row[0] as String?)?.trim().isNotEmpty == true
+          ? (row[0] as String).trim()
+          : (_extractUserIdFromPayload(payload) ?? 'unknown'),
+      amountMinor: (row[1] as num?)?.toInt() ?? payloadAmount,
+      currency: (row[2] as String?)?.trim().isNotEmpty == true
+          ? (row[2] as String).trim()
+          : defaultCurrency,
+    );
+  }
+
+  String _mapLedgerEntryType(String eventType) {
+    switch (eventType.trim().toLowerCase()) {
+      case 'payment_failed':
+        return 'charge_failed';
+      case 'subscription_canceled':
+      case 'payment_canceled':
+        return 'refund_succeeded';
+      case 'chargeback':
+        return 'chargeback';
+      case 'invoice_created':
+        return 'invoice_created';
+      case 'invoice_paid':
+        return 'invoice_paid';
+      case 'payment_succeeded':
+      default:
+        return 'charge_captured';
+    }
+  }
+
+  int _mapLedgerAmount({required String entryType, required int amountMinor}) {
+    if (entryType == 'refund_succeeded' || entryType == 'chargeback') {
+      return amountMinor > 0 ? -amountMinor : amountMinor;
+    }
+    return amountMinor;
+  }
+
+  String? _extractUserIdFromPayload(Map<String, Object?> payload) {
+    final direct = payload['user_id']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) {
+      return direct;
+    }
+    final nested = _nestedValue(payload, const <String>[
+      'data',
+      'user_id',
+    ])?.toString().trim();
+    if (nested != null && nested.isNotEmpty) {
+      return nested;
+    }
+    return null;
+  }
+
+  Object? _nestedValue(Map<String, Object?> payload, List<String> path) {
+    Object? current = payload;
+    for (final key in path) {
+      if (current is! Map) {
+        return null;
+      }
+      current = current[key];
+    }
+    return current;
+  }
+
+  int? _toInt(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value.trim());
+    }
+    return null;
+  }
+
   Future<void> _appendTimeline(
     PostgreSQLExecutionContext txn, {
     required String purchaseId,
@@ -412,4 +599,16 @@ class PaymentService {
       }),
     );
   }
+}
+
+class _FinancialContext {
+  const _FinancialContext({
+    required this.userId,
+    required this.amountMinor,
+    required this.currency,
+  });
+
+  final String userId;
+  final int amountMinor;
+  final String currency;
 }

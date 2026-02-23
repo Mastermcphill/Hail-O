@@ -21,6 +21,7 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/drivers/drivers_controller.dart';
+import '../modules/marketplace/billing_ledger_repository.dart';
 import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_handlers.dart';
 import '../modules/marketplace/marketplace_offer_repository.dart';
@@ -75,8 +76,13 @@ Handler buildApiRouter({
   final MarketplaceOfferRepository offerRepository = postgresProvider != null
       ? PostgresMarketplaceOfferRepository(postgresProvider)
       : InMemoryMarketplaceOfferRepository();
+  final BillingLedgerRepository billingLedgerRepository =
+      postgresProvider != null
+      ? PostgresBillingLedgerRepository(postgresProvider)
+      : InMemoryBillingLedgerRepository();
   final paymentService = PaymentService.fromEnvironment(
     postgresProvider: postgresProvider,
+    billingLedgerRepository: billingLedgerRepository,
     configuredProvider: Platform.environment['PAYMENT_PROVIDER'],
     paystackSecretKey:
         Platform.environment['PAYSTACK_SECRET_KEY'] ??
