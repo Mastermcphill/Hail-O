@@ -223,8 +223,7 @@ Future<void> main() async {
     jsonEncode(<String, Object?>{
       'event': 'server_listen',
       'host': listenHost,
-      'resolved_port': server.port,
-      'configured_port': configuredPortRaw.isEmpty ? null : configuredPortRaw,
+      'port': server.port,
     }),
   );
   stdout.writeln(
