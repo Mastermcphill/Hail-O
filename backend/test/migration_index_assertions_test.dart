@@ -22,6 +22,7 @@ void main() {
       final authSql = sqlByName['002_auth_credentials.sql'] ?? '';
       final rideSql = sqlByName['003_ride_request_metadata.sql'] ?? '';
       final opsSql = sqlByName['004_operational_records.sql'] ?? '';
+      final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
 
       expect(
         authSql.contains(
@@ -41,6 +42,32 @@ void main() {
         opsSql.contains('UNIQUE(operation_type, entity_id, idempotency_key)'),
         isTrue,
         reason: 'operational idempotency uniqueness must exist',
+      );
+      expect(
+        marketplaceSql.contains(
+          'CREATE TABLE IF NOT EXISTS marketplace_offers',
+        ),
+        isTrue,
+        reason: 'marketplace offers table must exist',
+      );
+      expect(
+        marketplaceSql.contains(
+          'CREATE TABLE IF NOT EXISTS marketplace_purchases',
+        ),
+        isTrue,
+        reason: 'marketplace purchases table must exist',
+      );
+      expect(
+        marketplaceSql.contains('UNIQUE(user_id, idempotency_key)'),
+        isTrue,
+        reason: 'marketplace purchase idempotency uniqueness must exist',
+      );
+      expect(
+        marketplaceSql.contains(
+          'CREATE INDEX IF NOT EXISTS idx_marketplace_timeline_purchase_created_desc',
+        ),
+        isTrue,
+        reason: 'timeline query index must exist',
       );
     },
   );
