@@ -24,16 +24,38 @@ class RideRequestScreen extends StatefulWidget {
 }
 
 class _RideRequestScreenState extends State<RideRequestScreen> {
-  final _scheduledDepartureController = TextEditingController();
-  final _distanceMetersController = TextEditingController(text: '12000');
-  final _durationSecondsController = TextEditingController(text: '1800');
-  final _luggageCountController = TextEditingController(text: '0');
-  final _vehicleClassController = TextEditingController(text: 'sedan');
-  final _baseFareMinorController = TextEditingController(text: '0');
-  final _premiumMarkupMinorController = TextEditingController(text: '0');
-  final _connectionFeeMinorController = TextEditingController(text: '0');
+  final TextEditingController _scheduledDepartureController =
+      TextEditingController();
+  final TextEditingController _pickupController = TextEditingController(
+    text: 'Lagos',
+  );
+  final TextEditingController _dropoffController = TextEditingController(
+    text: 'Ibadan',
+  );
+  final TextEditingController _passengersController = TextEditingController(
+    text: '1',
+  );
+  final TextEditingController _luggageCountController = TextEditingController(
+    text: '0',
+  );
+  final TextEditingController _distanceMetersController = TextEditingController(
+    text: '12000',
+  );
+  final TextEditingController _durationSecondsController =
+      TextEditingController(text: '1800');
+  final TextEditingController _vehicleClassController = TextEditingController(
+    text: 'sedan',
+  );
+  final TextEditingController _baseFareMinorController = TextEditingController(
+    text: '0',
+  );
+  final TextEditingController _premiumMarkupMinorController =
+      TextEditingController(text: '0');
+  final TextEditingController _connectionFeeMinorController =
+      TextEditingController(text: '0');
 
   String _tripScope = 'intra_city';
+  bool _charterMode = false;
   bool _isSubmitting = false;
   bool _isCheckingNextOfKin = true;
   String? _gateErrorMessage;
@@ -53,65 +75,17 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   @override
   void dispose() {
     _scheduledDepartureController.dispose();
+    _pickupController.dispose();
+    _dropoffController.dispose();
+    _passengersController.dispose();
+    _luggageCountController.dispose();
     _distanceMetersController.dispose();
     _durationSecondsController.dispose();
-    _luggageCountController.dispose();
     _vehicleClassController.dispose();
     _baseFareMinorController.dispose();
     _premiumMarkupMinorController.dispose();
     _connectionFeeMinorController.dispose();
     super.dispose();
-  }
-
-  Future<void> _submit() async {
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    try {
-      final scheduledAt = DateTime.parse(
-        _scheduledDepartureController.text.trim(),
-      ).toUtc();
-      final payload = <String, dynamic>{
-        'scheduled_departure_at': scheduledAt.toIso8601String(),
-        'trip_scope': _tripScopeToBackendValue(_tripScope),
-        'distance_meters': _parseInt(_distanceMetersController.text),
-        'duration_seconds': _parseInt(_durationSecondsController.text),
-        'luggage_count': _parseInt(_luggageCountController.text),
-        'vehicle_class': _vehicleClassController.text.trim().isEmpty
-            ? 'sedan'
-            : _vehicleClassController.text.trim(),
-        'base_fare_minor': _parseInt(_baseFareMinorController.text),
-        'premium_markup_minor': _parseInt(_premiumMarkupMinorController.text),
-        'connection_fee_minor': _parseInt(_connectionFeeMinorController.text),
-      };
-
-      final response = await widget.apiClient.post(
-        ApiPaths.ridesRequest,
-        body: payload,
-      );
-      final rideId = _resolveRideId(response);
-      if (rideId == null || rideId.isEmpty) {
-        throw Exception('Ride request succeeded but no ride id was returned');
-      }
-
-      if (!mounted) {
-        return;
-      }
-      context.go('/rider/status/${Uri.encodeComponent(rideId)}');
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showErrorSnackBar(error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
-    }
   }
 
   Future<void> _ensureNextOfKin() async {
@@ -133,7 +107,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         });
         return;
       }
-      await _goToNextOfKin();
+      _goToNextOfKin();
     } catch (error) {
       if (_isNotFound(error)) {
         if (await _hasLocalNextOfKin()) {
@@ -145,7 +119,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
           });
           return;
         }
-        await _goToNextOfKin();
+        _goToNextOfKin();
         return;
       }
       if (!mounted) {
@@ -158,12 +132,63 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     }
   }
 
-  Future<void> _goToNextOfKin() async {
-    if (!mounted) {
-      return;
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isSubmitting = true;
+    });
+    try {
+      final scheduledAt = DateTime.parse(
+        _scheduledDepartureController.text.trim(),
+      ).toUtc();
+      final luggageCount = _parseInt(_luggageCountController.text);
+      final payload = <String, dynamic>{
+        'scheduled_departure_at': scheduledAt.toIso8601String(),
+        'trip_scope': _tripScopeToBackendValue(_tripScope),
+        'pickup': _pickupController.text.trim(),
+        'dropoff': _dropoffController.text.trim(),
+        'passengers': _parseInt(_passengersController.text),
+        'luggage_count': luggageCount,
+        'distance_meters': _parseInt(_distanceMetersController.text),
+        'duration_seconds': _parseInt(_durationSecondsController.text),
+        'vehicle_class': _vehicleClassController.text.trim().isEmpty
+            ? 'sedan'
+            : _vehicleClassController.text.trim(),
+        'base_fare_minor': _parseInt(_baseFareMinorController.text),
+        'premium_markup_minor': _parseInt(_premiumMarkupMinorController.text),
+        'connection_fee_minor': _parseInt(_connectionFeeMinorController.text),
+        'charter_mode': _charterMode,
+      };
+
+      final response = await widget.apiClient.post(
+        ApiPaths.ridesRequest,
+        body: payload,
+      );
+      final rideId = _resolveRideId(response);
+      if (rideId == null || rideId.isEmpty) {
+        throw Exception('Ride request succeeded but no ride id was returned');
+      }
+
+      if (!mounted) {
+        return;
+      }
+      final charter = _charterMode ? '1' : '0';
+      context.go(
+        '/rider/offers/${Uri.encodeComponent(rideId)}'
+        '?luggage=$luggageCount&charter=$charter',
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
-    final returnTo = Uri.encodeComponent('/rider/request');
-    context.go('/rider/next-of-kin?returnTo=$returnTo');
   }
 
   Future<bool> _hasLocalNextOfKin() async {
@@ -180,6 +205,14 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     } catch (_) {
       return false;
     }
+  }
+
+  void _goToNextOfKin() {
+    if (!mounted) {
+      return;
+    }
+    final returnTo = Uri.encodeComponent('/rider/request');
+    context.go('/rider/next-of-kin?returnTo=$returnTo');
   }
 
   @override
@@ -223,21 +256,35 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: 680),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'Create Ride Request',
+                'Request Ride',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: _scheduledDepartureController,
-                decoration: const InputDecoration(
-                  labelText: 'scheduled_departure_at (UTC ISO)',
-                  border: OutlineInputBorder(),
-                ),
+              _LabeledTextField(
+                controller: _pickupController,
+                label: 'pickup',
+                keyboardType: TextInputType.text,
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _dropoffController,
+                label: 'dropoff',
+                keyboardType: TextInputType.text,
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _passengersController,
+                label: 'passengers',
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _luggageCountController,
+                label: 'luggage_count',
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -270,40 +317,34 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                 },
               ),
               const SizedBox(height: 12),
+              SwitchListTile(
+                value: _charterMode,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Charter mode'),
+                subtitle: const Text('Auto-select all seats later'),
+                onChanged: (value) {
+                  setState(() {
+                    _charterMode = value;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _scheduledDepartureController,
+                decoration: const InputDecoration(
+                  labelText: 'scheduled_departure_at (UTC ISO)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
               _LabeledTextField(
                 controller: _distanceMetersController,
-                label: 'distance_meters',
+                label: 'distance_meters (stubbed)',
               ),
               const SizedBox(height: 12),
               _LabeledTextField(
                 controller: _durationSecondsController,
-                label: 'duration_seconds',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _luggageCountController,
-                label: 'luggage_count',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _vehicleClassController,
-                label: 'vehicle_class',
-                keyboardType: TextInputType.text,
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _baseFareMinorController,
-                label: 'base_fare_minor',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _premiumMarkupMinorController,
-                label: 'premium_markup_minor',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _connectionFeeMinorController,
-                label: 'connection_fee_minor',
+                label: 'duration_seconds (stubbed)',
               ),
               const SizedBox(height: 20),
               FilledButton(
@@ -326,7 +367,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   void _showErrorSnackBar(Object error) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(_errorText(error))));
+    ).showSnackBar(SnackBar(content: Text(formatApiError(error))));
   }
 }
 
@@ -382,10 +423,6 @@ String? _resolveRideId(Map<String, dynamic> response) {
     }
   }
   return null;
-}
-
-String _errorText(Object error) {
-  return formatApiError(error);
 }
 
 bool _containsNextOfKin(Map<String, dynamic> response) {

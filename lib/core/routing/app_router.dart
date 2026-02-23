@@ -3,14 +3,18 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
+import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_home.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
+import '../../features/rider/offers_screen.dart';
+import '../../features/rider/paywall_screen.dart';
 import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
+import '../../features/rider/seat_selection_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../api/api_client.dart';
 import '../storage/token_storage.dart';
@@ -75,8 +79,60 @@ class AppRouter {
               ),
             ),
             GoRoute(
+              path: '/rider/offers/:rideId',
+              builder: (context, state) => OffersScreen(
+                apiClient: _apiClient,
+                rideId: state.pathParameters['rideId'] ?? '',
+                luggageCount:
+                    int.tryParse(state.uri.queryParameters['luggage'] ?? '0') ??
+                    0,
+                charterMode: state.uri.queryParameters['charter'] == '1',
+              ),
+            ),
+            GoRoute(
+              path: '/rider/paywall/:rideId',
+              builder: (context, state) => PaywallScreen(
+                apiClient: _apiClient,
+                rideId: state.pathParameters['rideId'] ?? '',
+                offerPriceMinor:
+                    int.tryParse(
+                      state.uri.queryParameters['offerPrice'] ?? '0',
+                    ) ??
+                    0,
+                charterMode: state.uri.queryParameters['charter'] == '1',
+                luggageCount:
+                    int.tryParse(state.uri.queryParameters['luggage'] ?? '0') ??
+                    0,
+              ),
+            ),
+            GoRoute(
+              path: '/rider/seats/:rideId',
+              builder: (context, state) => SeatSelectionScreen(
+                apiClient: _apiClient,
+                rideId: state.pathParameters['rideId'] ?? '',
+                offerPriceMinor:
+                    int.tryParse(
+                      state.uri.queryParameters['offerPrice'] ?? '0',
+                    ) ??
+                    0,
+                charterMode: state.uri.queryParameters['charter'] == '1',
+              ),
+            ),
+            GoRoute(
               path: '/driver',
               builder: (context, state) => const DriverHome(),
+            ),
+            GoRoute(
+              path: '/driver/offer',
+              builder: (context, state) =>
+                  DriverOfferScreen(apiClient: _apiClient),
+            ),
+            GoRoute(
+              path: '/driver/offer/:rideId',
+              builder: (context, state) => DriverOfferScreen(
+                apiClient: _apiClient,
+                initialRideId: state.pathParameters['rideId'],
+              ),
             ),
             GoRoute(
               path: '/driver/route-chain',
@@ -324,6 +380,18 @@ String _titleForPath(String path) {
   }
   if (_isSelectedPath(path, '/rider/status')) {
     return 'Ride Status';
+  }
+  if (_isSelectedPath(path, '/rider/offers')) {
+    return 'Marketplace Offers';
+  }
+  if (_isSelectedPath(path, '/rider/paywall')) {
+    return 'Connection Fee';
+  }
+  if (_isSelectedPath(path, '/rider/seats')) {
+    return 'Seat Selection';
+  }
+  if (_isSelectedPath(path, '/driver/offer')) {
+    return 'Driver Offer';
   }
   if (_isSelectedPath(path, '/driver/route-chain')) {
     return 'Route Chain';
