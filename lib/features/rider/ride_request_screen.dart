@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
+import '../../integrations/google/google_distance_service.dart';
 
 class RideRequestScreen extends StatefulWidget {
   const RideRequestScreen({super.key, required this.apiClient});
@@ -24,6 +25,8 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   final _baseFareMinorController = TextEditingController(text: '0');
   final _premiumMarkupMinorController = TextEditingController(text: '0');
   final _connectionFeeMinorController = TextEditingController(text: '0');
+
+  final GoogleDistanceService _distanceService = GoogleDistanceService();
 
   String _tripScope = 'intra_city';
   bool _charterMode = false;
@@ -96,10 +99,17 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _isEstimating = true;
     });
     try {
+      final estimate = await _distanceService.estimate(
+        origin: pickup,
+        destination: dropoff,
+      );
+      if (!mounted) {
+        return;
+      }
       setState(() {
-        _distanceMeters = 12000;
-        _durationSeconds = 1800;
-        _distanceSource = 'stub';
+        _distanceMeters = estimate.distanceMeters;
+        _durationSeconds = estimate.durationSeconds;
+        _distanceSource = estimate.source;
       });
     } finally {
       if (mounted) {
@@ -119,9 +129,15 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     try {
       final pickup = _pickupController.text.trim();
       final dropoff = _dropoffController.text.trim();
-      _distanceMeters = 12000;
-      _durationSeconds = 1800;
-      _distanceSource = 'stub';
+      if (pickup.isNotEmpty && dropoff.isNotEmpty) {
+        final estimate = await _distanceService.estimate(
+          origin: pickup,
+          destination: dropoff,
+        );
+        _distanceMeters = estimate.distanceMeters;
+        _durationSeconds = estimate.durationSeconds;
+        _distanceSource = estimate.source;
+      }
 
       final scheduledAt = DateTime.parse(
         _scheduledDepartureController.text.trim(),
