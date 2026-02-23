@@ -13,25 +13,13 @@ import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../infra/request_context.dart';
-import '../infra/request_metrics.dart';
 import '../infra/postgres_provider.dart';
+import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
-import '../modules/auth/auth_credentials_store.dart';
 import '../modules/admin/admin_controller.dart';
+import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
-import '../modules/drivers/drivers_controller.dart';
-import '../modules/marketplace/billing_ledger_repository.dart';
-import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
-import '../modules/marketplace/marketplace_handlers.dart';
-import '../modules/marketplace/marketplace_entitlement_service.dart';
-import '../modules/marketplace/marketplace_offer_repository.dart';
-import '../modules/marketplace/marketplace_reconciliation_service.dart';
-import '../modules/marketplace/marketplace_revenue_service.dart';
-import '../modules/marketplace/marketplace_router.dart';
-import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
-import '../modules/payments/payment_service.dart';
-import '../modules/payments/payments_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -73,59 +61,10 @@ Handler buildApiRouter({
   final disputesController = DisputesController(
     disputeService: DisputeService(db),
   );
-  final driversController = DriversController();
-  final MarketplaceOfferRepository offerRepository = postgresProvider != null
-      ? PostgresMarketplaceOfferRepository(postgresProvider)
-      : InMemoryMarketplaceOfferRepository();
-  final BillingLedgerRepository billingLedgerRepository =
-      postgresProvider != null
-      ? PostgresBillingLedgerRepository(postgresProvider)
-      : InMemoryBillingLedgerRepository();
-  final MarketplaceEntitlementRepository entitlementRepository =
-      postgresProvider != null
-      ? PostgresMarketplaceEntitlementRepository(postgresProvider)
-      : InMemoryMarketplaceEntitlementRepository();
-  final entitlementService = MarketplaceEntitlementService(
-    repository: entitlementRepository,
-    postgresProvider: postgresProvider,
-  );
-  final MarketplaceReconciliationService? reconciliationService =
-      postgresProvider != null
-      ? MarketplaceReconciliationService(
-          store: PostgresMarketplaceReconciliationStore(postgresProvider),
-          entitlementService: entitlementService,
-        )
-      : null;
-  final paymentService = PaymentService.fromEnvironment(
-    postgresProvider: postgresProvider,
-    billingLedgerRepository: billingLedgerRepository,
-    entitlementService: entitlementService,
-    configuredProvider: env['PAYMENT_PROVIDER'],
-    paystackSecretKey:
-        env['PAYSTACK_SECRET_KEY'] ?? env['PAYMENT_PROVIDER_SECRET'],
-    stripeWebhookSecret:
-        env['STRIPE_WEBHOOK_SECRET'] ?? env['PAYMENT_PROVIDER_SECRET'],
-    metrics: requestMetrics,
-  );
-  final revenueService = MarketplaceRevenueService(
-    postgresProvider: postgresProvider,
-    metrics: requestMetrics,
-  );
-  final marketplaceRouter = MarketplaceRouter(
-    handlers: MarketplaceHandlers(
-      offerRepository: offerRepository,
-      paymentService: paymentService,
-      entitlementService: entitlementService,
-      revenueService: revenueService,
-    ),
-  );
-  final paymentsController = PaymentsController(paymentService: paymentService);
   final adminController = AdminController(
     walletReversalService: WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
-    reconciliationService: reconciliationService,
-    revenueService: revenueService,
   );
 
   final router = Router()
@@ -145,10 +84,6 @@ Handler buildApiRouter({
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..get(
-      '/healthz',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
-    )
-    ..get(
       '/api/healthz',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
@@ -158,10 +93,6 @@ Handler buildApiRouter({
     )
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
-    ..mount('/drivers/', driversController.router.call)
-    ..mount('/marketplace/', marketplaceRouter.router.call)
-    ..mount('/orgs/', marketplaceRouter.orgRouter.call)
-    ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
     ..mount('/admin/', adminController.router.call)
