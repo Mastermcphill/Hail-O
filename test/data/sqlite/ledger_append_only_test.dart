@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/moneybox_ledger_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallet_ledger_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/models/moneybox_ledger_entry.dart';
-import 'package:hail_o_finance_core/domain/models/wallet.dart';
-import 'package:hail_o_finance_core/domain/models/wallet_ledger_entry.dart';
+import 'package:hailo_core/data/sqlite/dao/moneybox_ledger_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/wallet_ledger_dao.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/models/moneybox_ledger_entry.dart';
+import 'package:hailo_core/domain/models/wallet.dart';
+import 'package:hailo_core/domain/models/wallet_ledger_entry.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {

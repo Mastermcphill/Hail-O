@@ -1,13 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/models/ride_event_type.dart';
-import 'package:hail_o_finance_core/domain/services/ledger_invariant_service.dart';
-import 'package:hail_o_finance_core/domain/services/operation_journal_service.dart';
-import 'package:hail_o_finance_core/domain/services/operation_recovery_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_orchestrator_service.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/errors/domain_errors.dart';
+import 'package:hailo_core/domain/models/ride_event_type.dart';
+import 'package:hailo_core/domain/services/ledger_invariant_service.dart';
+import 'package:hailo_core/domain/services/operation_journal_service.dart';
+import 'package:hailo_core/domain/services/operation_recovery_service.dart';
+import 'package:hailo_core/domain/services/ride_orchestrator_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {

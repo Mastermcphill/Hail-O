@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
 import 'package:shelf/shelf.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

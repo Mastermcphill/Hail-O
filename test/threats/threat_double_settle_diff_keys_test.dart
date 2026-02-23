@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/services/escrow_service.dart';
-import 'package:hail_o_finance_core/domain/services/ledger_invariant_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_settlement_service.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/services/escrow_service.dart';
+import 'package:hailo_core/domain/services/ledger_invariant_service.dart';
+import 'package:hailo_core/domain/services/ride_settlement_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

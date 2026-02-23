@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/services/penalty_engine_service.dart';
+import 'package:hailo_core/domain/services/penalty_engine_service.dart';
 
 void main() {
   group('PenaltyEngineService', () {

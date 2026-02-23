@@ -1,25 +1,25 @@
-import 'package:hail_o_finance_core/data/sqlite/migration.dart';
-import 'package:hail_o_finance_core/data/sqlite/migration_runner.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0001_initial_schema.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0002_task2_task3_finance_logistics.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0003_mapbox_offline_foundation.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0004_fleet_configs.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0005_ride_settlement_payout_records.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0006_penalty_records.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0007_reversal_and_payout_guards.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0008_ride_events_orchestrator.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0009_ledger_indexes_and_invariants.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0010_pricing_snapshot_on_rides.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0011_disputes_workflow.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0012_documents_compliance_fields.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0013_orchestrator_mutation_events.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0014_wallet_transfer_journal.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0015_policy_rules_tables.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0016_operation_journal.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0017_rule_rollouts.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0018_auth_credentials.dart';
-import 'package:hail_o_finance_core/data/sqlite/migrations/m0019_ride_request_metadata.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_core/data/sqlite/migration.dart';
+import 'package:hailo_core/data/sqlite/migration_runner.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0001_initial_schema.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0002_task2_task3_finance_logistics.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0003_mapbox_offline_foundation.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0004_fleet_configs.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0005_ride_settlement_payout_records.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0006_penalty_records.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0007_reversal_and_payout_guards.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0008_ride_events_orchestrator.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0009_ledger_indexes_and_invariants.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0010_pricing_snapshot_on_rides.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0011_disputes_workflow.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0012_documents_compliance_fields.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0013_orchestrator_mutation_events.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0014_wallet_transfer_journal.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0015_policy_rules_tables.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0016_operation_journal.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0017_rule_rollouts.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0018_auth_credentials.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0019_ride_request_metadata.dart';
+import 'package:hailo_core/sqlite_api.dart';
 
 List<Migration> allMigrations() {
   return const <Migration>[

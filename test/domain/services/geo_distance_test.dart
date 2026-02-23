@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/models/latlng.dart';
-import 'package:hail_o_finance_core/domain/services/geo_distance.dart';
+import 'package:hailo_core/domain/models/latlng.dart';
+import 'package:hailo_core/domain/services/geo_distance.dart';
 
 void main() {
   test('haversine sanity check for short distance', () {

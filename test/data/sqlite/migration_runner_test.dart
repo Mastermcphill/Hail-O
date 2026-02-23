@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/data/sqlite/table_names.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/data/sqlite/table_names.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

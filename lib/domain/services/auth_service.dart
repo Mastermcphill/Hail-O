@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:bcrypt/bcrypt.dart';
 import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_core/sqlite_api.dart';
 
 import '../../data/sqlite/dao/auth_credentials_dao.dart';
 import '../../data/sqlite/dao/idempotency_dao.dart';

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/penalty_records_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/penalty_records_dao.dart';
 
 import 'api_test_harness.dart';
 

@@ -1,10 +1,10 @@
 import 'package:sqflite/sqflite.dart';
 
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/models/ride_event_type.dart';
-import 'package:hail_o_finance_core/domain/services/escrow_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_orchestrator_service.dart';
-import 'package:hail_o_finance_core/domain/services/wallet_reversal_service.dart';
+import 'package:hailo_core/domain/errors/domain_errors.dart';
+import 'package:hailo_core/domain/models/ride_event_type.dart';
+import 'package:hailo_core/domain/services/escrow_service.dart';
+import 'package:hailo_core/domain/services/ride_orchestrator_service.dart';
+import 'package:hailo_core/domain/services/wallet_reversal_service.dart';
 
 import 'sim_types.dart';
 

@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/repositories/sqlite_offline_region_repository.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/offline_download_events_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/offline_regions_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/models/latlng.dart';
-import 'package:hail_o_finance_core/domain/services/offline_region_sync_service.dart';
-import 'package:hail_o_finance_core/integrations/mapbox/offline_mapbox_manager.dart';
+import 'package:hailo_core/data/repositories/sqlite_offline_region_repository.dart';
+import 'package:hailo_core/data/sqlite/dao/offline_download_events_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/offline_regions_dao.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/models/latlng.dart';
+import 'package:hailo_core/domain/services/offline_region_sync_service.dart';
+import 'package:hailo_core/integrations/mapbox/offline_mapbox_manager.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeOfflineMapboxManager implements OfflineMapboxManager {

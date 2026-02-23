@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/models/vehicle.dart';
-import 'package:hail_o_finance_core/domain/services/vehicle_eligibility_service.dart';
+import 'package:hailo_core/domain/models/vehicle.dart';
+import 'package:hailo_core/domain/services/vehicle_eligibility_service.dart';
 
 void main() {
   test('luggage=3 excludes sedan/hatchback and allows suv/bus', () {

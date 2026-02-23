@@ -1,5 +1,5 @@
 import 'package:shelf/shelf.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';

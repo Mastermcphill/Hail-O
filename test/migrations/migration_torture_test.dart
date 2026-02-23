@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/services/pricing_engine_service.dart';
-import 'package:hail_o_finance_core/domain/services/ride_settlement_service.dart';
+import 'package:hailo_core/domain/services/pricing_engine_service.dart';
+import 'package:hailo_core/domain/services/ride_settlement_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

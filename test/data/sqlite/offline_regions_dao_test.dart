@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/offline_download_events_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/offline_regions_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/models/offline_download_event.dart';
-import 'package:hail_o_finance_core/domain/models/offline_region_record.dart';
+import 'package:hailo_core/data/sqlite/dao/offline_download_events_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/offline_regions_dao.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/models/offline_download_event.dart';
+import 'package:hailo_core/domain/models/offline_region_record.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {

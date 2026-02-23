@@ -1,17 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/disputes_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/escrow_holds_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/payout_records_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallet_ledger_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallet_reversals_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallets_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/models/dispute.dart';
-import 'package:hail_o_finance_core/domain/models/payout_record.dart';
-import 'package:hail_o_finance_core/domain/models/wallet.dart';
-import 'package:hail_o_finance_core/domain/models/wallet_ledger_entry.dart';
-import 'package:hail_o_finance_core/domain/models/wallet_reversal_record.dart';
+import 'package:hailo_core/data/sqlite/dao/disputes_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/escrow_holds_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/payout_records_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/wallet_ledger_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/wallet_reversals_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/wallets_dao.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/errors/domain_errors.dart';
+import 'package:hailo_core/domain/models/dispute.dart';
+import 'package:hailo_core/domain/models/payout_record.dart';
+import 'package:hailo_core/domain/models/wallet.dart';
+import 'package:hailo_core/domain/models/wallet_ledger_entry.dart';
+import 'package:hailo_core/domain/models/wallet_reversal_record.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {

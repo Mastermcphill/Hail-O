@@ -1,6 +1,6 @@
 import '../../../lib/data/sqlite/dao/ride_request_metadata_dao.dart';
 import '../../../lib/domain/models/ride_request_metadata.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import 'ride_request_metadata_store.dart';
 

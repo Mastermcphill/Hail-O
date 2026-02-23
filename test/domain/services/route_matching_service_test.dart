@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/models/route_node.dart';
-import 'package:hail_o_finance_core/domain/models/vehicle.dart';
-import 'package:hail_o_finance_core/domain/services/route_matching_service.dart';
+import 'package:hailo_core/domain/models/route_node.dart';
+import 'package:hailo_core/domain/models/vehicle.dart';
+import 'package:hailo_core/domain/services/route_matching_service.dart';
 
 void main() {
   test('matches calling-at sub-route correctly', () {

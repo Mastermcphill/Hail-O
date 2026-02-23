@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:test/test.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../modules/admin/admin_controller.dart';

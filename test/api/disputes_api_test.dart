@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/escrow_holds_dao.dart';
-import 'package:hail_o_finance_core/domain/models/ride_event_type.dart';
-import 'package:hail_o_finance_core/domain/services/ride_orchestrator_service.dart';
+import 'package:hailo_core/data/sqlite/dao/escrow_holds_dao.dart';
+import 'package:hailo_core/domain/models/ride_event_type.dart';
+import 'package:hailo_core/domain/services/ride_orchestrator_service.dart';
 
 import 'api_test_harness.dart';
 

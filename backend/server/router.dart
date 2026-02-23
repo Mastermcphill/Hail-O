@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../../lib/domain/services/auth_service.dart';
 import '../../lib/domain/services/dispute_service.dart';

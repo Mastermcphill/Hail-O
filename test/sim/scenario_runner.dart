@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:hail_o_finance_core/domain/errors/domain_errors.dart';
-import 'package:hail_o_finance_core/domain/services/ledger_invariant_service.dart';
+import 'package:hailo_core/domain/errors/domain_errors.dart';
+import 'package:hailo_core/domain/services/ledger_invariant_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'scenario_actions.dart';

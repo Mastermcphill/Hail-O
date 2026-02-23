@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/domain/services/ride_lifecycle_guard_service.dart';
+import 'package:hailo_core/domain/services/ride_lifecycle_guard_service.dart';
 
 void main() {
   final guard = RideLifecycleGuardService();

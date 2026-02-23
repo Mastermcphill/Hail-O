@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_core/sqlite_api.dart';
 
 import '../../data/sqlite/table_names.dart';
 import '../models/sync_snapshot.dart';

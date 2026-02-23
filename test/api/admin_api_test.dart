@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallet_ledger_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/wallets_dao.dart';
-import 'package:hail_o_finance_core/domain/models/wallet.dart';
-import 'package:hail_o_finance_core/domain/models/wallet_ledger_entry.dart';
+import 'package:hailo_core/data/sqlite/dao/wallet_ledger_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/wallets_dao.dart';
+import 'package:hailo_core/domain/models/wallet.dart';
+import 'package:hailo_core/domain/models/wallet_ledger_entry.dart';
 
 import 'api_test_harness.dart';
 

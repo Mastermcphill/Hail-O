@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/services/cancel_ride_service.dart';
-import 'package:hail_o_finance_core/domain/services/penalty_engine_service.dart';
-import 'package:hail_o_finance_core/services/wallet_service.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/services/cancel_ride_service.dart';
+import 'package:hailo_core/domain/services/penalty_engine_service.dart';
+import 'package:hailo_core/services/wallet_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {

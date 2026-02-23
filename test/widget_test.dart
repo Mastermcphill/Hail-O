@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/main.dart';
+import 'package:hailo_core/main.dart';
 
 void main() {
   testWidgets('App bootstrap smoke test', (WidgetTester tester) async {

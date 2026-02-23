@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/integrations/api/api_config.dart';
-import 'package:hail_o_finance_core/integrations/api/api_exception.dart';
-import 'package:hail_o_finance_core/integrations/api/hailo_backend_api_client.dart';
+import 'package:hailo_core/integrations/api/api_config.dart';
+import 'package:hailo_core/integrations/api/api_exception.dart';
+import 'package:hailo_core/integrations/api/hailo_backend_api_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 

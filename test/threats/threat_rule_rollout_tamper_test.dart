@@ -1,13 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/penalty_rules_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/dao/pricing_rules_dao.dart';
-import 'package:hail_o_finance_core/data/sqlite/hailo_database.dart';
-import 'package:hail_o_finance_core/domain/models/penalty_rule.dart';
-import 'package:hail_o_finance_core/domain/models/pricing_rule.dart';
-import 'package:hail_o_finance_core/domain/services/penalty_engine_service.dart';
-import 'package:hail_o_finance_core/domain/services/pricing_engine_service.dart';
+import 'package:hailo_core/data/sqlite/dao/penalty_rules_dao.dart';
+import 'package:hailo_core/data/sqlite/dao/pricing_rules_dao.dart';
+import 'package:hailo_core/data/sqlite/hailo_database.dart';
+import 'package:hailo_core/domain/models/penalty_rule.dart';
+import 'package:hailo_core/domain/models/pricing_rule.dart';
+import 'package:hailo_core/domain/services/penalty_engine_service.dart';
+import 'package:hailo_core/domain/services/pricing_engine_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
