@@ -15,133 +15,86 @@ class DistanceEstimate {
 }
 
 class GoogleDistanceService {
-  GoogleDistanceService({http.Client? httpClient, String? apiKey})
-    : _httpClient = httpClient ?? http.Client(),
-      _apiKey =
-          apiKey ?? const String.fromEnvironment('GOOGLE_DISTANCE_MATRIX_KEY');
+  GoogleDistanceService({http.Client? client})
+    : _client = client ?? http.Client();
 
-  final http.Client _httpClient;
-  final String _apiKey;
+  static const _distanceMatrixKey = String.fromEnvironment(
+    'GOOGLE_DISTANCE_MATRIX_API_KEY',
+  );
+
+  final http.Client _client;
+
+  bool get isConfigured => _distanceMatrixKey.trim().isNotEmpty;
 
   Future<DistanceEstimate> estimate({
     required String origin,
     required String destination,
   }) async {
-    final cleanOrigin = origin.trim();
-    final cleanDestination = destination.trim();
-    if (cleanOrigin.isEmpty || cleanDestination.isEmpty) {
-      return _stubEstimate(cleanOrigin, cleanDestination, source: 'stub:empty');
+    if (!isConfigured) {
+      return _stubEstimate();
     }
 
-    if (_apiKey.trim().isEmpty) {
-      return _stubEstimate(
-        cleanOrigin,
-        cleanDestination,
-        source: 'stub:no_key',
-      );
-    }
-
-    final uri =
-        Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json', {
-          'origins': cleanOrigin,
-          'destinations': cleanDestination,
-          'key': _apiKey,
-          'units': 'metric',
-          'mode': 'driving',
-        });
+    final uri = Uri.https(
+      'maps.googleapis.com',
+      '/maps/api/distancematrix/json',
+      <String, String>{
+        'origins': origin,
+        'destinations': destination,
+        'mode': 'driving',
+        'key': _distanceMatrixKey,
+      },
+    );
 
     try {
-      final response = await _httpClient.get(uri);
-      if (response.statusCode >= 400) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:http_${response.statusCode}',
-        );
+      final response = await _client.get(uri);
+      if (response.statusCode != 200) {
+        return _stubEstimate();
       }
       final decoded = jsonDecode(response.body);
-      if (decoded is! Map) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:parse',
-        );
+      if (decoded is! Map<String, dynamic>) {
+        return _stubEstimate();
       }
-
       final rows = decoded['rows'];
       if (rows is! List || rows.isEmpty) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:rows',
-        );
+        return _stubEstimate();
       }
       final firstRow = rows.first;
-      if (firstRow is! Map) {
-        return _stubEstimate(cleanOrigin, cleanDestination, source: 'stub:row');
+      if (firstRow is! Map<String, dynamic>) {
+        return _stubEstimate();
       }
-
       final elements = firstRow['elements'];
       if (elements is! List || elements.isEmpty) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:elements',
-        );
+        return _stubEstimate();
       }
       final firstElement = elements.first;
-      if (firstElement is! Map) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:element',
-        );
+      if (firstElement is! Map<String, dynamic>) {
+        return _stubEstimate();
       }
-
-      final status = (firstElement['status'] ?? '').toString();
-      if (status != 'OK') {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:status_$status',
-        );
+      final distance = firstElement['distance'];
+      final duration = firstElement['duration'];
+      if (distance is! Map || duration is! Map) {
+        return _stubEstimate();
       }
-
-      final distanceValue =
-          ((firstElement['distance'] as Map?)?['value'] as num?)?.toInt() ?? 0;
-      final durationValue =
-          ((firstElement['duration'] as Map?)?['value'] as num?)?.toInt() ?? 0;
-      if (distanceValue <= 0 || durationValue <= 0) {
-        return _stubEstimate(
-          cleanOrigin,
-          cleanDestination,
-          source: 'stub:zero',
-        );
+      final distanceMeters = (distance['value'] as num?)?.toInt();
+      final durationSeconds = (duration['value'] as num?)?.toInt();
+      if (distanceMeters == null || durationSeconds == null) {
+        return _stubEstimate();
       }
-
       return DistanceEstimate(
-        distanceMeters: distanceValue,
-        durationSeconds: durationValue,
-        source: 'google',
+        distanceMeters: distanceMeters,
+        durationSeconds: durationSeconds,
+        source: 'google_distance_matrix',
       );
     } catch (_) {
-      return _stubEstimate(cleanOrigin, cleanDestination, source: 'stub:error');
+      return _stubEstimate();
     }
   }
 
-  DistanceEstimate _stubEstimate(
-    String origin,
-    String destination, {
-    required String source,
-  }) {
-    final combined = (origin + destination).replaceAll(RegExp(r'\s+'), '');
-    final seed = combined.isEmpty ? 12 : combined.length;
-    final distanceMeters = (seed * 900).clamp(4000, 60000);
-    final durationSeconds = ((distanceMeters / 8.5).round()).clamp(900, 10800);
-    return DistanceEstimate(
-      distanceMeters: distanceMeters,
-      durationSeconds: durationSeconds,
-      source: source,
+  DistanceEstimate _stubEstimate() {
+    return const DistanceEstimate(
+      distanceMeters: 12000,
+      durationSeconds: 1800,
+      source: 'stub',
     );
   }
 }

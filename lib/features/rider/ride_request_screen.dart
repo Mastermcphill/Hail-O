@@ -6,16 +6,10 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
-import '../../core/storage/token_storage.dart';
 import '../../integrations/google/google_distance_service.dart';
-import 'next_of_kin_screen.dart';
 
 class RideRequestScreen extends StatefulWidget {
-  const RideRequestScreen({
-    super.key,
-    required this.apiClient,
-    required this.tokenStorage,
-  });
+  const RideRequestScreen({super.key, required this.apiClient});
 
   final ApiClient apiClient;
   final TokenStorage tokenStorage;
@@ -25,43 +19,25 @@ class RideRequestScreen extends StatefulWidget {
 }
 
 class _RideRequestScreenState extends State<RideRequestScreen> {
+  final _pickupController = TextEditingController();
+  final _dropoffController = TextEditingController();
+  final _passengersController = TextEditingController(text: '1');
+  final _luggageCountController = TextEditingController(text: '0');
+  final _scheduledDepartureController = TextEditingController();
+  final _vehicleClassController = TextEditingController(text: 'sedan');
+  final _baseFareMinorController = TextEditingController(text: '0');
+  final _premiumMarkupMinorController = TextEditingController(text: '0');
+  final _connectionFeeMinorController = TextEditingController(text: '0');
+
   final GoogleDistanceService _distanceService = GoogleDistanceService();
-  final TextEditingController _scheduledDepartureController =
-      TextEditingController();
-  final TextEditingController _pickupController = TextEditingController(
-    text: 'Lagos',
-  );
-  final TextEditingController _dropoffController = TextEditingController(
-    text: 'Ibadan',
-  );
-  final TextEditingController _passengersController = TextEditingController(
-    text: '1',
-  );
-  final TextEditingController _luggageCountController = TextEditingController(
-    text: '0',
-  );
-  final TextEditingController _distanceMetersController = TextEditingController(
-    text: '12000',
-  );
-  final TextEditingController _durationSecondsController =
-      TextEditingController(text: '1800');
-  final TextEditingController _vehicleClassController = TextEditingController(
-    text: 'sedan',
-  );
-  final TextEditingController _baseFareMinorController = TextEditingController(
-    text: '0',
-  );
-  final TextEditingController _premiumMarkupMinorController =
-      TextEditingController(text: '0');
-  final TextEditingController _connectionFeeMinorController =
-      TextEditingController(text: '0');
 
   String _tripScope = 'intra_city';
   bool _charterMode = false;
   bool _isSubmitting = false;
-  bool _isEstimatingDistance = false;
-  bool _isCheckingNextOfKin = true;
-  String? _gateErrorMessage;
+  bool _isEstimating = false;
+  bool _isCheckingGate = true;
+  int _distanceMeters = 12000;
+  int _durationSeconds = 1800;
   String _distanceSource = 'stub';
 
   @override
@@ -71,20 +47,16 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         .toUtc()
         .add(const Duration(minutes: 10))
         .toIso8601String();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _ensureNextOfKin();
-    });
+    _ensureNextOfKinGate();
   }
 
   @override
   void dispose() {
-    _scheduledDepartureController.dispose();
     _pickupController.dispose();
     _dropoffController.dispose();
     _passengersController.dispose();
     _luggageCountController.dispose();
-    _distanceMetersController.dispose();
-    _durationSecondsController.dispose();
+    _scheduledDepartureController.dispose();
     _vehicleClassController.dispose();
     _baseFareMinorController.dispose();
     _premiumMarkupMinorController.dispose();
@@ -92,47 +64,62 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     super.dispose();
   }
 
-  Future<void> _ensureNextOfKin() async {
-    if (mounted) {
-      setState(() {
-        _isCheckingNextOfKin = true;
-        _gateErrorMessage = null;
-      });
-    }
-
+  Future<void> _ensureNextOfKinGate() async {
+    setState(() {
+      _isCheckingGate = true;
+    });
     try {
-      final response = await widget.apiClient.get(ApiPaths.nextOfKin);
-      if (_containsNextOfKin(response) || await _hasLocalNextOfKin()) {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _isCheckingNextOfKin = false;
-        });
-        return;
-      }
-      _goToNextOfKin();
+      await widget.apiClient.get(ApiPaths.meNextOfKin);
     } catch (error) {
-      if (_isNotFound(error)) {
-        if (await _hasLocalNextOfKin()) {
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _isCheckingNextOfKin = false;
-          });
-          return;
-        }
-        _goToNextOfKin();
+      if (!mounted) {
         return;
       }
+      final shouldGate =
+          error is ApiException &&
+          (error.statusCode == 404 || error.code == 'next_of_kin_not_set');
+      if (shouldGate) {
+        context.go('/rider/next-of-kin?return_to=/rider/request');
+        return;
+      }
+      _showErrorSnackBar(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingGate = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _estimateDistance() async {
+    final pickup = _pickupController.text.trim();
+    final dropoff = _dropoffController.text.trim();
+    if (pickup.isEmpty || dropoff.isEmpty) {
+      _showSnackBar('Enter pickup and dropoff first.');
+      return;
+    }
+    setState(() {
+      _isEstimating = true;
+    });
+    try {
+      final estimate = await _distanceService.estimate(
+        origin: pickup,
+        destination: dropoff,
+      );
       if (!mounted) {
         return;
       }
       setState(() {
-        _isCheckingNextOfKin = false;
-        _gateErrorMessage = formatApiError(error);
+        _distanceMeters = estimate.distanceMeters;
+        _durationSeconds = estimate.durationSeconds;
+        _distanceSource = estimate.source;
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEstimating = false;
+        });
+      }
     }
   }
 
@@ -142,20 +129,32 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _isSubmitting = true;
     });
     try {
-      await _estimateDistance(silentErrors: true);
+      final pickup = _pickupController.text.trim();
+      final dropoff = _dropoffController.text.trim();
+      if (pickup.isNotEmpty && dropoff.isNotEmpty) {
+        final estimate = await _distanceService.estimate(
+          origin: pickup,
+          destination: dropoff,
+        );
+        _distanceMeters = estimate.distanceMeters;
+        _durationSeconds = estimate.durationSeconds;
+        _distanceSource = estimate.source;
+      }
+
       final scheduledAt = DateTime.parse(
         _scheduledDepartureController.text.trim(),
       ).toUtc();
-      final luggageCount = _parseInt(_luggageCountController.text);
+
       final payload = <String, dynamic>{
         'scheduled_departure_at': scheduledAt.toIso8601String(),
         'trip_scope': _tripScopeToBackendValue(_tripScope),
-        'pickup': _pickupController.text.trim(),
-        'dropoff': _dropoffController.text.trim(),
+        'pickup': pickup,
+        'dropoff': dropoff,
         'passengers': _parseInt(_passengersController.text),
-        'luggage_count': luggageCount,
-        'distance_meters': _parseInt(_distanceMetersController.text),
-        'duration_seconds': _parseInt(_durationSecondsController.text),
+        'luggage_count': _parseInt(_luggageCountController.text),
+        'charter_mode': _charterMode,
+        'distance_meters': _distanceMeters,
+        'duration_seconds': _durationSeconds,
         'vehicle_class': _vehicleClassController.text.trim().isEmpty
             ? 'sedan'
             : _vehicleClassController.text.trim(),
@@ -177,10 +176,10 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       if (!mounted) {
         return;
       }
-      final charter = _charterMode ? '1' : '0';
       context.go(
         '/rider/offers/${Uri.encodeComponent(rideId)}'
-        '?luggage=$luggageCount&charter=$charter',
+        '?luggage_count=${_parseInt(_luggageCountController.text)}'
+        '&charter_mode=$_charterMode',
       );
     } catch (error) {
       if (!mounted) {
@@ -255,39 +254,8 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isCheckingNextOfKin) {
+    if (_isCheckingGate) {
       return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_gateErrorMessage != null) {
-      return Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(
-                  'Could not verify next-of-kin',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _gateErrorMessage!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _ensureNextOfKin,
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
     }
 
     return SingleChildScrollView(
@@ -303,32 +271,19 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 16),
-              _LabeledTextField(
+              TextField(
                 controller: _pickupController,
-                label: 'pickup',
-                keyboardType: TextInputType.text,
+                decoration: const InputDecoration(
+                  labelText: 'pickup',
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 12),
-              _LabeledTextField(
+              TextField(
                 controller: _dropoffController,
-                label: 'dropoff',
-                keyboardType: TextInputType.text,
-              ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: (_isSubmitting || _isEstimatingDistance)
-                      ? null
-                      : () => _estimateDistance(),
-                  icon: _isEstimatingDistance
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.route_outlined),
-                  label: const Text('Estimate Distance'),
+                decoration: const InputDecoration(
+                  labelText: 'dropoff',
+                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
@@ -371,19 +326,18 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                   });
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               SwitchListTile(
-                value: _charterMode,
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Charter mode'),
-                subtitle: const Text('Auto-select all seats later'),
+                value: _charterMode,
                 onChanged: (value) {
                   setState(() {
                     _charterMode = value;
                   });
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               TextField(
                 controller: _scheduledDepartureController,
                 decoration: const InputDecoration(
@@ -393,17 +347,55 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
               ),
               const SizedBox(height: 12),
               _LabeledTextField(
-                controller: _distanceMetersController,
-                label: 'distance_meters',
+                controller: _vehicleClassController,
+                label: 'vehicle_class',
+                keyboardType: TextInputType.text,
               ),
               const SizedBox(height: 12),
               _LabeledTextField(
-                controller: _durationSecondsController,
-                label: 'duration_seconds',
+                controller: _baseFareMinorController,
+                label: 'base_fare_minor',
               ),
-              const SizedBox(height: 4),
-              Text('distance_source: $_distanceSource'),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _premiumMarkupMinorController,
+                label: 'premium_markup_minor',
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _connectionFeeMinorController,
+                label: 'connection_fee_minor',
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('distance_meters: $_distanceMeters'),
+                      const SizedBox(height: 4),
+                      Text('duration_seconds: $_durationSeconds'),
+                      const SizedBox(height: 4),
+                      Text('distance_source: $_distanceSource'),
+                      const SizedBox(height: 8),
+                      FilledButton.tonal(
+                        onPressed: _isEstimating ? null : _estimateDistance,
+                        child: _isEstimating
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Estimate Distance'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: _isSubmitting ? null : _submit,
                 child: _isSubmitting
@@ -422,9 +414,14 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   }
 
   void _showErrorSnackBar(Object error) {
+    final message = formatApiError(error);
+    _showSnackBar(message);
+  }
+
+  void _showSnackBar(String message) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(formatApiError(error))));
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
@@ -480,52 +477,4 @@ String? _resolveRideId(Map<String, dynamic> response) {
     }
   }
   return null;
-}
-
-bool _containsNextOfKin(Map<String, dynamic> response) {
-  if (_hasAllNextOfKinFields(response)) {
-    return true;
-  }
-
-  final nextOfKinMap = _asMap(response['next_of_kin']);
-  if (_hasAllNextOfKinFields(nextOfKinMap)) {
-    return true;
-  }
-
-  final dataMap = _asMap(response['data']);
-  if (_hasAllNextOfKinFields(dataMap)) {
-    return true;
-  }
-
-  final nestedMap = _asMap(dataMap['next_of_kin']);
-  return _hasAllNextOfKinFields(nestedMap);
-}
-
-bool _hasAllNextOfKinFields(Map<String, dynamic> map) {
-  return _readString(map['full_name']).isNotEmpty &&
-      _readString(map['phone']).isNotEmpty &&
-      _readString(map['relationship']).isNotEmpty;
-}
-
-bool _isNotFound(Object error) {
-  return error is ApiException && error.statusCode == 404;
-}
-
-Map<String, dynamic> _asMap(dynamic value) {
-  if (value is Map<String, dynamic>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map(
-      (key, mapValue) => MapEntry<String, dynamic>(key.toString(), mapValue),
-    );
-  }
-  return <String, dynamic>{};
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
 }

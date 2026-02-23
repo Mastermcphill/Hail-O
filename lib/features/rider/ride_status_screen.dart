@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
@@ -33,13 +35,13 @@ class _RideStatusScreenState extends State<RideStatusScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _startPolling();
+    unawaited(_startPolling());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startPolling();
+      unawaited(_startPolling());
       return;
     }
     if (state == AppLifecycleState.paused ||
@@ -163,6 +165,7 @@ class _RideStatusScreenState extends State<RideStatusScreen>
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     RideTimelineWidget(snapshot: _snapshot!),
                     const SizedBox(height: 12),

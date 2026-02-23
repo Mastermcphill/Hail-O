@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf_io.dart' as io;
@@ -59,29 +61,26 @@ Future<void> main() async {
       40;
   final rateLimitMarketplaceReadPerIp =
       int.tryParse(
-        (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '180').trim(),
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '120').trim(),
       ) ??
-      180;
+      120;
   final rateLimitMarketplaceReadPerUser =
       int.tryParse(
-        (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '360').trim(),
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '240').trim(),
       ) ??
-      360;
+      240;
   final rateLimitMarketplaceWritePerIp =
       int.tryParse(
-        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '30').trim(),
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '40').trim(),
       ) ??
-      30;
+      40;
   final rateLimitMarketplaceWritePerUser =
       int.tryParse(
-        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '60').trim(),
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '80').trim(),
       ) ??
-      60;
+      80;
   final rateLimitWebhookPerIp =
-      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '600').trim()) ?? 600;
-  final rateLimitWebhookPerUser =
-      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_USER'] ?? '1200').trim()) ??
-      1200;
+      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '300').trim()) ?? 300;
   final trustProxyHeaders =
       (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() != 'false';
   final metricsPublic =
@@ -162,7 +161,6 @@ Future<void> main() async {
     'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
     'rate_limit_marketplace_write_per_user': rateLimitMarketplaceWritePerUser,
     'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
-    'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
     'trust_proxy_headers': trustProxyHeaders,
     'metrics_public': metricsPublic,
     'metrics_protected': !metricsPublic,
@@ -192,7 +190,6 @@ Future<void> main() async {
     maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
     maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
     maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
-    maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
@@ -200,10 +197,12 @@ Future<void> main() async {
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,
+    postgresProvider: postgresProvider,
+    environmentMap: env,
   ).buildHandler();
 
-  final configuredPortRaw = (Platform.environment['PORT'] ?? '').trim();
-  final port = int.tryParse(configuredPortRaw) ?? 10000;
+  final port = int.parse(Platform.environment['PORT'] ?? '8080');
+  const listenHost = '0.0.0.0';
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
   );
@@ -216,6 +215,100 @@ Future<void> main() async {
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
   stdout.writeln(
-    'Hail-O backend listening on http://${server.address.host}:${server.port}',
+    jsonEncode(<String, Object?>{
+      'event': 'server_listen',
+      'host': listenHost,
+      'port': server.port,
+    }),
   );
+  stdout.writeln(
+    'Hail-O backend listening on http://$listenHost:${server.port}',
+  );
+
+  try {
+    await _verifyBindContract(port: server.port);
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'bind_check_ok',
+        'path': '/api/healthz',
+        'port': server.port,
+      }),
+    );
+  } catch (error) {
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'bind_check_failed',
+        'path': '/api/healthz',
+        'port': server.port,
+        'reason': error.toString(),
+      }),
+    );
+    await server.close(force: true);
+    await db.close();
+    if (postgresProvider != null) {
+      await postgresProvider.close();
+    }
+    rethrow;
+  }
+
+  final shutdownCompleter = Completer<void>();
+  final signalSubscriptions = <StreamSubscription<ProcessSignal>>[];
+
+  void triggerShutdown(String signal) {
+    if (shutdownCompleter.isCompleted) {
+      return;
+    }
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'shutdown_signal',
+        'signal': signal,
+      }),
+    );
+    shutdownCompleter.complete();
+  }
+
+  if (!Platform.isWindows) {
+    signalSubscriptions.add(
+      ProcessSignal.sigterm.watch().listen((_) => triggerShutdown('sigterm')),
+    );
+  }
+  signalSubscriptions.add(
+    ProcessSignal.sigint.watch().listen((_) => triggerShutdown('sigint')),
+  );
+
+  await shutdownCompleter.future;
+  for (final subscription in signalSubscriptions) {
+    await subscription.cancel();
+  }
+  await server.close(force: false);
+  await db.close();
+  if (postgresProvider != null) {
+    await postgresProvider.close();
+  }
+  stdout.writeln(
+    jsonEncode(<String, Object?>{
+      'event': 'server_stopped',
+      'port': server.port,
+    }),
+  );
+}
+
+Future<void> _verifyBindContract({required int port}) async {
+  final client = HttpClient();
+  client.connectionTimeout = const Duration(seconds: 3);
+  try {
+    final request = await client
+        .getUrl(Uri.parse('http://127.0.0.1:$port/api/healthz'))
+        .timeout(const Duration(seconds: 5));
+    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final response = await request.close().timeout(const Duration(seconds: 5));
+    final body = await utf8.decoder.bind(response).join();
+    if (response.statusCode != 200) {
+      throw StateError(
+        'bind contract expected 200 from /api/healthz, got ${response.statusCode}, body=$body',
+      );
+    }
+  } finally {
+    client.close(force: true);
+  }
 }

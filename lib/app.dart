@@ -26,6 +26,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
 
   @override
   void dispose() {
+    _appRouter.dispose();
     _apiClient.close();
     super.dispose();
   }

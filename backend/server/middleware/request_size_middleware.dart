@@ -4,7 +4,7 @@ import '../http_utils.dart';
 
 Middleware requestSizeMiddleware({
   int maxBytes = 262144,
-  Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
+  Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
 }) {
   final safeMaxBytes = maxBytes > 0 ? maxBytes : 262144;
 

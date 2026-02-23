@@ -6,17 +6,16 @@ import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_home.dart';
+import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
-import '../../features/marketplace/data/marketplace_repository.dart';
-import '../../features/marketplace/ui/manage_seats_screen.dart';
-import '../../features/marketplace/state/marketplace_controller.dart';
+import '../../features/marketplace/marketplace_module.dart';
+import '../../features/marketplace/ui/billing_screen.dart';
+import '../../features/marketplace/ui/invite_screen.dart';
 import '../../features/marketplace/ui/offers_screen.dart';
 import '../../features/marketplace/ui/paywall_screen.dart';
-import '../../features/marketplace/ui/plan_change_preview_screen.dart';
-import '../../features/marketplace/ui/receipt_screen.dart';
 import '../../features/marketplace/ui/seats_screen.dart';
 import '../../features/marketplace/ui/timeline_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
@@ -25,7 +24,6 @@ import '../../features/rider/paywall_screen.dart';
 import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
-import '../../features/rider/timeline_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../api/api_client.dart';
 import '../storage/token_storage.dart';
@@ -34,6 +32,7 @@ class AppRouter {
   AppRouter({required ApiClient apiClient, required TokenStorage tokenStorage})
     : _apiClient = apiClient,
       _tokenStorage = tokenStorage {
+    _marketplaceModule = MarketplaceModule(apiClient: _apiClient);
     router = GoRouter(
       initialLocation: '/login',
       routes: <RouteBase>[
@@ -68,19 +67,8 @@ class AppRouter {
             ),
             GoRoute(
               path: '/rider/request',
-              builder: (context, state) => RideRequestScreen(
-                apiClient: _apiClient,
-                tokenStorage: _tokenStorage,
-              ),
-            ),
-            GoRoute(
-              path: '/rider/next-of-kin',
-              builder: (context, state) => NextOfKinScreen(
-                apiClient: _apiClient,
-                tokenStorage: _tokenStorage,
-                returnTo:
-                    state.uri.queryParameters['returnTo'] ?? '/rider/request',
-              ),
+              builder: (context, state) =>
+                  RideRequestScreen(apiClient: _apiClient),
             ),
             GoRoute(
               path: '/rider/status/:rideId',
@@ -94,10 +82,17 @@ class AppRouter {
               builder: (context, state) => OffersScreen(
                 apiClient: _apiClient,
                 rideId: state.pathParameters['rideId'] ?? '',
-                luggageCount:
-                    int.tryParse(state.uri.queryParameters['luggage'] ?? '0') ??
-                    0,
-                charterMode: state.uri.queryParameters['charter'] == '1',
+                initialLuggageCount: int.tryParse(
+                  state.uri.queryParameters['luggage_count'] ?? '',
+                ),
+                charterMode:
+                    (state.uri.queryParameters['charter_mode'] ?? '')
+                        .toLowerCase() ==
+                    'true',
+                expired:
+                    (state.uri.queryParameters['expired'] ?? '')
+                        .toLowerCase() ==
+                    'true',
               ),
             ),
             GoRoute(
@@ -105,15 +100,10 @@ class AppRouter {
               builder: (context, state) => PaywallScreen(
                 apiClient: _apiClient,
                 rideId: state.pathParameters['rideId'] ?? '',
-                offerPriceMinor:
-                    int.tryParse(
-                      state.uri.queryParameters['offerPrice'] ?? '0',
-                    ) ??
-                    0,
-                charterMode: state.uri.queryParameters['charter'] == '1',
-                luggageCount:
-                    int.tryParse(state.uri.queryParameters['luggage'] ?? '0') ??
-                    0,
+                charterMode:
+                    (state.uri.queryParameters['charter_mode'] ?? '')
+                        .toLowerCase() ==
+                    'true',
               ),
             ),
             GoRoute(
@@ -121,139 +111,68 @@ class AppRouter {
               builder: (context, state) => SeatSelectionScreen(
                 apiClient: _apiClient,
                 rideId: state.pathParameters['rideId'] ?? '',
-                offerPriceMinor:
-                    int.tryParse(
-                      state.uri.queryParameters['offerPrice'] ?? '0',
-                    ) ??
-                    0,
-                charterMode: state.uri.queryParameters['charter'] == '1',
+                charterMode:
+                    (state.uri.queryParameters['charter_mode'] ?? '')
+                        .toLowerCase() ==
+                    'true',
               ),
             ),
             GoRoute(
-              path: '/rider/timeline/:purchaseId',
-              builder: (context, state) => TimelineScreen(
+              path: '/rider/next-of-kin',
+              builder: (context, state) => NextOfKinScreen(
                 apiClient: _apiClient,
-                purchaseId: state.pathParameters['purchaseId'] ?? '',
-                rideId: state.uri.queryParameters['rideId'],
+                returnTo: state.uri.queryParameters['return_to'],
               ),
             ),
-            ShellRoute(
-              builder: (context, state, child) {
-                return ChangeNotifierProvider<MarketplaceController>(
-                  create: (_) => MarketplaceController(
-                    repository: createMarketplaceRepository(_apiClient),
-                  ),
-                  child: child,
-                );
-              },
-              routes: <RouteBase>[
-                GoRoute(
-                  path: '/marketplace/offers',
-                  builder: (context, state) => MarketplaceOffersScreen(
-                    currentPurchaseId: state.uri.queryParameters['purchaseId'],
-                    currentOfferId: state.uri.queryParameters['currentOfferId'],
-                  ),
-                ),
-                GoRoute(
-                  path: '/marketplace/paywall',
-                  builder: (context, state) {
-                    final offerId = state.uri.queryParameters['offerId'] ?? '';
-                    if (offerId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message: 'Missing query parameter: offerId',
-                      );
-                    }
-                    return MarketplacePaywallScreen(offerId: offerId);
-                  },
-                ),
-                GoRoute(
-                  path: '/marketplace/seats',
-                  builder: (context, state) {
-                    final offerId = state.uri.queryParameters['offerId'] ?? '';
-                    if (offerId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message: 'Missing query parameter: offerId',
-                      );
-                    }
-                    return MarketplaceSeatsScreen(offerId: offerId);
-                  },
-                ),
-                GoRoute(
-                  path: '/marketplace/upgrade',
-                  builder: (context, state) {
-                    final purchaseId =
-                        state.uri.queryParameters['purchaseId'] ?? '';
-                    final currentOfferId =
-                        state.uri.queryParameters['currentOfferId'] ?? '';
-                    final newOfferId =
-                        state.uri.queryParameters['newOfferId'] ?? '';
-                    if (purchaseId.isEmpty ||
-                        currentOfferId.isEmpty ||
-                        newOfferId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message:
-                            'Missing query parameter: purchaseId, currentOfferId, or newOfferId',
-                      );
-                    }
-                    return MarketplacePlanChangePreviewScreen(
-                      purchaseId: purchaseId,
-                      currentOfferId: currentOfferId,
-                      newOfferId: newOfferId,
-                    );
-                  },
-                ),
-                GoRoute(
-                  path: '/marketplace/receipt',
-                  builder: (context, state) {
-                    final purchaseId =
-                        state.uri.queryParameters['purchaseId'] ?? '';
-                    if (purchaseId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message: 'Missing query parameter: purchaseId',
-                      );
-                    }
-                    return MarketplaceReceiptScreen(
-                      purchaseId: purchaseId,
-                      fallbackOfferId: state.uri.queryParameters['offerId'],
-                      fallbackSeatCount: int.tryParse(
-                        state.uri.queryParameters['seatCount'] ?? '',
-                      ),
-                      fallbackTotalPriceMinor: int.tryParse(
-                        state.uri.queryParameters['totalPrice'] ?? '',
-                      ),
-                    );
-                  },
-                ),
-                GoRoute(
-                  path: '/marketplace/seats/manage/:purchaseId',
-                  builder: (context, state) {
-                    final purchaseId = state.pathParameters['purchaseId'] ?? '';
-                    if (purchaseId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message: 'Missing path parameter: purchaseId',
-                      );
-                    }
-                    return MarketplaceManageSeatsScreen(purchaseId: purchaseId);
-                  },
-                ),
-                GoRoute(
-                  path: '/marketplace/timeline',
-                  builder: (context, state) {
-                    final purchaseId =
-                        state.uri.queryParameters['purchaseId'] ?? '';
-                    if (purchaseId.isEmpty) {
-                      return const _MissingRouteParamScreen(
-                        message: 'Missing query parameter: purchaseId',
-                      );
-                    }
-                    return MarketplaceTimelineScreen(purchaseId: purchaseId);
-                  },
-                ),
-              ],
+            GoRoute(
+              path: '/marketplace/offers',
+              builder: (context, state) => MarketplaceOffersScreen(
+                controller: _marketplaceModule.controller,
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/paywall',
+              builder: (context, state) => MarketplacePaywallScreen(
+                controller: _marketplaceModule.controller,
+                offerId: state.uri.queryParameters['offerId'] ?? '',
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/seats',
+              builder: (context, state) => MarketplaceSeatsScreen(
+                controller: _marketplaceModule.controller,
+                offerId: state.uri.queryParameters['offerId'] ?? '',
+                purchaseId: state.uri.queryParameters['purchaseId'],
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/billing',
+              builder: (context, state) => MarketplaceBillingScreen(
+                controller: _marketplaceModule.controller,
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/invites',
+              builder: (context, state) => MarketplaceInviteScreen(
+                controller: _marketplaceModule.controller,
+                initialToken: state.uri.queryParameters['token'],
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/timeline',
+              builder: (context, state) => MarketplaceTimelineScreen(
+                controller: _marketplaceModule.controller,
+                purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+              ),
             ),
             GoRoute(
               path: '/driver',
               builder: (context, state) => const DriverHome(),
+            ),
+            GoRoute(
+              path: '/driver/route-chain',
+              builder: (context, state) =>
+                  RouteChainScreen(apiClient: _apiClient),
             ),
             GoRoute(
               path: '/driver/offer',
@@ -265,13 +184,6 @@ class AppRouter {
               builder: (context, state) => DriverOfferScreen(
                 apiClient: _apiClient,
                 initialRideId: state.pathParameters['rideId'],
-              ),
-            ),
-            GoRoute(
-              path: '/driver/route-chain',
-              builder: (context, state) => RouteChainScreen(
-                apiClient: _apiClient,
-                tokenStorage: _tokenStorage,
               ),
             ),
             GoRoute(
@@ -303,7 +215,12 @@ class AppRouter {
 
   final ApiClient _apiClient;
   final TokenStorage _tokenStorage;
+  late final MarketplaceModule _marketplaceModule;
   late final GoRouter router;
+
+  void dispose() {
+    _marketplaceModule.dispose();
+  }
 
   Future<String?> _handleRedirect(
     BuildContext context,
@@ -322,7 +239,8 @@ class AppRouter {
     }
 
     if (isLoginPath) {
-      return '/health';
+      final role = _normalizeRole(await _tokenStorage.readRole());
+      return _homeRouteForRole(role);
     }
 
     final role = _normalizeRole(await _tokenStorage.readRole());
@@ -528,23 +446,32 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/rider/request')) {
     return 'Request Ride';
   }
-  if (_isSelectedPath(path, '/rider/next-of-kin')) {
-    return 'Next of Kin';
-  }
-  if (_isSelectedPath(path, '/rider/status')) {
-    return 'Ride Status';
-  }
   if (_isSelectedPath(path, '/rider/offers')) {
-    return 'Marketplace Offers';
+    return 'Ride Offers';
   }
   if (_isSelectedPath(path, '/rider/paywall')) {
-    return 'Connection Fee';
+    return 'Paywall';
   }
   if (_isSelectedPath(path, '/rider/seats')) {
     return 'Seat Selection';
   }
-  if (_isSelectedPath(path, '/rider/timeline')) {
-    return 'Timeline';
+  if (_isSelectedPath(path, '/rider/status')) {
+    return 'Ride Status';
+  }
+  if (_isSelectedPath(path, '/rider/next-of-kin')) {
+    return 'Next-of-kin';
+  }
+  if (_isSelectedPath(path, '/driver/ride-ops')) {
+    return 'Driver Ride Ops';
+  }
+  if (_isSelectedPath(path, '/driver/route-chain')) {
+    return 'Route Chain';
+  }
+  if (_isSelectedPath(path, '/driver/offer')) {
+    return 'Driver Offer';
+  }
+  if (_isSelectedPath(path, '/rider')) {
+    return 'Rider';
   }
   if (_isSelectedPath(path, '/marketplace/offers')) {
     return 'Marketplace Offers';
@@ -552,32 +479,17 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/marketplace/paywall')) {
     return 'Marketplace Paywall';
   }
-  if (_isSelectedPath(path, '/marketplace/upgrade')) {
-    return 'Marketplace Upgrade';
-  }
-  if (_isSelectedPath(path, '/marketplace/seats/manage')) {
-    return 'Manage Seats';
-  }
   if (_isSelectedPath(path, '/marketplace/seats')) {
     return 'Marketplace Seats';
   }
-  if (_isSelectedPath(path, '/marketplace/receipt')) {
-    return 'Marketplace Receipt';
+  if (_isSelectedPath(path, '/marketplace/billing')) {
+    return 'Marketplace Billing';
+  }
+  if (_isSelectedPath(path, '/marketplace/invites')) {
+    return 'Marketplace Invites';
   }
   if (_isSelectedPath(path, '/marketplace/timeline')) {
     return 'Marketplace Timeline';
-  }
-  if (_isSelectedPath(path, '/driver/offer')) {
-    return 'Driver Offer';
-  }
-  if (_isSelectedPath(path, '/driver/route-chain')) {
-    return 'Route Chain';
-  }
-  if (_isSelectedPath(path, '/driver/ride-ops')) {
-    return 'Driver Ride Ops';
-  }
-  if (_isSelectedPath(path, '/rider')) {
-    return 'Rider';
   }
   if (_isSelectedPath(path, '/driver')) {
     return 'Driver';

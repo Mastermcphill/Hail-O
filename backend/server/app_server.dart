@@ -34,12 +34,11 @@ class AppServer {
     this.maxRequestsPerUser = 120,
     this.maxAuthRequestsPerIp = 20,
     this.maxAuthRequestsPerUser = 40,
-    this.maxMarketplaceReadRequestsPerIp = 180,
-    this.maxMarketplaceReadRequestsPerUser = 360,
-    this.maxMarketplaceWriteRequestsPerIp = 30,
-    this.maxMarketplaceWriteRequestsPerUser = 60,
-    this.maxWebhookRequestsPerIp = 600,
-    this.maxWebhookRequestsPerUser = 1200,
+    this.maxMarketplaceReadRequestsPerIp = 120,
+    this.maxMarketplaceReadRequestsPerUser = 240,
+    this.maxMarketplaceWriteRequestsPerIp = 40,
+    this.maxMarketplaceWriteRequestsPerUser = 80,
+    this.maxWebhookRequestsPerIp = 300,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
@@ -47,6 +46,8 @@ class AppServer {
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
+    this.postgresProvider,
+    this.environmentMap = const <String, String>{},
   });
 
   final Database db;
@@ -69,7 +70,6 @@ class AppServer {
   final int maxMarketplaceWriteRequestsPerIp;
   final int maxMarketplaceWriteRequestsPerUser;
   final int maxWebhookRequestsPerIp;
-  final int maxWebhookRequestsPerUser;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
@@ -77,6 +77,8 @@ class AppServer {
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
+  final PostgresProvider? postgresProvider;
+  final Map<String, String> environmentMap;
 
   Handler buildHandler() {
     final router = buildApiRouter(
@@ -92,11 +94,13 @@ class AppServer {
       metricsPublic: metricsPublic,
       runtimeConfigSnapshot: runtimeConfigSnapshot,
       postgresProvider: postgresProvider,
+      environmentMap: environmentMap,
     );
     final authPublicPaths = <String>{
       'auth/register',
       'auth/login',
       'health',
+      'healthz',
       'api/healthz',
       'webhooks/payments',
       if (metricsPublic) 'metrics',
@@ -136,7 +140,6 @@ class AppServer {
                         maxMarketplaceWriteRequestsPerUser:
                             maxMarketplaceWriteRequestsPerUser,
                         maxWebhookRequestsPerIp: maxWebhookRequestsPerIp,
-                        maxWebhookRequestsPerUser: maxWebhookRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
                       ),
                     )

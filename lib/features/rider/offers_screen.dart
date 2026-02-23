@@ -4,62 +4,80 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
-import '../../core/api/mock_backend_store.dart';
 
 class OffersScreen extends StatefulWidget {
   const OffersScreen({
     super.key,
     required this.apiClient,
     required this.rideId,
-    required this.luggageCount,
-    required this.charterMode,
+    this.initialLuggageCount,
+    this.charterMode = false,
+    this.expired = false,
   });
 
   final ApiClient apiClient;
   final String rideId;
-  final int luggageCount;
+  final int? initialLuggageCount;
   final bool charterMode;
+  final bool expired;
 
   @override
   State<OffersScreen> createState() => _OffersScreenState();
 }
 
 class _OffersScreenState extends State<OffersScreen> {
-  List<Map<String, dynamic>> _offers = <Map<String, dynamic>>[];
   bool _isLoading = true;
+  bool _isAccepting = false;
   String? _errorMessage;
-  String? _acceptingOfferId;
+  List<Map<String, dynamic>> _offers = <Map<String, dynamic>>[];
+  int _luggageCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadOffers();
+    _luggageCount = widget.initialLuggageCount ?? 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      if (widget.expired) {
+        _showSnackBar('Connection fee window expired. Choose another offer.');
+      }
+    });
+    _load();
   }
 
-  Future<void> _loadOffers() async {
+  Future<void> _load() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
+      await _hydrateRideContext();
       final response = await widget.apiClient.get(
         ApiPaths.rideOffers(widget.rideId),
       );
-      final offers = _extractOffers(response);
+      final rawOffers =
+          (response['offers'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map>()
+              .map(
+                (item) => item.map(
+                  (key, value) =>
+                      MapEntry<String, dynamic>(key.toString(), value),
+                ),
+              )
+              .toList(growable: false);
       setState(() {
-        _offers = offers.isEmpty ? _mockOffers(widget.rideId) : offers;
+        _offers = rawOffers.isEmpty ? _buildFallbackOffers() : rawOffers;
       });
     } catch (error) {
-      if (error is ApiException && error.statusCode == 404) {
-        setState(() {
-          _offers = _mockOffers(widget.rideId);
-        });
-      } else {
-        setState(() {
-          _errorMessage = formatApiError(error);
-          _offers = _mockOffers(widget.rideId);
-        });
+      if (!mounted) {
+        return;
       }
+      setState(() {
+        _offers = _buildFallbackOffers();
+        _errorMessage = formatApiError(error);
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -69,166 +87,164 @@ class _OffersScreenState extends State<OffersScreen> {
     }
   }
 
-  Future<void> _acceptOffer(Map<String, dynamic> offer) async {
-    final offerId = _readString(offer['offer_id']);
-    if (offerId.isEmpty) {
-      _showSnackBar('Offer id is missing.');
+  Future<void> _hydrateRideContext() async {
+    if (_luggageCount > 0) {
       return;
     }
-
-    setState(() {
-      _acceptingOfferId = offerId;
-    });
-
     try {
+      final snapshot = await widget.apiClient.get(
+        ApiPaths.rideSnapshot(widget.rideId),
+      );
+      final ride = _asMap(snapshot['ride']);
+      final luggage =
+          (snapshot['luggage_count'] as num?)?.toInt() ??
+          (ride['luggage_count'] as num?)?.toInt() ??
+          0;
+      _luggageCount = luggage;
+    } catch (_) {
+      // Ignore; fallback offers will still render.
+    }
+  }
+
+  List<Map<String, dynamic>> _visibleOffers() {
+    if (_luggageCount <= 2) {
+      return _offers;
+    }
+    return _offers
+        .where((offer) {
+          final vehicleClass = (offer['vehicle_class'] ?? '')
+              .toString()
+              .toLowerCase();
+          return vehicleClass != 'sedan' && vehicleClass != 'hatchback';
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> _acceptOffer(Map<String, dynamic> offer) async {
+    setState(() {
+      _isAccepting = true;
+    });
+    try {
+      final offerId = offer['offer_id']?.toString() ?? '';
       await widget.apiClient.post(
         ApiPaths.rideAcceptOffer(widget.rideId),
         body: <String, dynamic>{'offer_id': offerId},
       );
-    } catch (error) {
-      if (error is! ApiException || error.statusCode != 404) {
-        if (!mounted) {
-          return;
-        }
-        _showSnackBar(formatApiError(error));
-        setState(() {
-          _acceptingOfferId = null;
-        });
+      if (!mounted) {
         return;
       }
-      MockBackendStore.acceptedOfferByRideId[widget.rideId] = offer;
+      context.go(
+        '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
+        '?charter_mode=${widget.charterMode}',
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar(formatApiError(error));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAccepting = false;
+        });
+      }
     }
-
-    MockBackendStore.acceptedOfferByRideId[widget.rideId] = offer;
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _acceptingOfferId = null;
-    });
-    final offerPrice = _readInt(offer['price_minor']);
-    final charterFlag = widget.charterMode ? '1' : '0';
-    context.push(
-      '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
-      '?offerPrice=$offerPrice'
-      '&charter=$charterFlag'
-      '&luggage=${widget.luggageCount}',
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final filteredOffers = _applyLuggageFilter(_offers, widget.luggageCount);
+    final visibleOffers = _visibleOffers();
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            'Blind Offers',
-            style: Theme.of(context).textTheme.headlineSmall,
+          Row(
+            children: <Widget>[
+              Text(
+                'Blind Offers',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const Spacer(),
+              FilledButton.tonal(
+                onPressed: _isLoading ? null : _load,
+                child: const Text('Refresh'),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           SelectableText('ride_id: ${widget.rideId}'),
-          const SizedBox(height: 4),
-          Text('luggage_count: ${widget.luggageCount}'),
+          const SizedBox(height: 6),
+          Text('luggage_count: $_luggageCount'),
+          if (_luggageCount > 2)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('Sedan/Hatchback offers hidden for heavy luggage.'),
+            ),
           if (_errorMessage != null) ...<Widget>[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               _errorMessage!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
           const SizedBox(height: 12),
-          Row(
-            children: <Widget>[
-              FilledButton.tonal(
-                onPressed: _isLoading ? null : _loadOffers,
-                child: const Text('Refresh offers'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : filteredOffers.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No offers available for current luggage filter.',
-                    ),
-                  )
+                : visibleOffers.isEmpty
+                ? const Center(child: Text('No offers available yet.'))
                 : ListView.separated(
-                    itemCount: filteredOffers.length,
-                    separatorBuilder: (_, index) => const SizedBox(height: 10),
+                    itemCount: visibleOffers.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final offer = filteredOffers[index];
-                      final offerId = _readString(offer['offer_id']);
-                      final isAccepting = _acceptingOfferId == offerId;
+                      final offer = visibleOffers[index];
                       return Card(
-                        child: InkWell(
-                          key: Key('offer_card_$index'),
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: isAccepting ? null : () => _acceptOffer(offer),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                _OfferRow(
-                                  label: 'star_rating',
-                                  value: _readStringOrDash(
-                                    offer['star_rating'],
-                                  ),
-                                ),
-                                _OfferRow(
-                                  label: 'gender',
-                                  value: _readStringOrDash(offer['gender']),
-                                ),
-                                _OfferRow(
-                                  label: 'tribe',
-                                  value: _readStringOrDash(offer['tribe']),
-                                ),
-                                _OfferRow(
-                                  label: 'vehicle_class',
-                                  value: _readStringOrDash(
-                                    offer['vehicle_class'],
-                                  ),
-                                ),
-                                _OfferRow(
-                                  label: 'luggage_supported',
-                                  value: _readBool(offer['luggage_supported'])
-                                      ? 'true'
-                                      : 'false',
-                                ),
-                                _OfferRow(
-                                  label: 'price_minor',
-                                  value: _readInt(
-                                    offer['price_minor'],
-                                  ).toString(),
-                                ),
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: FilledButton(
-                                    key: Key('offer_accept_button_$index'),
-                                    onPressed: isAccepting
-                                        ? null
-                                        : () => _acceptOffer(offer),
-                                    child: isAccepting
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Text('Accept offer'),
-                                  ),
-                                ),
-                              ],
-                            ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              _OfferRow(
+                                label: 'star_rating',
+                                value: '${offer['star_rating'] ?? '-'}',
+                              ),
+                              _OfferRow(
+                                label: 'gender',
+                                value: '${offer['gender'] ?? '-'}',
+                              ),
+                              _OfferRow(
+                                label: 'tribe',
+                                value: '${offer['tribe'] ?? '-'}',
+                              ),
+                              _OfferRow(
+                                label: 'vehicle_class',
+                                value: '${offer['vehicle_class'] ?? '-'}',
+                              ),
+                              _OfferRow(
+                                label: 'luggage_supported',
+                                value: '${offer['luggage_supported'] ?? '-'}',
+                              ),
+                              _OfferRow(
+                                label: 'price_minor',
+                                value: '${offer['price_minor'] ?? '-'}',
+                              ),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: _isAccepting
+                                    ? null
+                                    : () => _acceptOffer(offer),
+                                child: _isAccepting
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Accept Offer'),
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -245,6 +261,37 @@ class _OffersScreenState extends State<OffersScreen> {
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
+
+  List<Map<String, dynamic>> _buildFallbackOffers() {
+    return <Map<String, dynamic>>[
+      <String, dynamic>{
+        'offer_id': 'fallback-${widget.rideId}-1',
+        'star_rating': 4.8,
+        'gender': 'male',
+        'tribe': 'Yoruba',
+        'vehicle_class': 'suv',
+        'luggage_supported': true,
+        'price_minor': 9200,
+      },
+      <String, dynamic>{
+        'offer_id': 'fallback-${widget.rideId}-2',
+        'star_rating': 4.6,
+        'gender': 'female',
+        'tribe': 'Igbo',
+        'vehicle_class': 'sedan',
+        'luggage_supported': true,
+        'price_minor': 8000,
+      },
+      <String, dynamic>{
+        'offer_id': 'fallback-${widget.rideId}-3',
+        'star_rating': 4.3,
+        'gender': 'male',
+        'vehicle_class': 'hatchback',
+        'luggage_supported': false,
+        'price_minor': 7200,
+      },
+    ];
+  }
 }
 
 class _OfferRow extends StatelessWidget {
@@ -256,7 +303,7 @@ class _OfferRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         children: <Widget>[
           SizedBox(width: 130, child: Text(label)),
@@ -267,123 +314,14 @@ class _OfferRow extends StatelessWidget {
   }
 }
 
-List<Map<String, dynamic>> _extractOffers(Map<String, dynamic> response) {
-  final directList = response['offers'];
-  if (directList is List) {
-    return _normalizeList(directList);
-  }
-  final nestedData = response['data'];
-  if (nestedData is List) {
-    return _normalizeList(nestedData);
-  }
-  if (nestedData is Map) {
-    final nestedOffers = nestedData['offers'];
-    if (nestedOffers is List) {
-      return _normalizeList(nestedOffers);
-    }
-  }
-  return <Map<String, dynamic>>[];
-}
-
-List<Map<String, dynamic>> _normalizeList(List<dynamic> source) {
-  return source
-      .whereType<Map>()
-      .map(
-        (item) => item.map(
-          (key, value) => MapEntry<String, dynamic>(key.toString(), value),
-        ),
-      )
-      .toList(growable: false);
-}
-
-List<Map<String, dynamic>> _mockOffers(String rideId) {
-  final stored = MockBackendStore.offersByRideId[rideId];
-  if (stored != null && stored.isNotEmpty) {
-    return stored;
-  }
-  return <Map<String, dynamic>>[
-    <String, dynamic>{
-      'offer_id': 'mock_offer_1',
-      'star_rating': 4.8,
-      'gender': 'male',
-      'tribe': 'yoruba',
-      'vehicle_class': 'sedan',
-      'luggage_supported': true,
-      'price_minor': 4200,
-    },
-    <String, dynamic>{
-      'offer_id': 'mock_offer_2',
-      'star_rating': 4.5,
-      'gender': 'female',
-      'tribe': 'igbo',
-      'vehicle_class': 'suv',
-      'luggage_supported': true,
-      'price_minor': 5600,
-    },
-    <String, dynamic>{
-      'offer_id': 'mock_offer_3',
-      'star_rating': 4.9,
-      'gender': 'male',
-      'tribe': 'hausa',
-      'vehicle_class': 'hatchback',
-      'luggage_supported': false,
-      'price_minor': 3900,
-    },
-  ];
-}
-
-List<Map<String, dynamic>> _applyLuggageFilter(
-  List<Map<String, dynamic>> offers,
-  int luggageCount,
-) {
-  if (luggageCount <= 2) {
-    return offers;
-  }
-  return offers
-      .where((offer) {
-        final vehicleClass = _readString(offer['vehicle_class']).toLowerCase();
-        return vehicleClass != 'sedan' && vehicleClass != 'hatchback';
-      })
-      .toList(growable: false);
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
-}
-
-String _readStringOrDash(Object? value) {
-  final text = _readString(value);
-  if (text.isNotEmpty) {
-    return text;
-  }
-  if (value != null) {
-    return value.toString();
-  }
-  return '-';
-}
-
-int _readInt(Object? value) {
-  if (value is int) {
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) {
     return value;
   }
-  if (value is num) {
-    return value.toInt();
+  if (value is Map) {
+    return value.map(
+      (key, item) => MapEntry<String, dynamic>(key.toString(), item),
+    );
   }
-  if (value is String) {
-    return int.tryParse(value.trim()) ?? 0;
-  }
-  return 0;
-}
-
-bool _readBool(Object? value) {
-  if (value is bool) {
-    return value;
-  }
-  if (value is String) {
-    return value.toLowerCase() == 'true';
-  }
-  return false;
+  return <String, dynamic>{};
 }

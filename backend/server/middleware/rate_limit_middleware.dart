@@ -33,14 +33,13 @@ Middleware rateLimitMiddleware({
   int maxRequestsPerUser = 120,
   int maxAuthRequestsPerIp = 20,
   int maxAuthRequestsPerUser = 40,
-  int maxMarketplaceReadRequestsPerIp = 180,
-  int maxMarketplaceReadRequestsPerUser = 360,
-  int maxMarketplaceWriteRequestsPerIp = 30,
-  int maxMarketplaceWriteRequestsPerUser = 60,
-  int maxWebhookRequestsPerIp = 600,
-  int maxWebhookRequestsPerUser = 1200,
+  int maxMarketplaceReadRequestsPerIp = 120,
+  int maxMarketplaceReadRequestsPerUser = 240,
+  int maxMarketplaceWriteRequestsPerIp = 40,
+  int maxMarketplaceWriteRequestsPerUser = 80,
+  int maxWebhookRequestsPerIp = 300,
   bool trustProxyHeaders = true,
-  Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
+  Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
   NowProvider? nowProvider,
   Uuid? uuid,
 }) {
@@ -138,33 +137,59 @@ Middleware rateLimitMiddleware({
         request,
         trustProxyHeaders: trustProxyHeaders,
       );
-      final rule = ruleFor(request);
-      final bucketKeyPrefix = '${rule.bucket}::';
+      final method = request.method.toUpperCase();
+      final isAuthPath = path.startsWith('auth/');
+      final isMarketplacePath = path.startsWith('marketplace/');
+      final isOrgPath = path == 'orgs' || path.startsWith('orgs/');
+      final isMarketplaceOfferRead =
+          isMarketplacePath &&
+          method == 'GET' &&
+          (path == 'marketplace/offers' ||
+              path.startsWith('marketplace/offers/'));
+      final isWebhookPath = path.startsWith('webhooks/');
 
-      if (isAuthenticated) {
-        final key = '$bucketKeyPrefix$userId';
-        if (!consume(userBuckets, key, currentUtc, rule.maxRequestsPerUser)) {
-          return Future<Response>.value(
-            _rateLimitedResponse(
-              request,
-              traceUuid,
-              message: 'Too many requests for this user',
-              retryAfterSeconds: window.inSeconds,
-            ),
-          );
-        }
+      int ipLimit;
+      int userLimit;
+      if (isWebhookPath) {
+        ipLimit = maxWebhookRequestsPerIp;
+        userLimit = 0;
+      } else if (isMarketplacePath || isOrgPath) {
+        ipLimit = isMarketplaceOfferRead
+            ? maxMarketplaceReadRequestsPerIp
+            : maxMarketplaceWriteRequestsPerIp;
+        userLimit = isMarketplaceOfferRead
+            ? maxMarketplaceReadRequestsPerUser
+            : maxMarketplaceWriteRequestsPerUser;
       } else {
-        final key = '$bucketKeyPrefix$ipKey';
-        if (!consume(ipBuckets, key, currentUtc, rule.maxRequestsPerIp)) {
-          return Future<Response>.value(
-            _rateLimitedResponse(
-              request,
-              traceUuid,
-              message: 'Too many requests for this IP',
-              retryAfterSeconds: window.inSeconds,
-            ),
-          );
-        }
+        ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
+        userLimit = isAuthPath ? maxAuthRequestsPerUser : maxRequestsPerUser;
+      }
+
+      if (!consume(ipBuckets, ipKey, currentUtc, ipLimit)) {
+        return Future<Response>.value(
+          jsonErrorResponse(
+            request,
+            429,
+            code: 'rate_limited',
+            message: 'Too many requests for this IP',
+            headers: <String, String>{'retry-after': '${window.inSeconds}'},
+          ),
+        );
+      }
+
+      final userId = request.requestContext.userId?.trim() ?? '';
+      if (userLimit > 0 &&
+          userId.isNotEmpty &&
+          !consume(userBuckets, userId, currentUtc, userLimit)) {
+        return Future<Response>.value(
+          jsonErrorResponse(
+            request,
+            429,
+            code: 'rate_limited',
+            message: 'Too many requests for this user',
+            headers: <String, String>{'retry-after': '${window.inSeconds}'},
+          ),
+        );
       }
 
       return innerHandler(request);

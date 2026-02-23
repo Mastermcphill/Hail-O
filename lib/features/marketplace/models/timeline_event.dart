@@ -1,67 +1,39 @@
-enum TimelineEventStatus {
-  pending,
-  success,
-  warning,
-  failed;
-
-  static TimelineEventStatus fromString(String value) {
-    final normalized = value.trim().toLowerCase();
-    switch (normalized) {
-      case 'success':
-        return TimelineEventStatus.success;
-      case 'warning':
-        return TimelineEventStatus.warning;
-      case 'failed':
-      case 'error':
-        return TimelineEventStatus.failed;
-      case 'pending':
-      default:
-        return TimelineEventStatus.pending;
-    }
-  }
-}
-
-class TimelineEvent {
-  const TimelineEvent({
-    required this.id,
+class MarketplaceTimelineEvent {
+  const MarketplaceTimelineEvent({
+    required this.type,
     required this.title,
     required this.description,
-    required this.occurredAt,
+    required this.timestamp,
     required this.status,
+    this.cursor,
   });
 
-  final String id;
+  final String type;
   final String title;
   final String description;
-  final DateTime occurredAt;
-  final TimelineEventStatus status;
+  final DateTime? timestamp;
+  final String status;
+  final String? cursor;
 
-  factory TimelineEvent.fromMap(Map<String, dynamic> map) {
-    final occurredRaw = _readString(map['occurred_at']);
-    return TimelineEvent(
-      id: _readString(map['id']),
-      title: _readString(map['title']),
-      description: _readString(map['description']),
-      occurredAt:
-          DateTime.tryParse(occurredRaw)?.toUtc() ?? DateTime.now().toUtc(),
-      status: TimelineEventStatus.fromString(_readString(map['status'])),
+  factory MarketplaceTimelineEvent.fromJson(Map<String, dynamic> json) {
+    return MarketplaceTimelineEvent(
+      type: (json['type'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      description: (json['description'] ?? '').toString(),
+      timestamp: DateTime.tryParse((json['timestamp'] ?? '').toString()),
+      status: (json['status'] ?? 'ok').toString(),
+      cursor: json['cursor']?.toString(),
     );
   }
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'id': id,
+      'type': type,
       'title': title,
       'description': description,
-      'occurred_at': occurredAt.toUtc().toIso8601String(),
-      'status': status.name,
+      'timestamp': timestamp?.toIso8601String(),
+      'status': status,
+      'cursor': cursor,
     };
   }
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
 }

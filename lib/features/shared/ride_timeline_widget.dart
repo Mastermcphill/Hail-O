@@ -5,15 +5,25 @@ class RideTimelineWidget extends StatelessWidget {
 
   final Map<String, dynamic> snapshot;
 
+  static const List<String> _states = <String>[
+    'REQUESTED',
+    'OFFERED',
+    'ACCEPTED',
+    'PAYWALL_PENDING',
+    'CONFIRMED',
+    'STARTED',
+    'COMPLETED',
+    'CANCELLED',
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final states = _states;
-    final currentState = _resolveState(snapshot);
-    final currentIndex = states.indexOf(currentState);
+    final current = _normalizeState(snapshot);
+    final currentIndex = _stateIndex(current);
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -21,60 +31,121 @@ class RideTimelineWidget extends StatelessWidget {
               'Ride Timeline',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 10),
-            for (var i = 0; i < states.length; i++)
-              _TimelineStep(
-                label: states[i],
-                isActive: i == currentIndex,
-                isReached: currentIndex >= 0 && i <= currentIndex,
-                isLast: i == states.length - 1,
+            const SizedBox(height: 12),
+            for (var i = 0; i < _states.length; i++)
+              _TimelineRow(
+                state: _states[i],
+                isCurrent: i == currentIndex,
+                isComplete: currentIndex >= 0 && i <= currentIndex,
+                isLast: i == _states.length - 1,
               ),
           ],
         ),
       ),
     );
   }
+
+  String _normalizeState(Map<String, dynamic> snapshot) {
+    final ride = _asMap(snapshot['ride']);
+    final raw =
+        (snapshot['status'] ??
+                snapshot['state'] ??
+                snapshot['ride_status'] ??
+                ride['status'] ??
+                ride['state'] ??
+                ride['ride_status'])
+            ?.toString()
+            .trim()
+            .toUpperCase();
+
+    if (raw == null || raw.isEmpty) {
+      return 'REQUESTED';
+    }
+
+    if (_states.contains(raw)) {
+      return raw;
+    }
+
+    if (raw.contains('BOOK')) {
+      return 'REQUESTED';
+    }
+    if (raw.contains('ACCEPT')) {
+      return 'ACCEPTED';
+    }
+    if (raw.contains('START')) {
+      return 'STARTED';
+    }
+    if (raw.contains('COMPLETE')) {
+      return 'COMPLETED';
+    }
+    if (raw.contains('CANCEL')) {
+      return 'CANCELLED';
+    }
+    if (raw.contains('PAY')) {
+      return 'PAYWALL_PENDING';
+    }
+    if (raw.contains('CONFIRM')) {
+      return 'CONFIRMED';
+    }
+    if (raw.contains('OFFER')) {
+      return 'OFFERED';
+    }
+    return 'REQUESTED';
+  }
+
+  int _stateIndex(String state) {
+    return _states.indexOf(state);
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map(
+        (key, item) => MapEntry<String, dynamic>(key.toString(), item),
+      );
+    }
+    return <String, dynamic>{};
+  }
 }
 
-class _TimelineStep extends StatelessWidget {
-  const _TimelineStep({
-    required this.label,
-    required this.isActive,
-    required this.isReached,
+class _TimelineRow extends StatelessWidget {
+  const _TimelineRow({
+    required this.state,
+    required this.isCurrent,
+    required this.isComplete,
     required this.isLast,
   });
 
-  final String label;
-  final bool isActive;
-  final bool isReached;
+  final String state;
+  final bool isCurrent;
+  final bool isComplete;
   final bool isLast;
 
   @override
   Widget build(BuildContext context) {
-    final color = isActive
-        ? Theme.of(context).colorScheme.primary
-        : (isReached
-              ? Theme.of(context).colorScheme.secondary
-              : Theme.of(context).colorScheme.outlineVariant);
+    final activeColor = Theme.of(context).colorScheme.primary;
+    final mutedColor = Theme.of(context).colorScheme.outline;
+    final color = isCurrent || isComplete ? activeColor : mutedColor;
 
     return Row(
-      key: Key('timeline_step_$label'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         SizedBox(
-          width: 20,
+          width: 22,
           child: Column(
             children: <Widget>[
               Icon(
-                isReached ? Icons.check_circle : Icons.radio_button_unchecked,
-                size: 16,
+                isComplete ? Icons.check_circle : Icons.radio_button_unchecked,
                 color: color,
+                size: 18,
               ),
               if (!isLast)
                 Container(
                   width: 2,
                   height: 24,
-                  color: color.withValues(alpha: 0.5),
+                  color: isComplete ? activeColor : mutedColor,
                 ),
             ],
           ),
@@ -83,80 +154,14 @@ class _TimelineStep extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 1),
           child: Text(
-            label,
+            state,
             style: TextStyle(
-              fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+              fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w400,
+              color: color,
             ),
           ),
         ),
       ],
     );
   }
-}
-
-const List<String> _states = <String>[
-  'REQUESTED',
-  'OFFERED',
-  'ACCEPTED',
-  'PAYWALL_PENDING',
-  'CONFIRMED',
-  'STARTED',
-  'COMPLETED',
-  'CANCELLED',
-];
-
-String _resolveState(Map<String, dynamic> snapshot) {
-  final ride = _asMap(snapshot['ride']);
-  final raw = _firstString(<Object?>[
-    snapshot['ride_status'],
-    snapshot['status'],
-    snapshot['state'],
-    ride['ride_status'],
-    ride['status'],
-    ride['state'],
-  ]).toUpperCase();
-
-  if (raw.contains('CANCEL')) {
-    return 'CANCELLED';
-  }
-  if (raw.contains('COMPLETE')) {
-    return 'COMPLETED';
-  }
-  if (raw.contains('START')) {
-    return 'STARTED';
-  }
-  if (raw.contains('CONFIRM')) {
-    return 'CONFIRMED';
-  }
-  if (raw.contains('PAYWALL')) {
-    return 'PAYWALL_PENDING';
-  }
-  if (raw.contains('ACCEPT')) {
-    return 'ACCEPTED';
-  }
-  if (raw.contains('OFFER')) {
-    return 'OFFERED';
-  }
-  return 'REQUESTED';
-}
-
-Map<String, dynamic> _asMap(dynamic value) {
-  if (value is Map<String, dynamic>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map(
-      (key, mapValue) => MapEntry<String, dynamic>(key.toString(), mapValue),
-    );
-  }
-  return <String, dynamic>{};
-}
-
-String _firstString(List<Object?> values) {
-  for (final value in values) {
-    if (value is String && value.trim().isNotEmpty) {
-      return value.trim();
-    }
-  }
-  return '';
 }

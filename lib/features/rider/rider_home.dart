@@ -45,16 +45,33 @@ class RiderHome extends StatelessWidget {
                 child: const Text('Open Ride Status (paste ride id)'),
               ),
               const SizedBox(height: 10),
-              OutlinedButton(
+              FilledButton.tonal(
                 onPressed: () {
                   context.go('/rider/next-of-kin');
                 },
                 child: const Text('Next-of-kin'),
               ),
-              if (kDebugMode) ...<Widget>[
-                const SizedBox(height: 10),
-                const _MarketplaceDebugSection(),
-              ],
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/offers');
+                },
+                child: const Text('Marketplace'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/billing');
+                },
+                child: const Text('Marketplace Billing'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/invites');
+                },
+                child: const Text('Marketplace Invites'),
+              ),
             ],
           ),
         ),

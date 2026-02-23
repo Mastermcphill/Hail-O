@@ -28,7 +28,7 @@ class DriverHome extends StatelessWidget {
                 child: const Text('Create Route Chain'),
               ),
               const SizedBox(height: 10),
-              FilledButton.tonal(
+              FilledButton(
                 onPressed: () async {
                   final rideId = await _promptForRideId(
                     context,
@@ -46,7 +46,7 @@ class DriverHome extends StatelessWidget {
                 child: const Text('Offer on Ride (paste ride id)'),
               ),
               const SizedBox(height: 10),
-              FilledButton.tonal(
+              FilledButton(
                 onPressed: () async {
                   final rideId = await _promptForRideId(
                     context,

@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
+import 'team_selector.dart';
 
 class MarketplaceOffersScreen extends StatefulWidget {
-  const MarketplaceOffersScreen({
-    super.key,
-    this.currentPurchaseId,
-    this.currentOfferId,
-  });
+  const MarketplaceOffersScreen({super.key, required this.controller});
 
-  final String? currentPurchaseId;
-  final String? currentOfferId;
+  final MarketplaceController controller;
 
   @override
   State<MarketplaceOffersScreen> createState() =>
@@ -23,200 +18,151 @@ class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      context.read<MarketplaceController>().loadOffers();
+    widget.controller.addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.controller.initializeOffers();
+      await widget.controller.startSyncLoop();
     });
   }
 
   @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    widget.controller.stopSyncLoop();
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Consumer<MarketplaceController>(
-      builder: (context, controller, child) {
-        if (controller.loadingOffers && controller.offers.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (controller.errorMessage != null && controller.offers.isEmpty) {
-          return _ErrorState(
-            message: controller.errorMessage!,
-            onRetry: controller.loadOffers,
-          );
-        }
-
-        if (controller.offers.isEmpty) {
-          return _EmptyState(onRetry: controller.loadOffers);
-        }
-
-        return RefreshIndicator(
-          onRefresh: controller.loadOffers,
-          child: ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: controller.offers.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final offer = controller.offers[index];
-              final isCurrentOffer = widget.currentOfferId == offer.id;
-              final isPlanChange = (widget.currentPurchaseId ?? '').isNotEmpty;
-              return Card(
-                key: Key('marketplace_offer_card_$index'),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        offer.title,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      if (isCurrentOffer) ...<Widget>[
-                        const SizedBox(height: 6),
-                        const Chip(
-                          label: Text('Current plan'),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ],
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          _InfoChip(label: offer.vehicleClass),
-                          _InfoChip(
-                            label: 'rating ${offer.rating.toStringAsFixed(1)}',
-                          ),
-                          _InfoChip(label: '${offer.etaMinutes} min ETA'),
-                          _InfoChip(label: '${offer.seatsAvailable} seats'),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      for (final bullet in offer.highlights)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text('- $bullet'),
-                        ),
-                      const SizedBox(height: 10),
-                      Text('Price: ${offer.priceMinor} minor units'),
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton(
-                          key: Key('marketplace_offer_continue_$index'),
-                          onPressed: isPlanChange && isCurrentOffer
-                              ? null
-                              : () {
-                                  if (isPlanChange) {
-                                    context.push(
-                                      '/marketplace/upgrade?purchaseId='
-                                      '${Uri.encodeQueryComponent(widget.currentPurchaseId!)}'
-                                      '&currentOfferId=${Uri.encodeQueryComponent(widget.currentOfferId ?? '')}'
-                                      '&newOfferId=${Uri.encodeQueryComponent(offer.id)}',
+    final controller = widget.controller;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                'Marketplace Offers',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const Spacer(),
+              if (controller.isSyncing)
+                const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          MarketplaceTeamSelector(
+            controller: controller,
+            onOpenInvites: () => context.go('/marketplace/invites'),
+            onOpenBilling: () => context.go('/marketplace/billing'),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              if (controller.offlineMode)
+                const Chip(label: Text('Offline mode')),
+              if (controller.pendingOutboxCount > 0)
+                Chip(label: Text('Queued: ${controller.pendingOutboxCount}')),
+              if (!controller.canManageBilling)
+                const Chip(label: Text('Read-only role')),
+            ],
+          ),
+          if (controller.infoBanner != null &&
+              controller.infoBanner!.trim().isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              controller.infoBanner!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonal(
+              onPressed: controller.isLoadingOffers
+                  ? null
+                  : controller.refreshOffers,
+              child: const Text('Refresh'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: controller.isLoadingOffers && controller.offers.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : controller.offers.isEmpty
+                ? const Center(child: Text('No offers cached yet.'))
+                : ListView.separated(
+                    itemCount: controller.offers.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final offer = controller.offers[index];
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                offer.title,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(offer.subtitle),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${offer.currency} ${offer.price} / ${offer.interval}',
+                              ),
+                              const SizedBox(height: 8),
+                              if (offer.perks.isNotEmpty)
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: offer.perks
+                                      .map((perk) => Chip(label: Text(perk)))
+                                      .toList(growable: false),
+                                ),
+                              const SizedBox(height: 10),
+                              FilledButton(
+                                onPressed: () {
+                                  if (!controller.canManageBilling) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "You don't have billing permission",
+                                        ),
+                                      ),
                                     );
                                     return;
                                   }
-                                  context.push(
-                                    '/marketplace/paywall?offerId='
-                                    '${Uri.encodeQueryComponent(offer.id)}',
+                                  context.go(
+                                    '/marketplace/paywall'
+                                    '?offerId=${Uri.encodeQueryComponent(offer.id)}',
                                   );
                                 },
-                          child: Text(
-                            isPlanChange
-                                ? (isCurrentOffer
-                                      ? 'Current plan'
-                                      : 'Preview change')
-                                : 'Continue',
+                                child: const Text('Choose plan'),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                ),
-              );
-            },
           ),
-        );
-      },
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(label: Text(label), visualDensity: VisualDensity.compact);
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onRetry});
-
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                'No marketplace offers available right now.',
-                style: Theme.of(context).textTheme.titleMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: onRetry, child: const Text('Retry')),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                'Could not load offers',
-                style: Theme.of(context).textTheme.titleMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: onRetry, child: const Text('Retry')),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

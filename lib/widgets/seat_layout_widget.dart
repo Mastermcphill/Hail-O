@@ -3,55 +3,70 @@ import 'package:flutter/material.dart';
 class SeatLayoutWidget extends StatelessWidget {
   const SeatLayoutWidget({
     super.key,
-    required this.seats,
+    required this.availableSeatIds,
     required this.selectedSeatIds,
     required this.onToggleSeat,
-    this.readOnly = false,
   });
 
-  final List<Map<String, dynamic>> seats;
+  final List<String> availableSeatIds;
   final Set<String> selectedSeatIds;
-  final ValueChanged<String> onToggleSeat;
-  final bool readOnly;
+  final void Function(String seatId) onToggleSeat;
 
   @override
   Widget build(BuildContext context) {
-    final byId = <String, Map<String, dynamic>>{
-      for (final seat in seats) _seatId(seat): seat,
-    };
-    final ordered = <String>{
-      'FRONT_RIGHT',
-      'BACK_LEFT',
-      'BACK_MIDDLE',
-      'BACK_RIGHT',
-      ...byId.keys.where(
-        (id) =>
-            id != 'FRONT_RIGHT' &&
-            id != 'BACK_LEFT' &&
-            id != 'BACK_MIDDLE' &&
-            id != 'BACK_RIGHT',
-      ),
-    }.toList();
-
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text('Seat Layout', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            for (final seatId in ordered)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _SeatTile(
-                  seat: byId[seatId] ?? <String, dynamic>{'seat_id': seatId},
-                  selected: selectedSeatIds.contains(seatId),
-                  onTap: (readOnly || !_isAvailable(byId[seatId]))
-                      ? null
-                      : () => onToggleSeat(seatId),
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _SeatTile(
+                    seatId: 'FRONT_RIGHT',
+                    available: availableSeatIds.contains('FRONT_RIGHT'),
+                    selected: selectedSeatIds.contains('FRONT_RIGHT'),
+                    onTap: onToggleSeat,
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                const Expanded(child: SizedBox()),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _SeatTile(
+                    seatId: 'BACK_LEFT',
+                    available: availableSeatIds.contains('BACK_LEFT'),
+                    selected: selectedSeatIds.contains('BACK_LEFT'),
+                    onTap: onToggleSeat,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _SeatTile(
+                    seatId: 'BACK_MIDDLE',
+                    available: availableSeatIds.contains('BACK_MIDDLE'),
+                    selected: selectedSeatIds.contains('BACK_MIDDLE'),
+                    onTap: onToggleSeat,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _SeatTile(
+                    seatId: 'BACK_RIGHT',
+                    available: availableSeatIds.contains('BACK_RIGHT'),
+                    selected: selectedSeatIds.contains('BACK_RIGHT'),
+                    onTap: onToggleSeat,
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -60,49 +75,54 @@ class SeatLayoutWidget extends StatelessWidget {
 }
 
 class _SeatTile extends StatelessWidget {
-  const _SeatTile({required this.seat, required this.selected, this.onTap});
+  const _SeatTile({
+    required this.seatId,
+    required this.available,
+    required this.selected,
+    required this.onTap,
+  });
 
-  final Map<String, dynamic> seat;
+  final String seatId;
+  final bool available;
   final bool selected;
-  final VoidCallback? onTap;
+  final void Function(String seatId) onTap;
 
   @override
   Widget build(BuildContext context) {
-    final seatId = _seatId(seat);
-    final available = _isAvailable(seat);
-    return Material(
-      color: selected
-          ? Theme.of(context).colorScheme.primaryContainer
-          : Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(10),
-      child: ListTile(
-        title: Text(seatId),
-        subtitle: Text(available ? 'Available' : 'Unavailable'),
-        trailing: Icon(
-          selected ? Icons.check_circle : Icons.event_seat_outlined,
-          color: selected ? Theme.of(context).colorScheme.primary : null,
+    final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = !available
+        ? colorScheme.surfaceContainerHighest
+        : selected
+        ? colorScheme.primaryContainer
+        : colorScheme.surface;
+    final borderColor = !available
+        ? colorScheme.outlineVariant
+        : selected
+        ? colorScheme.primary
+        : colorScheme.outline;
+
+    return InkWell(
+      onTap: available ? () => onTap(seatId) : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Ink(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor),
         ),
-        onTap: onTap,
+        child: Column(
+          children: <Widget>[
+            const Icon(Icons.event_seat),
+            const SizedBox(height: 6),
+            Text(
+              seatId,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }
-}
-
-String _seatId(Map<String, dynamic>? seat) {
-  final id = seat?['seat_id'] ?? seat?['id'];
-  if (id is String && id.trim().isNotEmpty) {
-    return id.trim();
-  }
-  return 'UNKNOWN_SEAT';
-}
-
-bool _isAvailable(Map<String, dynamic>? seat) {
-  if (seat == null) {
-    return false;
-  }
-  final available = seat['is_available'];
-  if (available is bool) {
-    return available;
-  }
-  return true;
 }

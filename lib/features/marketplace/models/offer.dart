@@ -1,87 +1,45 @@
-class Offer {
-  const Offer({
+class MarketplaceOffer {
+  const MarketplaceOffer({
     required this.id,
     required this.title,
-    required this.vehicleClass,
-    required this.priceMinor,
-    required this.rating,
-    required this.seatsAvailable,
-    required this.etaMinutes,
-    required this.highlights,
+    required this.subtitle,
+    required this.price,
+    required this.currency,
+    required this.interval,
+    required this.perks,
   });
 
   final String id;
   final String title;
-  final String vehicleClass;
-  final int priceMinor;
-  final double rating;
-  final int seatsAvailable;
-  final int etaMinutes;
-  final List<String> highlights;
+  final String subtitle;
+  final int price;
+  final String currency;
+  final String interval;
+  final List<String> perks;
 
-  factory Offer.fromMap(Map<String, dynamic> map) {
-    return Offer(
-      id: _readString(map['id']),
-      title: _readString(map['title']),
-      vehicleClass: _readString(map['vehicle_class']),
-      priceMinor: _readInt(map['price_minor']),
-      rating: _readDouble(map['rating']),
-      seatsAvailable: _readInt(map['seats_available']),
-      etaMinutes: _readInt(map['eta_minutes']),
-      highlights: _readStringList(map['highlights']),
+  factory MarketplaceOffer.fromJson(Map<String, dynamic> json) {
+    return MarketplaceOffer(
+      id: (json['id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      subtitle: (json['subtitle'] ?? '').toString(),
+      price: (json['price'] as num?)?.toInt() ?? 0,
+      currency: (json['currency'] ?? 'NGN').toString(),
+      interval: (json['interval'] ?? 'month').toString(),
+      perks: (json['perks'] as List<dynamic>? ?? const <dynamic>[])
+          .map((item) => item.toString())
+          .toList(growable: false),
     );
   }
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'id': id,
       'title': title,
-      'vehicle_class': vehicleClass,
-      'price_minor': priceMinor,
-      'rating': rating,
-      'seats_available': seatsAvailable,
-      'eta_minutes': etaMinutes,
-      'highlights': highlights,
+      'subtitle': subtitle,
+      'price': price,
+      'currency': currency,
+      'interval': interval,
+      'perks': perks,
     };
   }
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
-}
-
-int _readInt(Object? value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is num) {
-    return value.toInt();
-  }
-  if (value is String) {
-    return int.tryParse(value.trim()) ?? 0;
-  }
-  return 0;
-}
-
-double _readDouble(Object? value) {
-  if (value is double) {
-    return value;
-  }
-  if (value is num) {
-    return value.toDouble();
-  }
-  if (value is String) {
-    return double.tryParse(value.trim()) ?? 0;
-  }
-  return 0;
-}
-
-List<String> _readStringList(Object? value) {
-  if (value is List) {
-    return value.map((entry) => entry.toString()).toList(growable: false);
-  }
-  return <String>[];
 }

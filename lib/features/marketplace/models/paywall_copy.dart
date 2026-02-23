@@ -1,66 +1,37 @@
-class PaywallCopy {
-  const PaywallCopy({
+class MarketplacePaywallCopy {
+  const MarketplacePaywallCopy({
     required this.offerId,
     required this.headline,
+    required this.subhead,
     required this.bullets,
     required this.legalText,
-    required this.ctaLabel,
-    required this.connectionFeeMinor,
   });
 
   final String offerId;
   final String headline;
+  final String subhead;
   final List<String> bullets;
   final String legalText;
-  final String ctaLabel;
-  final int connectionFeeMinor;
 
-  factory PaywallCopy.fromMap(Map<String, dynamic> map) {
-    return PaywallCopy(
-      offerId: _readString(map['offer_id']),
-      headline: _readString(map['headline']),
-      bullets: _readStringList(map['bullets']),
-      legalText: _readString(map['legal_text']),
-      ctaLabel: _readString(map['cta_label']),
-      connectionFeeMinor: _readInt(map['connection_fee_minor']),
+  factory MarketplacePaywallCopy.fromJson(Map<String, dynamic> json) {
+    return MarketplacePaywallCopy(
+      offerId: (json['offerId'] ?? '').toString(),
+      headline: (json['headline'] ?? '').toString(),
+      subhead: (json['subhead'] ?? '').toString(),
+      bullets: (json['bullets'] as List<dynamic>? ?? const <dynamic>[])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      legalText: (json['legalText'] ?? '').toString(),
     );
   }
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'offer_id': offerId,
+      'offerId': offerId,
       'headline': headline,
+      'subhead': subhead,
       'bullets': bullets,
-      'legal_text': legalText,
-      'cta_label': ctaLabel,
-      'connection_fee_minor': connectionFeeMinor,
+      'legalText': legalText,
     };
   }
-}
-
-String _readString(Object? value) {
-  if (value is String) {
-    return value.trim();
-  }
-  return '';
-}
-
-int _readInt(Object? value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is num) {
-    return value.toInt();
-  }
-  if (value is String) {
-    return int.tryParse(value.trim()) ?? 0;
-  }
-  return 0;
-}
-
-List<String> _readStringList(Object? value) {
-  if (value is List) {
-    return value.map((entry) => entry.toString()).toList(growable: false);
-  }
-  return <String>[];
 }
