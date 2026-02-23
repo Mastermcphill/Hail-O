@@ -20,6 +20,7 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/drivers/drivers_controller.dart';
+import '../modules/marketplace/marketplace_router.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -63,6 +64,7 @@ Handler buildApiRouter({
     buildInfo: buildInfo,
   );
   final driversController = DriversController();
+  final marketplaceRouter = MarketplaceRouter();
 
   final router = Router()
     ..get('/', (Request request) {
@@ -94,6 +96,7 @@ Handler buildApiRouter({
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/drivers/', driversController.router.call)
+    ..mount('/marketplace/', marketplaceRouter.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
     ..mount('/admin/', adminController.router.call)

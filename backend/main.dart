@@ -22,7 +22,10 @@ import 'server/app_server.dart';
 Future<void> main() async {
   final env = Platform.environment;
   final config = BackendRuntimeConfig.fromEnvironment();
-  final db = await DbProvider.instance.open(databasePath: config.sqlitePath);
+  final db = await DbProvider.instance.open(
+    databasePath: config.sqlitePath,
+    dbMode: config.dbMode,
+  );
   final requestMetrics = RequestMetrics();
   final environment = (env['ENV'] ?? 'development').trim();
   final dbQueryTimeoutMs =
