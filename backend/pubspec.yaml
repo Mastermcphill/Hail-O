@@ -25,8 +25,8 @@ dependencies:
   sqflite_common: ^2.5.5
   sqflite_common_ffi: ^2.3.6
   uuid: ^4.5.1
-  hailo_core:
-    path: ..
+  hailo_shared:
+    path: ../packages/hailo_shared
 
 dev_dependencies:
   lints: ^6.0.0
