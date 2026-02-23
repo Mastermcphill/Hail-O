@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
 import 'team_selector.dart';
 
 class MarketplaceBillingScreen extends StatefulWidget {
-  const MarketplaceBillingScreen({super.key, required this.controller});
+  const MarketplaceBillingScreen({super.key, this.controller});
 
-  final MarketplaceController controller;
+  final MarketplaceController? controller;
 
   @override
   State<MarketplaceBillingScreen> createState() =>
@@ -15,32 +16,37 @@ class MarketplaceBillingScreen extends StatefulWidget {
 }
 
 class _MarketplaceBillingScreenState extends State<MarketplaceBillingScreen> {
+  MarketplaceController _readController(BuildContext context) {
+    return widget.controller ?? context.read<MarketplaceController>();
+  }
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_onControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await widget.controller.loadOrgs();
-      await widget.controller.refreshActiveOrgPurchases();
+      if (!mounted) {
+        return;
+      }
+      final controller = _readController(context);
+      await controller.loadOrgs();
+      await controller.refreshActiveOrgPurchases();
     });
   }
 
   @override
-  void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
-    super.dispose();
-  }
-
-  void _onControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
+    if (widget.controller != null) {
+      return AnimatedBuilder(
+        animation: widget.controller!,
+        builder: (context, _) => _buildBody(context, widget.controller!),
+      );
+    }
+    return Consumer<MarketplaceController>(
+      builder: (context, controller, _) => _buildBody(context, controller),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, MarketplaceController controller) {
     final numberFormat = NumberFormat.decimalPattern();
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -111,7 +117,7 @@ class _MarketplaceBillingScreenState extends State<MarketplaceBillingScreen> {
                       return Card(
                         child: ListTile(
                           title: Text(
-                            '${purchase.offerId} • ${purchase.status}',
+                            '${purchase.offerId} | ${purchase.status}',
                           ),
                           subtitle: Text(
                             'purchaseId: ${purchase.purchaseId}\n'

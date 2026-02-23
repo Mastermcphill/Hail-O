@@ -16,6 +16,7 @@ class MarketplaceEndpoints {
     ).query;
     return '/marketplace/pricing/preview?$query';
   }
+
   static const applyCoupon = '/marketplace/apply-coupon';
   static const removeCoupon = '/marketplace/remove-coupon';
   static const applyReferral = '/marketplace/apply-referral';
@@ -40,4 +41,8 @@ class MarketplaceEndpoints {
   static String orgInvoices(String orgId) => '/orgs/$orgId/billing/invoices';
   static String orgRetryInvoice(String orgId, String invoiceId) =>
       '/orgs/$orgId/billing/retry/$invoiceId';
+  static const orgs = '/orgs';
+  static String orgPurchases(String orgId) => '/orgs/$orgId/purchases';
+  static String orgInvites(String orgId) => '/orgs/$orgId/invites';
+  static const acceptOrgInvite = '/orgs/invites/accept';
 }

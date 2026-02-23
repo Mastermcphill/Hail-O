@@ -6,7 +6,6 @@ import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_home.dart';
-import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
@@ -14,8 +13,11 @@ import '../../features/health/health_screen.dart';
 import '../../features/marketplace/marketplace_module.dart';
 import '../../features/marketplace/ui/billing_screen.dart';
 import '../../features/marketplace/ui/invite_screen.dart';
+import '../../features/marketplace/ui/manage_seats_screen.dart';
 import '../../features/marketplace/ui/offers_screen.dart';
 import '../../features/marketplace/ui/paywall_screen.dart';
+import '../../features/marketplace/ui/plan_change_preview_screen.dart';
+import '../../features/marketplace/ui/receipt_screen.dart';
 import '../../features/marketplace/ui/seats_screen.dart';
 import '../../features/marketplace/ui/timeline_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
@@ -126,43 +128,92 @@ class AppRouter {
             ),
             GoRoute(
               path: '/marketplace/offers',
-              builder: (context, state) => MarketplaceOffersScreen(
-                controller: _marketplaceModule.controller,
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceOffersScreen(
+                  currentPurchaseId: state.uri.queryParameters['purchaseId'],
+                  currentOfferId: state.uri.queryParameters['currentOfferId'],
+                ),
               ),
             ),
             GoRoute(
               path: '/marketplace/paywall',
-              builder: (context, state) => MarketplacePaywallScreen(
-                controller: _marketplaceModule.controller,
-                offerId: state.uri.queryParameters['offerId'] ?? '',
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplacePaywallScreen(
+                  offerId: state.uri.queryParameters['offerId'] ?? '',
+                ),
               ),
             ),
             GoRoute(
               path: '/marketplace/seats',
-              builder: (context, state) => MarketplaceSeatsScreen(
-                controller: _marketplaceModule.controller,
-                offerId: state.uri.queryParameters['offerId'] ?? '',
-                purchaseId: state.uri.queryParameters['purchaseId'],
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceSeatsScreen(
+                  offerId: state.uri.queryParameters['offerId'] ?? '',
+                ),
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/receipt',
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceReceiptScreen(
+                  purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+                  fallbackOfferId: state.uri.queryParameters['offerId'],
+                  fallbackSeatCount: int.tryParse(
+                    state.uri.queryParameters['seatCount'] ?? '',
+                  ),
+                  fallbackTotalPriceMinor: int.tryParse(
+                    state.uri.queryParameters['totalPriceMinor'] ?? '',
+                  ),
+                ),
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/seats/manage/:purchaseId',
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceManageSeatsScreen(
+                  purchaseId: state.pathParameters['purchaseId'] ?? '',
+                ),
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/upgrade',
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplacePlanChangePreviewScreen(
+                  purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+                  currentOfferId:
+                      state.uri.queryParameters['currentOfferId'] ?? '',
+                  newOfferId: state.uri.queryParameters['newOfferId'] ?? '',
+                ),
               ),
             ),
             GoRoute(
               path: '/marketplace/billing',
-              builder: (context, state) => MarketplaceBillingScreen(
-                controller: _marketplaceModule.controller,
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: const MarketplaceBillingScreen(),
               ),
             ),
             GoRoute(
               path: '/marketplace/invites',
-              builder: (context, state) => MarketplaceInviteScreen(
-                controller: _marketplaceModule.controller,
-                initialToken: state.uri.queryParameters['token'],
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceInviteScreen(
+                  initialToken: state.uri.queryParameters['token'],
+                ),
               ),
             ),
             GoRoute(
               path: '/marketplace/timeline',
-              builder: (context, state) => MarketplaceTimelineScreen(
-                controller: _marketplaceModule.controller,
-                purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+              builder: (context, state) => ChangeNotifierProvider.value(
+                value: _marketplaceModule.controller,
+                child: MarketplaceTimelineScreen(
+                  purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+                ),
               ),
             ),
             GoRoute(
@@ -305,26 +356,6 @@ class RoleNavigationScaffold extends StatelessWidget {
               label: item.label,
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _MissingRouteParamScreen extends StatelessWidget {
-  const _MissingRouteParamScreen({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          message,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Theme.of(context).colorScheme.error),
-        ),
       ),
     );
   }

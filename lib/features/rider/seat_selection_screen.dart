@@ -11,11 +11,13 @@ class SeatSelectionScreen extends StatefulWidget {
     super.key,
     required this.apiClient,
     required this.rideId,
+    this.offerPriceMinor,
     this.charterMode = false,
   });
 
   final ApiClient apiClient;
   final String rideId;
+  final int? offerPriceMinor;
   final bool charterMode;
 
   @override
@@ -23,6 +25,9 @@ class SeatSelectionScreen extends StatefulWidget {
 }
 
 class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
+  final TextEditingController _seatCountController = TextEditingController(
+    text: '1',
+  );
   bool _isLoading = true;
   bool _isSubmitting = false;
   String? _errorMessage;
@@ -36,6 +41,12 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     super.initState();
     _charterMode = widget.charterMode;
     _loadSeats();
+  }
+
+  @override
+  void dispose() {
+    _seatCountController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSeats() async {
@@ -82,6 +93,8 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
               ]
             : available;
         _selectedSeatIds = initiallySelected;
+        _seatCountController.text =
+            (_selectedSeatIds.isEmpty ? 1 : _selectedSeatIds.length).toString();
         _basePriceMinor =
             (response['base_price_minor'] as num?)?.toInt() ?? 7000;
         _charterMode = response['charter_mode'] == true || widget.charterMode;
@@ -99,6 +112,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
         ];
         _basePriceMinor = 7000;
         _errorMessage = formatApiError(error);
+        _seatCountController.text = '1';
       });
     } finally {
       if (mounted) {
@@ -115,6 +129,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       return;
     }
     _selectedSeatIds = _availableSeatIds.toSet();
+    _seatCountController.text = _selectedSeatIds.length.toString();
   }
 
   void _toggleSeat(String seatId) {
@@ -127,6 +142,21 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       } else {
         _selectedSeatIds.add(seatId);
       }
+      _seatCountController.text = _selectedSeatIds.length.toString();
+    });
+  }
+
+  void _applySeatCountFromField(String raw) {
+    final requested = int.tryParse(raw.trim());
+    if (requested == null || requested < 1) {
+      return;
+    }
+    final clamped = requested > _availableSeatIds.length
+        ? _availableSeatIds.length
+        : requested;
+    setState(() {
+      _selectedSeatIds = _availableSeatIds.take(clamped).toSet();
+      _seatCountController.text = clamped.toString();
     });
   }
 
@@ -141,7 +171,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     });
     try {
       final pricingMinor = _computePricingMinor();
-      await widget.apiClient.post(
+      final response = await widget.apiClient.post(
         ApiPaths.rideSeatsSelect(widget.rideId),
         body: <String, dynamic>{
           'seat_ids': _selectedSeatIds.toList(growable: false),
@@ -151,7 +181,11 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       if (!mounted) {
         return;
       }
-      context.go('/rider/status/${Uri.encodeComponent(widget.rideId)}');
+      final purchaseId = _extractPurchaseId(response);
+      context.push(
+        '/rider/timeline/${Uri.encodeComponent(purchaseId)}'
+        '?rideId=${Uri.encodeQueryComponent(widget.rideId)}',
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -200,70 +234,86 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     final pricingMinor = _computePricingMinor();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                'Seat Selection',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 6),
-              SelectableText('ride_id: ${widget.rideId}'),
-              const SizedBox(height: 6),
-              Text('charter_mode: $_charterMode'),
-              const SizedBox(height: 12),
-              if (_isLoading)
-                const LinearProgressIndicator()
-              else
-                SeatLayoutWidget(
-                  availableSeatIds: _availableSeatIds,
-                  selectedSeatIds: _selectedSeatIds,
-                  onToggleSeat: _toggleSeat,
+    return Material(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  'Seat Selection',
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
-              const SizedBox(height: 12),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text('base_price_minor: $_basePriceMinor'),
-                      const SizedBox(height: 4),
-                      Text(
-                        _charterMode
-                            ? 'Charter multiplier applied: +200%'
-                            : 'Seat multipliers: front +10%, window +5%',
-                      ),
-                      const SizedBox(height: 4),
-                      Text('pricing_minor: $pricingMinor'),
-                    ],
+                const SizedBox(height: 6),
+                SelectableText('ride_id: ${widget.rideId}'),
+                const SizedBox(height: 6),
+                Text('charter_mode: $_charterMode'),
+                const SizedBox(height: 10),
+                TextField(
+                  key: const Key('seat_count_field'),
+                  controller: _seatCountController,
+                  keyboardType: TextInputType.number,
+                  onChanged: _applySeatCountFromField,
+                  decoration: const InputDecoration(
+                    labelText: 'seat_count',
+                    border: OutlineInputBorder(),
                   ),
                 ),
-              ),
-              if (_errorMessage != null) ...<Widget>[
-                const SizedBox(height: 8),
-                Text(
-                  _errorMessage!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 12),
+                if (_isLoading)
+                  const LinearProgressIndicator()
+                else
+                  SeatLayoutWidget(
+                    availableSeatIds: _availableSeatIds,
+                    selectedSeatIds: _selectedSeatIds,
+                    onToggleSeat: _toggleSeat,
+                  ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text('base_price_minor: $_basePriceMinor'),
+                        const SizedBox(height: 4),
+                        Text(
+                          _charterMode
+                              ? 'Charter multiplier applied: +200%'
+                              : 'Seat multipliers: front +10%, window +5%',
+                        ),
+                        const SizedBox(height: 4),
+                        Text('pricing_minor: $pricingMinor'),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_errorMessage != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                FilledButton(
+                  key: const Key('confirm_seats_button'),
+                  onPressed: (_isLoading || _isSubmitting) ? null : _confirm,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Confirm Seats'),
                 ),
               ],
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: (_isLoading || _isSubmitting) ? null : _confirm,
-                child: _isSubmitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Confirm Seats'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -274,5 +324,20 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _extractPurchaseId(Map<String, dynamic> response) {
+    final direct = response['purchase_id']?.toString() ?? '';
+    if (direct.trim().isNotEmpty) {
+      return direct.trim();
+    }
+    final purchase = response['purchase'];
+    if (purchase is Map) {
+      final nested = purchase['id']?.toString() ?? '';
+      if (nested.trim().isNotEmpty) {
+        return nested.trim();
+      }
+    }
+    return 'purchase_${widget.rideId}';
   }
 }

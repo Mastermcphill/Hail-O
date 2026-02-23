@@ -3,9 +3,11 @@ import 'dart:math';
 import '../../../core/util/ids.dart';
 import '../models/billing_invoice.dart';
 import '../models/offer.dart';
+import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
+import '../models/purchase_snapshot.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_repository.dart';
@@ -29,6 +31,17 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   final Map<String, String> _referralByOrgId = <String, String>{};
   final Map<String, List<BillingInvoice>> _invoicesByOrgId =
       <String, List<BillingInvoice>>{};
+  final Map<String, MarketplaceInviteResult> _inviteByToken =
+      <String, MarketplaceInviteResult>{};
+  final List<MarketplaceOrgSummary> _orgs = <MarketplaceOrgSummary>[
+    MarketplaceOrgSummary(
+      id: _defaultOrgId,
+      name: 'Demo Org',
+      slug: 'demo-org',
+      role: 'owner',
+      memberStatus: 'active',
+    ),
+  ];
 
   static const String _defaultOrgId = 'org_demo';
 
@@ -387,6 +400,87 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
       return updated;
     }
     return null;
+  }
+
+  @override
+  Future<List<MarketplaceOrgSummary>> listOrgs() async {
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    return List<MarketplaceOrgSummary>.from(_orgs);
+  }
+
+  @override
+  Future<List<MarketplacePurchaseSnapshot>> fetchOrgPurchases(
+    String orgId,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    return _purchaseById.values
+        .map((receipt) {
+          return MarketplacePurchaseSnapshot(
+            purchaseId: receipt.purchaseId,
+            offerId: receipt.offerId,
+            seatCount: receipt.seatCount,
+            status: receipt.status.toLowerCase(),
+            createdAt: receipt.createdAt,
+            totalAmount: receipt.totalPriceMinor,
+            currency: 'NGN',
+            version: 1,
+            assignmentsVersion: 1,
+            assignments: receipt.assignments
+                .map(
+                  (seat) => MarketplaceAssignment(
+                    seatIndex: seat.seatNumber,
+                    name: seat.name,
+                    email: seat.email,
+                  ),
+                )
+                .toList(growable: false),
+            orgId: orgId,
+            orgName: 'Demo Org',
+            requesterRole: 'owner',
+          );
+        })
+        .toList(growable: false);
+  }
+
+  @override
+  Future<MarketplaceInviteResult> createOrgInvite({
+    required String orgId,
+    required String email,
+    required String role,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final token = 'invite_${newRequestId().replaceAll('-', '')}';
+    final invite = MarketplaceInviteResult(
+      orgId: orgId,
+      email: email,
+      role: role,
+      token: token,
+    );
+    _inviteByToken[token] = invite;
+    return invite;
+  }
+
+  @override
+  Future<MarketplaceOrgSummary?> acceptOrgInvite(String token) async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final invite = _inviteByToken[token];
+    if (invite == null) {
+      return null;
+    }
+    final org = MarketplaceOrgSummary(
+      id: invite.orgId,
+      name: 'Org ${invite.orgId}',
+      slug: invite.orgId.replaceAll('_', '-'),
+      role: invite.role,
+      memberStatus: 'active',
+    );
+    final index = _orgs.indexWhere((entry) => entry.id == org.id);
+    if (index >= 0) {
+      _orgs[index] = org;
+    } else {
+      _orgs.add(org);
+    }
+    return org;
   }
 
   Offer _findOffer(String offerId) {

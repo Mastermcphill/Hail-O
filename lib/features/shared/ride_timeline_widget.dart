@@ -34,6 +34,7 @@ class RideTimelineWidget extends StatelessWidget {
             const SizedBox(height: 12),
             for (var i = 0; i < _states.length; i++)
               _TimelineRow(
+                key: Key('timeline_step_${_states[i]}'),
                 state: _states[i],
                 isCurrent: i == currentIndex,
                 isComplete: currentIndex >= 0 && i <= currentIndex,
@@ -112,6 +113,7 @@ class RideTimelineWidget extends StatelessWidget {
 
 class _TimelineRow extends StatelessWidget {
   const _TimelineRow({
+    super.key,
     required this.state,
     required this.isCurrent,
     required this.isComplete,

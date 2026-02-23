@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
 import 'team_selector.dart';
@@ -7,12 +8,12 @@ import 'team_selector.dart';
 class MarketplaceTimelineScreen extends StatefulWidget {
   const MarketplaceTimelineScreen({
     super.key,
-    required this.controller,
     required this.purchaseId,
+    this.controller,
   });
 
-  final MarketplaceController controller;
   final String purchaseId;
+  final MarketplaceController? controller;
 
   @override
   State<MarketplaceTimelineScreen> createState() =>
@@ -22,45 +23,48 @@ class MarketplaceTimelineScreen extends StatefulWidget {
 class _MarketplaceTimelineScreenState extends State<MarketplaceTimelineScreen> {
   String _resolvedPurchaseId = '';
 
+  MarketplaceController _readController(BuildContext context) {
+    return widget.controller ?? context.read<MarketplaceController>();
+  }
+
   @override
   void initState() {
     super.initState();
     _resolvedPurchaseId = widget.purchaseId;
-    widget.controller.addListener(_onControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      _resolvedPurchaseId = await widget.controller.resolvePurchaseId(
-        widget.purchaseId,
-      );
       if (!mounted) {
         return;
       }
-      await widget.controller.loadPurchase(_resolvedPurchaseId);
-      await widget.controller.startSyncLoop(purchaseId: _resolvedPurchaseId);
+      final controller = _readController(context);
+      _resolvedPurchaseId = await controller.resolvePurchaseId(
+        widget.purchaseId,
+      );
+      await controller.loadPurchase(_resolvedPurchaseId);
+      if (mounted) {
+        setState(() {});
+      }
     });
   }
 
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
-    widget.controller.stopSyncLoop();
-    super.dispose();
-  }
-
-  void _onControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
-
-  Future<void> _refresh() async {
-    await widget.controller.flushOutbox();
-    await widget.controller.loadPurchase(_resolvedPurchaseId);
+  Future<void> _refresh(MarketplaceController controller) async {
+    await controller.flushOutbox();
+    await controller.loadPurchase(_resolvedPurchaseId);
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
+    if (widget.controller != null) {
+      return AnimatedBuilder(
+        animation: widget.controller!,
+        builder: (context, _) => _buildBody(context, widget.controller!),
+      );
+    }
+    return Consumer<MarketplaceController>(
+      builder: (context, controller, _) => _buildBody(context, controller),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, MarketplaceController controller) {
     final events = controller.timeline;
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -70,7 +74,7 @@ class _MarketplaceTimelineScreenState extends State<MarketplaceTimelineScreen> {
           Row(
             children: <Widget>[
               Text(
-                'Timeline',
+                'Marketplace Timeline',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const Spacer(),
@@ -135,19 +139,13 @@ class _MarketplaceTimelineScreenState extends State<MarketplaceTimelineScreen> {
                     );
                     return;
                   }
-                  final currentOfferId = controller.purchase?.offerId ?? '';
-                  if (currentOfferId.isEmpty) {
-                    return;
-                  }
                   context.go('/marketplace/offers');
                 },
                 child: const Text('Change plan'),
               ),
               FilledButton.tonal(
                 onPressed: controller.canManageBilling
-                    ? () {
-                        context.go('/marketplace/billing');
-                      }
+                    ? () => context.go('/marketplace/billing')
                     : null,
                 child: const Text('View billing'),
               ),
@@ -156,7 +154,7 @@ class _MarketplaceTimelineScreenState extends State<MarketplaceTimelineScreen> {
           const SizedBox(height: 10),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: _refresh,
+              onRefresh: () => _refresh(controller),
               child: events.isEmpty
                   ? ListView(
                       children: const <Widget>[
@@ -171,6 +169,7 @@ class _MarketplaceTimelineScreenState extends State<MarketplaceTimelineScreen> {
                       itemBuilder: (context, index) {
                         final event = events[index];
                         return ListTile(
+                          key: Key('marketplace_timeline_event_$index'),
                           leading: Icon(
                             event.status == 'error'
                                 ? Icons.error_outline

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
 import 'team_selector.dart';
@@ -6,12 +7,12 @@ import 'team_selector.dart';
 class MarketplaceInviteScreen extends StatefulWidget {
   const MarketplaceInviteScreen({
     super.key,
-    required this.controller,
     this.initialToken,
+    this.controller,
   });
 
-  final MarketplaceController controller;
   final String? initialToken;
+  final MarketplaceController? controller;
 
   @override
   State<MarketplaceInviteScreen> createState() =>
@@ -33,32 +34,30 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
     'admin',
   ];
 
+  MarketplaceController _readController(BuildContext context) {
+    return widget.controller ?? context.read<MarketplaceController>();
+  }
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_onControllerChanged);
     _tokenController.text = widget.initialToken?.trim() ?? '';
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await widget.controller.loadOrgs();
+      if (!mounted) {
+        return;
+      }
+      await _readController(context).loadOrgs();
     });
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
     _emailController.dispose();
     _tokenController.dispose();
     super.dispose();
   }
 
-  void _onControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
-
-  Future<void> _createInvite() async {
+  Future<void> _createInvite(MarketplaceController controller) async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(
@@ -70,7 +69,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
       _submittingInvite = true;
     });
     try {
-      final token = await widget.controller.createInvite(
+      final token = await controller.createInvite(
         email: email,
         role: _selectedRole,
       );
@@ -92,9 +91,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            widget.controller.infoBanner ?? 'Could not create invite',
-          ),
+          content: Text(controller.infoBanner ?? 'Could not create invite'),
         ),
       );
     } finally {
@@ -106,7 +103,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
     }
   }
 
-  Future<void> _acceptInvite() async {
+  Future<void> _acceptInvite(MarketplaceController controller) async {
     final token = _tokenController.text.trim();
     if (token.isEmpty) {
       ScaffoldMessenger.of(
@@ -118,7 +115,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
       _acceptingInvite = true;
     });
     try {
-      await widget.controller.acceptInvite(token);
+      await controller.acceptInvite(token);
       if (!mounted) {
         return;
       }
@@ -131,9 +128,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            widget.controller.infoBanner ?? 'Could not accept invite',
-          ),
+          content: Text(controller.infoBanner ?? 'Could not accept invite'),
         ),
       );
     } finally {
@@ -147,7 +142,18 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
+    if (widget.controller != null) {
+      return AnimatedBuilder(
+        animation: widget.controller!,
+        builder: (context, _) => _buildBody(context, widget.controller!),
+      );
+    }
+    return Consumer<MarketplaceController>(
+      builder: (context, controller, _) => _buildBody(context, controller),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, MarketplaceController controller) {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(
@@ -211,7 +217,7 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
                   FilledButton(
                     onPressed:
                         controller.canManageOrgMembers && !_submittingInvite
-                        ? _createInvite
+                        ? () => _createInvite(controller)
                         : null,
                     child: _submittingInvite
                         ? const SizedBox(
@@ -251,7 +257,9 @@ class _MarketplaceInviteScreenState extends State<MarketplaceInviteScreen> {
                   ),
                   const SizedBox(height: 10),
                   FilledButton.tonal(
-                    onPressed: _acceptingInvite ? null : _acceptInvite,
+                    onPressed: _acceptingInvite
+                        ? null
+                        : () => _acceptInvite(controller),
                     child: _acceptingInvite
                         ? const SizedBox(
                             width: 18,

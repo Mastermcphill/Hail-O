@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../state/marketplace_controller.dart';
 import 'team_selector.dart';
 
 class MarketplaceOffersScreen extends StatefulWidget {
-  const MarketplaceOffersScreen({super.key, required this.controller});
+  const MarketplaceOffersScreen({
+    super.key,
+    this.controller,
+    this.currentPurchaseId,
+    this.currentOfferId,
+  });
 
-  final MarketplaceController controller;
+  final MarketplaceController? controller;
+  final String? currentPurchaseId;
+  final String? currentOfferId;
 
   @override
   State<MarketplaceOffersScreen> createState() =>
@@ -15,33 +23,36 @@ class MarketplaceOffersScreen extends StatefulWidget {
 }
 
 class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
+  MarketplaceController _readController(BuildContext context) {
+    return widget.controller ?? context.read<MarketplaceController>();
+  }
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_onControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await widget.controller.initializeOffers();
-      await widget.controller.startSyncLoop();
+      if (!mounted) {
+        return;
+      }
+      final controller = _readController(context);
+      await controller.initializeOffers();
     });
   }
 
   @override
-  void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
-    widget.controller.stopSyncLoop();
-    super.dispose();
-  }
-
-  void _onControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
+    if (widget.controller != null) {
+      return AnimatedBuilder(
+        animation: widget.controller!,
+        builder: (context, _) => _buildBody(context, widget.controller!),
+      );
+    }
+    return Consumer<MarketplaceController>(
+      builder: (context, controller, _) => _buildBody(context, controller),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, MarketplaceController controller) {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -111,51 +122,45 @@ class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
                     itemBuilder: (context, index) {
                       final offer = controller.offers[index];
                       return Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                offer.title,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(offer.subtitle),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${offer.currency} ${offer.price} / ${offer.interval}',
-                              ),
-                              const SizedBox(height: 8),
-                              if (offer.perks.isNotEmpty)
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: offer.perks
-                                      .map((perk) => Chip(label: Text(perk)))
-                                      .toList(growable: false),
-                                ),
-                              const SizedBox(height: 10),
-                              FilledButton(
-                                onPressed: () {
-                                  if (!controller.canManageBilling) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          "You don't have billing permission",
-                                        ),
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                  context.go(
-                                    '/marketplace/paywall'
-                                    '?offerId=${Uri.encodeQueryComponent(offer.id)}',
-                                  );
-                                },
-                                child: const Text('Choose plan'),
-                              ),
-                            ],
+                        child: ListTile(
+                          title: Text(offer.title),
+                          subtitle: Text(
+                            '${offer.currency} ${offer.price} / ${offer.interval}',
+                          ),
+                          trailing: FilledButton(
+                            key: Key('marketplace_offer_continue_$index'),
+                            onPressed: () {
+                              if (!controller.canManageBilling) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      "You don't have billing permission",
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              final purchaseId =
+                                  widget.currentPurchaseId?.trim() ?? '';
+                              final currentOfferId =
+                                  widget.currentOfferId?.trim() ?? '';
+                              if (purchaseId.isNotEmpty &&
+                                  currentOfferId.isNotEmpty &&
+                                  currentOfferId != offer.id) {
+                                context.go(
+                                  '/marketplace/upgrade'
+                                  '?purchaseId=${Uri.encodeQueryComponent(purchaseId)}'
+                                  '&currentOfferId=${Uri.encodeQueryComponent(currentOfferId)}'
+                                  '&newOfferId=${Uri.encodeQueryComponent(offer.id)}',
+                                );
+                                return;
+                              }
+                              context.go(
+                                '/marketplace/paywall'
+                                '?offerId=${Uri.encodeQueryComponent(offer.id)}',
+                              );
+                            },
+                            child: const Text('Choose'),
                           ),
                         ),
                       );

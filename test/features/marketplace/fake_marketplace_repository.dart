@@ -1,9 +1,13 @@
 import 'package:hailo_core/core/api/api_errors.dart';
 import 'package:hailo_core/features/marketplace/data/marketplace_repository.dart';
+import 'package:hailo_core/features/marketplace/models/billing_invoice.dart';
 import 'package:hailo_core/features/marketplace/models/offer.dart';
 import 'package:hailo_core/features/marketplace/models/org_summary.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
+import 'package:hailo_core/features/marketplace/models/pricing_breakdown.dart';
+import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_snapshot.dart';
+import 'package:hailo_core/features/marketplace/models/seat_selection.dart';
 import 'package:hailo_core/features/marketplace/models/timeline_event.dart';
 
 class FakeMarketplaceRepository implements MarketplaceRepository {
@@ -18,6 +22,7 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
       perks: <String>['A'],
     ),
   ];
+
   MarketplacePaywallCopy paywallCopy = const MarketplacePaywallCopy(
     offerId: 'starter_monthly',
     headline: 'Paywall',
@@ -25,6 +30,7 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
     bullets: <String>['A'],
     legalText: 'Legal',
   );
+
   final Map<String, MarketplacePurchaseSnapshot> purchases =
       <String, MarketplacePurchaseSnapshot>{};
   final Map<String, List<MarketplacePurchaseSnapshot>> purchasesByOrg =
@@ -53,14 +59,12 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
   List<MarketplaceTimelineEvent> initialTimeline = <MarketplaceTimelineEvent>[];
   List<MarketplaceTimelineEvent> incrementalTimeline =
       <MarketplaceTimelineEvent>[];
+  final Map<String, int> _timelineReadsByPurchaseId = <String, int>{};
 
   bool throwOnOffers = false;
 
   @override
-  Future<MarketplaceFetchResult<List<MarketplaceOffer>>> fetchOffers({
-    String? ifNoneMatch,
-    DateTime? ifModifiedSince,
-  }) async {
+  Future<List<MarketplaceOffer>> fetchOffers() async {
     if (throwOnOffers) {
       throw ApiException(
         statusCode: 503,
@@ -68,31 +72,98 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
         message: 'offline',
       );
     }
-    return MarketplaceFetchResult<List<MarketplaceOffer>>(
-      data: offers,
-      notModified: false,
-      etag: 'offers-etag',
-    );
+    return List<MarketplaceOffer>.from(offers);
   }
 
   @override
-  Future<MarketplaceFetchResult<MarketplacePaywallCopy>> fetchPaywallCopy(
-    String offerId,
-  ) async {
-    return MarketplaceFetchResult<MarketplacePaywallCopy>(
-      data: paywallCopy,
-      notModified: false,
-      etag: 'paywall-etag',
-    );
+  Future<MarketplacePaywallCopy> fetchPaywallCopy(String offerId) async {
+    return paywallCopy;
   }
 
   @override
-  Future<MarketplacePurchaseSnapshot> createPurchase({
+  Future<PricingBreakdown> fetchPricingPreview({
+    required String orgId,
     required String offerId,
-    required int seatCount,
-    required List<MarketplaceAssignment> assignments,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: seats * 1000,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyCoupon({
+    required String orgId,
+    required String couponCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 500,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: (seats * 1000) - 500,
+      appliedCoupon: couponCode,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> removeCoupon({
+    required String orgId,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      creditsAppliedMinor: 0,
+      finalDueMinor: seats * 1000,
+    );
+  }
+
+  @override
+  Future<PricingBreakdown> applyReferral({
+    required String orgId,
+    required String referralCode,
+    required String offerId,
+    required int seats,
+  }) async {
+    return PricingBreakdown(
+      orgId: orgId,
+      offerId: offerId,
+      seats: seats,
+      currency: 'NGN',
+      baseMinor: seats * 1000,
+      couponDiscountMinor: 0,
+      referralDiscountMinor: 250,
+      creditsAppliedMinor: 0,
+      finalDueMinor: (seats * 1000) - 250,
+      appliedReferral: referralCode,
+    );
+  }
+
+  @override
+  Future<String> createCheckout(
+    SeatSelection selection, {
     required String idempotencyKey,
-    String? orgId,
   }) async {
     if (createFailuresRemaining > 0) {
       createFailuresRemaining -= 1;
@@ -102,80 +173,56 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
         message: 'offline',
       );
     }
-    final existing = await restorePurchase(idempotencyKey);
+    final existing = purchases['idem:$idempotencyKey'];
     if (existing != null) {
-      return existing;
+      return existing.purchaseId;
     }
     final snapshot = MarketplacePurchaseSnapshot(
       purchaseId: 'purchase-$idempotencyKey',
-      offerId: offerId,
-      seatCount: seatCount,
+      offerId: selection.offerId,
+      seatCount: selection.seatCount,
       status: 'active',
       createdAt: DateTime.now().toUtc(),
       totalAmount: 1000,
       currency: 'NGN',
       version: 1,
       assignmentsVersion: 1,
-      assignments: assignments,
-      orgId: orgId,
-      orgName: _orgNameForId(orgId),
-      requesterRole: _orgRoleForId(orgId),
+      assignments: selection.assignments
+          .map(
+            (entry) => MarketplaceAssignment(
+              seatIndex: entry.seatNumber,
+              name: entry.name,
+              email: entry.email,
+            ),
+          )
+          .toList(growable: false),
+      orgId: _firstOrgId,
+      orgName: _orgNameForId(_firstOrgId),
+      requesterRole: _orgRoleForId(_firstOrgId),
     );
     purchases[snapshot.purchaseId] = snapshot;
     purchases['idem:$idempotencyKey'] = snapshot;
-    if (orgId != null && orgId.trim().isNotEmpty) {
-      final rows = purchasesByOrg.putIfAbsent(
-        orgId,
-        () => <MarketplacePurchaseSnapshot>[],
-      );
-      rows.removeWhere((entry) => entry.purchaseId == snapshot.purchaseId);
-      rows.add(snapshot);
+    return snapshot.purchaseId;
+  }
+
+  @override
+  Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey) async {
+    return purchases['idem:$idempotencyKey']?.purchaseId;
+  }
+
+  @override
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId) async {
+    final snapshot = purchases[purchaseId];
+    if (snapshot == null) {
+      return null;
     }
-    return snapshot;
+    return _toReceipt(snapshot);
   }
 
   @override
-  Future<MarketplacePurchaseSnapshot?> restorePurchase(
-    String idempotencyKey,
-  ) async {
-    return purchases['idem:$idempotencyKey'];
-  }
-
-  @override
-  Future<MarketplaceFetchResult<MarketplacePurchaseSnapshot>> fetchPurchase(
-    String purchaseId, {
-    String? ifNoneMatch,
-    DateTime? ifModifiedSince,
-  }) async {
-    final snapshot =
-        purchases[purchaseId] ??
-        MarketplacePurchaseSnapshot(
-          purchaseId: purchaseId,
-          offerId: 'starter_monthly',
-          seatCount: 1,
-          status: 'active',
-          createdAt: DateTime.now().toUtc(),
-          totalAmount: 1000,
-          currency: 'NGN',
-          version: 1,
-          assignmentsVersion: 1,
-          assignments: const <MarketplaceAssignment>[],
-          orgId: _firstOrgId,
-          orgName: _orgNameForId(_firstOrgId),
-          requesterRole: _orgRoleForId(_firstOrgId),
-        );
-    return MarketplaceFetchResult<MarketplacePurchaseSnapshot>(
-      data: snapshot,
-      notModified: false,
-      etag: 'purchase-$purchaseId',
-    );
-  }
-
-  @override
-  Future<MarketplacePurchaseSnapshot> updateSeats({
+  Future<PurchaseReceipt> updateSeatCount({
     required String purchaseId,
     required int seatCount,
-    required int baseVersion,
   }) async {
     updateSeatCalls += 1;
     if (updateSeatFailuresRemaining > 0) {
@@ -197,110 +244,110 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
           'error_code': 'VERSION_CONFLICT',
           'message': 'conflict',
           'data': <String, dynamic>{
-            'latest': <String, dynamic>{
-              'purchaseId': purchaseId,
-              'offerId': 'starter_monthly',
-              'seatCount': 2,
-              'status': 'active',
-              'createdAt': DateTime.now().toUtc().toIso8601String(),
-              'totalAmount': 1000,
-              'currency': 'NGN',
-              'version': 3,
-              'assignments_version': 3,
-              'assignments': const <Map<String, dynamic>>[],
-            },
+            'latest': <String, dynamic>{'version': 3},
           },
         },
       );
     }
+    final existing = purchases[purchaseId] ?? _defaultSnapshot(purchaseId);
     final updated = MarketplacePurchaseSnapshot(
       purchaseId: purchaseId,
-      offerId: 'starter_monthly',
+      offerId: existing.offerId,
       seatCount: seatCount,
       status: 'active',
-      createdAt: DateTime.now().toUtc(),
-      totalAmount: 1000,
-      currency: 'NGN',
-      version: baseVersion + 1,
-      assignmentsVersion: baseVersion + 1,
-      assignments: const <MarketplaceAssignment>[],
-      orgId: _firstOrgId,
-      orgName: _orgNameForId(_firstOrgId),
-      requesterRole: _orgRoleForId(_firstOrgId),
+      createdAt: existing.createdAt,
+      totalAmount: existing.totalAmount,
+      currency: existing.currency,
+      version: existing.version + 1,
+      assignmentsVersion: existing.assignmentsVersion + 1,
+      assignments: existing.assignments,
+      orgId: existing.orgId,
+      orgName: existing.orgName,
+      requesterRole: existing.requesterRole,
     );
     purchases[purchaseId] = updated;
-    return updated;
+    return _toReceipt(updated);
   }
 
   @override
-  Future<MarketplacePurchaseSnapshot> updateAssignments({
+  Future<PurchaseReceipt> updateAssignments({
     required String purchaseId,
-    required List<MarketplaceAssignment> assignments,
-    required int baseVersion,
+    required List<SeatAssignment> assignments,
   }) async {
+    final existing = purchases[purchaseId] ?? _defaultSnapshot(purchaseId);
     final updated = MarketplacePurchaseSnapshot(
       purchaseId: purchaseId,
-      offerId: 'starter_monthly',
+      offerId: existing.offerId,
       seatCount: assignments.length,
       status: 'active',
-      createdAt: DateTime.now().toUtc(),
-      totalAmount: 1000,
-      currency: 'NGN',
-      version: baseVersion + 1,
-      assignmentsVersion: baseVersion + 1,
-      assignments: assignments,
-      orgId: _firstOrgId,
-      orgName: _orgNameForId(_firstOrgId),
-      requesterRole: _orgRoleForId(_firstOrgId),
+      createdAt: existing.createdAt,
+      totalAmount: existing.totalAmount,
+      currency: existing.currency,
+      version: existing.version + 1,
+      assignmentsVersion: existing.assignmentsVersion + 1,
+      assignments: assignments
+          .map(
+            (entry) => MarketplaceAssignment(
+              seatIndex: entry.seatNumber,
+              name: entry.name,
+              email: entry.email,
+            ),
+          )
+          .toList(growable: false),
+      orgId: existing.orgId,
+      orgName: existing.orgName,
+      requesterRole: existing.requesterRole,
     );
     purchases[purchaseId] = updated;
-    return updated;
+    return _toReceipt(updated);
   }
 
   @override
-  Future<MarketplacePurchaseSnapshot> changePlan({
+  Future<String> changePlan({
     required String purchaseId,
-    required String offerId,
-    required int baseVersion,
-    required String idempotencyKey,
+    required String newOfferId,
   }) async {
+    final existing = purchases[purchaseId] ?? _defaultSnapshot(purchaseId);
     final updated = MarketplacePurchaseSnapshot(
       purchaseId: purchaseId,
-      offerId: offerId,
-      seatCount: 1,
+      offerId: newOfferId,
+      seatCount: existing.seatCount,
       status: 'active',
-      createdAt: DateTime.now().toUtc(),
-      totalAmount: 2000,
-      currency: 'NGN',
-      version: baseVersion + 1,
-      assignmentsVersion: baseVersion + 1,
-      assignments: const <MarketplaceAssignment>[],
-      orgId: _firstOrgId,
-      orgName: _orgNameForId(_firstOrgId),
-      requesterRole: _orgRoleForId(_firstOrgId),
+      createdAt: existing.createdAt,
+      totalAmount: existing.totalAmount,
+      currency: existing.currency,
+      version: existing.version + 1,
+      assignmentsVersion: existing.assignmentsVersion + 1,
+      assignments: existing.assignments,
+      orgId: existing.orgId,
+      orgName: existing.orgName,
+      requesterRole: existing.requesterRole,
     );
     purchases[purchaseId] = updated;
-    return updated;
+    return purchaseId;
   }
 
   @override
-  Future<MarketplaceFetchResult<List<MarketplaceTimelineEvent>>> fetchTimeline(
-    String purchaseId, {
-    DateTime? sinceUtc,
-    int limit = 200,
-    String? ifNoneMatch,
-    DateTime? ifModifiedSince,
+  Future<List<MarketplaceTimelineEvent>> fetchTimeline(
+    String purchaseId,
+  ) async {
+    final reads = (_timelineReadsByPurchaseId[purchaseId] ?? 0) + 1;
+    _timelineReadsByPurchaseId[purchaseId] = reads;
+    final events = reads == 1 ? initialTimeline : incrementalTimeline;
+    return List<MarketplaceTimelineEvent>.from(events);
+  }
+
+  @override
+  Future<List<BillingInvoice>> fetchInvoices(String orgId) async {
+    return const <BillingInvoice>[];
+  }
+
+  @override
+  Future<BillingInvoice?> retryInvoice({
+    required String orgId,
+    required String invoiceId,
   }) async {
-    final events = sinceUtc == null ? initialTimeline : incrementalTimeline;
-    return MarketplaceFetchResult<List<MarketplaceTimelineEvent>>(
-      data: events,
-      notModified: false,
-      etag: 'timeline-$purchaseId',
-      latestEventAt: events.isNotEmpty
-          ? events.last.timestamp?.toIso8601String()
-          : null,
-      cursor: events.isNotEmpty ? events.last.cursor : null,
-    );
+    return null;
   }
 
   @override
@@ -359,6 +406,45 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
       orgs = List<MarketplaceOrgSummary>.from(orgs)..add(created);
     }
     return created;
+  }
+
+  MarketplacePurchaseSnapshot _defaultSnapshot(String purchaseId) {
+    return MarketplacePurchaseSnapshot(
+      purchaseId: purchaseId,
+      offerId: 'starter_monthly',
+      seatCount: 1,
+      status: 'active',
+      createdAt: DateTime.now().toUtc(),
+      totalAmount: 1000,
+      currency: 'NGN',
+      version: 1,
+      assignmentsVersion: 1,
+      assignments: const <MarketplaceAssignment>[],
+      orgId: _firstOrgId,
+      orgName: _orgNameForId(_firstOrgId),
+      requesterRole: _orgRoleForId(_firstOrgId),
+    );
+  }
+
+  PurchaseReceipt _toReceipt(MarketplacePurchaseSnapshot snapshot) {
+    return PurchaseReceipt(
+      purchaseId: snapshot.purchaseId,
+      offerId: snapshot.offerId,
+      offerTitle: snapshot.offerId,
+      seatCount: snapshot.seatCount,
+      totalPriceMinor: snapshot.totalAmount,
+      status: snapshot.status,
+      createdAt: snapshot.createdAt ?? DateTime.now().toUtc(),
+      assignments: snapshot.assignments
+          .map(
+            (entry) => SeatAssignment(
+              seatNumber: entry.seatIndex,
+              name: entry.name,
+              email: entry.email,
+            ),
+          )
+          .toList(growable: false),
+    );
   }
 
   String get _firstOrgId => orgs.isEmpty ? 'org-personal' : orgs.first.id;

@@ -2,9 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hailo_core/features/marketplace/data/marketplace_dev_settings.dart';
 import 'package:hailo_core/features/marketplace/data/marketplace_repository.dart';
 import 'package:hailo_core/features/marketplace/models/offer.dart';
+import 'package:hailo_core/features/marketplace/models/org_summary.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
 import 'package:hailo_core/features/marketplace/models/pricing_breakdown.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
+import 'package:hailo_core/features/marketplace/models/purchase_snapshot.dart';
 import 'package:hailo_core/features/marketplace/models/seat_selection.dart';
 import 'package:hailo_core/features/marketplace/models/timeline_event.dart';
 import 'package:hailo_core/features/marketplace/models/billing_invoice.dart';
@@ -304,5 +306,36 @@ class _FakeRepository implements MarketplaceRepository {
       status: 'paid',
       createdAt: DateTime.now().toUtc(),
     );
+  }
+
+  @override
+  Future<List<MarketplaceOrgSummary>> listOrgs() async {
+    return const <MarketplaceOrgSummary>[];
+  }
+
+  @override
+  Future<List<MarketplacePurchaseSnapshot>> fetchOrgPurchases(
+    String orgId,
+  ) async {
+    return const <MarketplacePurchaseSnapshot>[];
+  }
+
+  @override
+  Future<MarketplaceInviteResult> createOrgInvite({
+    required String orgId,
+    required String email,
+    required String role,
+  }) async {
+    return MarketplaceInviteResult(
+      orgId: orgId,
+      email: email,
+      role: role,
+      token: 'token',
+    );
+  }
+
+  @override
+  Future<MarketplaceOrgSummary?> acceptOrgInvite(String token) async {
+    return null;
   }
 }

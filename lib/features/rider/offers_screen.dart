@@ -10,10 +10,11 @@ class OffersScreen extends StatefulWidget {
     super.key,
     required this.apiClient,
     required this.rideId,
-    this.initialLuggageCount,
+    int? initialLuggageCount,
+    int? luggageCount,
     this.charterMode = false,
     this.expired = false,
-  });
+  }) : initialLuggageCount = initialLuggageCount ?? luggageCount;
 
   final ApiClient apiClient;
   final String rideId;
@@ -133,7 +134,7 @@ class _OffersScreenState extends State<OffersScreen> {
       if (!mounted) {
         return;
       }
-      context.go(
+      context.push(
         '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
         '?charter_mode=${widget.charterMode}',
       );
@@ -142,6 +143,10 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
       _showSnackBar(formatApiError(error));
+      context.push(
+        '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
+        '?charter_mode=${widget.charterMode}',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -196,55 +201,62 @@ class _OffersScreenState extends State<OffersScreen> {
                 ? const Center(child: Text('No offers available yet.'))
                 : ListView.separated(
                     itemCount: visibleOffers.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final offer = visibleOffers[index];
                       return Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              _OfferRow(
-                                label: 'star_rating',
-                                value: '${offer['star_rating'] ?? '-'}',
-                              ),
-                              _OfferRow(
-                                label: 'gender',
-                                value: '${offer['gender'] ?? '-'}',
-                              ),
-                              _OfferRow(
-                                label: 'tribe',
-                                value: '${offer['tribe'] ?? '-'}',
-                              ),
-                              _OfferRow(
-                                label: 'vehicle_class',
-                                value: '${offer['vehicle_class'] ?? '-'}',
-                              ),
-                              _OfferRow(
-                                label: 'luggage_supported',
-                                value: '${offer['luggage_supported'] ?? '-'}',
-                              ),
-                              _OfferRow(
-                                label: 'price_minor',
-                                value: '${offer['price_minor'] ?? '-'}',
-                              ),
-                              const SizedBox(height: 12),
-                              FilledButton(
-                                onPressed: _isAccepting
-                                    ? null
-                                    : () => _acceptOffer(offer),
-                                child: _isAccepting
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Text('Accept Offer'),
-                              ),
-                            ],
+                        key: Key('offer_card_$index'),
+                        child: InkWell(
+                          onTap: _isAccepting
+                              ? null
+                              : () => _acceptOffer(offer),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                _OfferRow(
+                                  label: 'star_rating',
+                                  value: '${offer['star_rating'] ?? '-'}',
+                                ),
+                                _OfferRow(
+                                  label: 'gender',
+                                  value: '${offer['gender'] ?? '-'}',
+                                ),
+                                _OfferRow(
+                                  label: 'tribe',
+                                  value: '${offer['tribe'] ?? '-'}',
+                                ),
+                                _OfferRow(
+                                  label: 'vehicle_class',
+                                  value: '${offer['vehicle_class'] ?? '-'}',
+                                ),
+                                _OfferRow(
+                                  label: 'luggage_supported',
+                                  value: '${offer['luggage_supported'] ?? '-'}',
+                                ),
+                                _OfferRow(
+                                  label: 'price_minor',
+                                  value: '${offer['price_minor'] ?? '-'}',
+                                ),
+                                const SizedBox(height: 12),
+                                FilledButton(
+                                  onPressed: _isAccepting
+                                      ? null
+                                      : () => _acceptOffer(offer),
+                                  child: _isAccepting
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Text('Accept Offer'),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );

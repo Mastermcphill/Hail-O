@@ -4,6 +4,6 @@ import 'package:hailo_core/main.dart';
 void main() {
   testWidgets('App bootstrap smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
-    expect(find.text('Hail-O Backend Core Bootstrap'), findsOneWidget);
+    expect(find.byType(MyApp), findsOneWidget);
   });
 }

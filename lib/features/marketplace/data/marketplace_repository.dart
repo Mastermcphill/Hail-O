@@ -1,9 +1,11 @@
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_config.dart';
 import '../models/offer.dart';
+import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
+import '../models/purchase_snapshot.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import '../models/billing_invoice.dart';
@@ -74,6 +76,31 @@ abstract class MarketplaceRepository {
     required String orgId,
     required String invoiceId,
   });
+
+  Future<List<MarketplaceOrgSummary>> listOrgs() async {
+    return const <MarketplaceOrgSummary>[];
+  }
+
+  Future<List<MarketplacePurchaseSnapshot>> fetchOrgPurchases(
+    String orgId,
+  ) async {
+    return const <MarketplacePurchaseSnapshot>[];
+  }
+
+  Future<MarketplaceInviteResult> createOrgInvite({
+    required String orgId,
+    required String email,
+    required String role,
+  }) async {
+    throw const MarketplaceRepositoryException(
+      'Team invites are not available on this backend yet.',
+      code: 'endpoint_not_available',
+    );
+  }
+
+  Future<MarketplaceOrgSummary?> acceptOrgInvite(String token) async {
+    return null;
+  }
 }
 
 class MarketplaceRepositoryException implements Exception {
@@ -321,6 +348,50 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
           _httpRepository.retryInvoice(orgId: orgId, invoiceId: invoiceId),
       mockCall: () =>
           _mockRepository.retryInvoice(orgId: orgId, invoiceId: invoiceId),
+    );
+  }
+
+  @override
+  Future<List<MarketplaceOrgSummary>> listOrgs() {
+    return _execute(
+      httpCall: _httpRepository.listOrgs,
+      mockCall: _mockRepository.listOrgs,
+    );
+  }
+
+  @override
+  Future<List<MarketplacePurchaseSnapshot>> fetchOrgPurchases(String orgId) {
+    return _execute(
+      httpCall: () => _httpRepository.fetchOrgPurchases(orgId),
+      mockCall: () => _mockRepository.fetchOrgPurchases(orgId),
+    );
+  }
+
+  @override
+  Future<MarketplaceInviteResult> createOrgInvite({
+    required String orgId,
+    required String email,
+    required String role,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.createOrgInvite(
+        orgId: orgId,
+        email: email,
+        role: role,
+      ),
+      mockCall: () => _mockRepository.createOrgInvite(
+        orgId: orgId,
+        email: email,
+        role: role,
+      ),
+    );
+  }
+
+  @override
+  Future<MarketplaceOrgSummary?> acceptOrgInvite(String token) {
+    return _execute(
+      httpCall: () => _httpRepository.acceptOrgInvite(token),
+      mockCall: () => _mockRepository.acceptOrgInvite(token),
     );
   }
 

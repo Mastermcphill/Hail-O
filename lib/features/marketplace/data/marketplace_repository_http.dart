@@ -2,9 +2,11 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_errors.dart';
 import '../models/billing_invoice.dart';
 import '../models/offer.dart';
+import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
+import '../models/purchase_snapshot.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_endpoints.dart';
@@ -331,6 +333,95 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       );
     }
   }
+
+  @override
+  Future<List<MarketplaceOrgSummary>> listOrgs() async {
+    try {
+      final response = await _apiClient.get(MarketplaceEndpoints.orgs);
+      final payload = extractEnvelopeData(response);
+      final rows = _extractList(payload, key: 'orgs');
+      return rows
+          .map((row) => MarketplaceOrgSummary.fromJson(row))
+          .toList(growable: false);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to load your teams right now.',
+      );
+    }
+  }
+
+  @override
+  Future<List<MarketplacePurchaseSnapshot>> fetchOrgPurchases(
+    String orgId,
+  ) async {
+    try {
+      final response = await _apiClient.get(
+        MarketplaceEndpoints.orgPurchases(orgId),
+      );
+      final payload = extractEnvelopeData(response);
+      final rows = _extractList(payload, key: 'purchases');
+      return rows
+          .map((row) => MarketplacePurchaseSnapshot.fromJson(row))
+          .toList(growable: false);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to load team purchases right now.',
+      );
+    }
+  }
+
+  @override
+  Future<MarketplaceInviteResult> createOrgInvite({
+    required String orgId,
+    required String email,
+    required String role,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.orgInvites(orgId),
+        body: <String, dynamic>{'email': email, 'role': role},
+      );
+      final payload = extractEnvelopeData(response);
+      final map = _toMap(payload);
+      return MarketplaceInviteResult.fromJson(map);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to create invite right now.',
+      );
+    }
+  }
+
+  @override
+  Future<MarketplaceOrgSummary?> acceptOrgInvite(String token) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.acceptOrgInvite,
+        body: <String, dynamic>{'token': token},
+      );
+      final payload = extractEnvelopeData(response);
+      final map = _toMap(payload);
+      if (map.isEmpty) {
+        return null;
+      }
+      final org = map['org'];
+      if (org is Map) {
+        return MarketplaceOrgSummary.fromJson(
+          org.map(
+            (key, value) => MapEntry<String, dynamic>(key.toString(), value),
+          ),
+        );
+      }
+      return MarketplaceOrgSummary.fromJson(map);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to accept invite right now.',
+      );
+    }
+  }
 }
 
 MarketplaceRepositoryException _mapError(
@@ -360,4 +451,41 @@ MarketplaceRepositoryException _mapError(
     fallbackMessage,
     code: 'unknown_marketplace_error',
   );
+}
+
+List<Map<String, dynamic>> _extractList(
+  dynamic payload, {
+  required String key,
+}) {
+  if (payload is List) {
+    return payload
+        .whereType<Map>()
+        .map(
+          (item) =>
+              item.map((k, v) => MapEntry<String, dynamic>(k.toString(), v)),
+        )
+        .toList(growable: false);
+  }
+  final map = _toMap(payload);
+  final direct = map[key];
+  if (direct is List) {
+    return direct
+        .whereType<Map>()
+        .map(
+          (item) =>
+              item.map((k, v) => MapEntry<String, dynamic>(k.toString(), v)),
+        )
+        .toList(growable: false);
+  }
+  return const <Map<String, dynamic>>[];
+}
+
+Map<String, dynamic> _toMap(dynamic payload) {
+  if (payload is Map<String, dynamic>) {
+    return payload;
+  }
+  if (payload is Map) {
+    return payload.map((k, v) => MapEntry<String, dynamic>(k.toString(), v));
+  }
+  return <String, dynamic>{};
 }

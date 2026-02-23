@@ -13,11 +13,15 @@ class PaywallScreen extends StatefulWidget {
     super.key,
     required this.apiClient,
     required this.rideId,
+    this.offerPriceMinor,
+    this.luggageCount,
     this.charterMode = false,
   });
 
   final ApiClient apiClient;
   final String rideId;
+  final int? offerPriceMinor;
+  final int? luggageCount;
   final bool charterMode;
 
   @override
@@ -147,7 +151,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
       if (!mounted) {
         return;
       }
-      context.go(
+      context.push(
         '/rider/seats/${Uri.encodeComponent(widget.rideId)}'
         '?charter_mode=${widget.charterMode}',
       );
@@ -216,6 +220,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                   ],
                   const SizedBox(height: 18),
                   FilledButton(
+                    key: const Key('paywall_continue_button'),
                     onPressed:
                         (_isLoading || _remaining == Duration.zero || _isPaying)
                         ? null

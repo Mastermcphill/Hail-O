@@ -2,17 +2,11 @@ class ApiPaths {
   static const health = '/health';
   static const authLogin = '/auth/login';
   static const authRegister = '/auth/register';
-  static const nextOfKin = '/me/next-of-kin';
-  static const routes = '/routes';
-  static String routesMatch({required String from, required String to}) {
-    final fromQuery = Uri.encodeQueryComponent(from);
-    final toQuery = Uri.encodeQueryComponent(to);
-    return '/routes/match?from=$fromQuery&to=$toQuery';
-  }
-
   static const meNextOfKin = '/me/next-of-kin';
+  static const nextOfKin = meNextOfKin;
 
   static const routesCreate = '/routes';
+  static const routes = routesCreate;
   static String routesMatch({required String from, required String to}) =>
       '/routes/match?from=${Uri.encodeQueryComponent(from)}'
       '&to=${Uri.encodeQueryComponent(to)}';
