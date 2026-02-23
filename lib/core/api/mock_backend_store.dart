@@ -11,4 +11,6 @@ class MockBackendStore {
       <String, List<Map<String, dynamic>>>{};
   static final Map<String, List<String>> selectedSeatIdsByRideId =
       <String, List<String>>{};
+  static final Map<String, Map<String, dynamic>> purchasesById =
+      <String, Map<String, dynamic>>{};
 }

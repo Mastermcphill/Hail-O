@@ -104,9 +104,12 @@ class _OffersScreenState extends State<OffersScreen> {
     if (!mounted) {
       return;
     }
+    setState(() {
+      _acceptingOfferId = null;
+    });
     final offerPrice = _readInt(offer['price_minor']);
     final charterFlag = widget.charterMode ? '1' : '0';
-    context.go(
+    context.push(
       '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
       '?offerPrice=$offerPrice'
       '&charter=$charterFlag'
@@ -164,60 +167,68 @@ class _OffersScreenState extends State<OffersScreen> {
                       final offerId = _readString(offer['offer_id']);
                       final isAccepting = _acceptingOfferId == offerId;
                       return Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              _OfferRow(
-                                label: 'star_rating',
-                                value: _readStringOrDash(offer['star_rating']),
-                              ),
-                              _OfferRow(
-                                label: 'gender',
-                                value: _readStringOrDash(offer['gender']),
-                              ),
-                              _OfferRow(
-                                label: 'tribe',
-                                value: _readStringOrDash(offer['tribe']),
-                              ),
-                              _OfferRow(
-                                label: 'vehicle_class',
-                                value: _readStringOrDash(
-                                  offer['vehicle_class'],
+                        child: InkWell(
+                          key: Key('offer_card_$index'),
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: isAccepting ? null : () => _acceptOffer(offer),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                _OfferRow(
+                                  label: 'star_rating',
+                                  value: _readStringOrDash(
+                                    offer['star_rating'],
+                                  ),
                                 ),
-                              ),
-                              _OfferRow(
-                                label: 'luggage_supported',
-                                value: _readBool(offer['luggage_supported'])
-                                    ? 'true'
-                                    : 'false',
-                              ),
-                              _OfferRow(
-                                label: 'price_minor',
-                                value: _readInt(
-                                  offer['price_minor'],
-                                ).toString(),
-                              ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: FilledButton(
-                                  onPressed: isAccepting
-                                      ? null
-                                      : () => _acceptOffer(offer),
-                                  child: isAccepting
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('Accept offer'),
+                                _OfferRow(
+                                  label: 'gender',
+                                  value: _readStringOrDash(offer['gender']),
                                 ),
-                              ),
-                            ],
+                                _OfferRow(
+                                  label: 'tribe',
+                                  value: _readStringOrDash(offer['tribe']),
+                                ),
+                                _OfferRow(
+                                  label: 'vehicle_class',
+                                  value: _readStringOrDash(
+                                    offer['vehicle_class'],
+                                  ),
+                                ),
+                                _OfferRow(
+                                  label: 'luggage_supported',
+                                  value: _readBool(offer['luggage_supported'])
+                                      ? 'true'
+                                      : 'false',
+                                ),
+                                _OfferRow(
+                                  label: 'price_minor',
+                                  value: _readInt(
+                                    offer['price_minor'],
+                                  ).toString(),
+                                ),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: FilledButton(
+                                    key: Key('offer_accept_button_$index'),
+                                    onPressed: isAccepting
+                                        ? null
+                                        : () => _acceptOffer(offer),
+                                    child: isAccepting
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Text('Accept offer'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );

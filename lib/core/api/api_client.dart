@@ -294,9 +294,19 @@ class ApiClient {
       final seatIds = (payload['seat_ids'] as List<dynamic>? ?? <dynamic>[])
           .map((value) => value.toString())
           .toList(growable: false);
+      final purchaseId =
+          'mock_purchase_${DateTime.now().millisecondsSinceEpoch}';
       MockBackendStore.selectedSeatIdsByRideId[seatSelectRideId] = seatIds;
+      MockBackendStore.purchasesById[purchaseId] = <String, dynamic>{
+        'purchase_id': purchaseId,
+        'ride_id': seatSelectRideId,
+        'seat_ids': seatIds,
+        'pricing_minor': _readInt(payload['pricing_minor']),
+        'status': 'CONFIRMED',
+      };
       return <String, dynamic>{
         'ok': true,
+        'purchase_id': purchaseId,
         'ride_id': seatSelectRideId,
         'seat_ids': seatIds,
         'pricing_minor': _readInt(payload['pricing_minor']),

@@ -166,8 +166,11 @@ class _PaywallScreenState extends State<PaywallScreen> {
     if (!mounted) {
       return;
     }
+    setState(() {
+      _isPaying = false;
+    });
     final charter = widget.charterMode ? '1' : '0';
-    context.go(
+    context.push(
       '/rider/seats/${Uri.encodeComponent(widget.rideId)}'
       '?offerPrice=${widget.offerPriceMinor}'
       '&charter=$charter'
@@ -214,6 +217,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
           ],
           const SizedBox(height: 12),
           FilledButton(
+            key: const Key('paywall_continue_button'),
             onPressed: (_isLoading || _isPaying || _remaining == Duration.zero)
                 ? null
                 : _payConnectionFee,
@@ -223,7 +227,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Pay Connection Fee'),
+                : const Text('Continue'),
           ),
           const SizedBox(height: 10),
           FilledButton.tonal(

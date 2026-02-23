@@ -15,6 +15,7 @@ import '../../features/rider/paywall_screen.dart';
 import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
+import '../../features/rider/timeline_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../api/api_client.dart';
 import '../storage/token_storage.dart';
@@ -116,6 +117,14 @@ class AppRouter {
                     ) ??
                     0,
                 charterMode: state.uri.queryParameters['charter'] == '1',
+              ),
+            ),
+            GoRoute(
+              path: '/rider/timeline/:purchaseId',
+              builder: (context, state) => TimelineScreen(
+                apiClient: _apiClient,
+                purchaseId: state.pathParameters['purchaseId'] ?? '',
+                rideId: state.uri.queryParameters['rideId'],
               ),
             ),
             GoRoute(
@@ -389,6 +398,9 @@ String _titleForPath(String path) {
   }
   if (_isSelectedPath(path, '/rider/seats')) {
     return 'Seat Selection';
+  }
+  if (_isSelectedPath(path, '/rider/timeline')) {
+    return 'Timeline';
   }
   if (_isSelectedPath(path, '/driver/offer')) {
     return 'Driver Offer';

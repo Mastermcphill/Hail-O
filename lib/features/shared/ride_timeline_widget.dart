@@ -58,6 +58,7 @@ class _TimelineStep extends StatelessWidget {
               : Theme.of(context).colorScheme.outlineVariant);
 
     return Row(
+      key: Key('timeline_step_$label'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         SizedBox(
