@@ -20,6 +20,11 @@ Middleware rateLimitMiddleware({
   int maxRequestsPerUser = 120,
   int maxAuthRequestsPerIp = 20,
   int maxAuthRequestsPerUser = 40,
+  int maxMarketplaceReadRequestsPerIp = 120,
+  int maxMarketplaceReadRequestsPerUser = 240,
+  int maxMarketplaceWriteRequestsPerIp = 40,
+  int maxMarketplaceWriteRequestsPerUser = 80,
+  int maxWebhookRequestsPerIp = 300,
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
   NowProvider? nowProvider,
@@ -61,8 +66,33 @@ Middleware rateLimitMiddleware({
         request,
         trustProxyHeaders: trustProxyHeaders,
       );
+      final method = request.method.toUpperCase();
       final isAuthPath = path.startsWith('auth/');
-      final ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
+      final isMarketplacePath = path.startsWith('marketplace/');
+      final isMarketplaceOfferRead =
+          isMarketplacePath &&
+          method == 'GET' &&
+          (path == 'marketplace/offers' ||
+              path.startsWith('marketplace/offers/'));
+      final isWebhookPath = path.startsWith('webhooks/');
+
+      int ipLimit;
+      int userLimit;
+      if (isWebhookPath) {
+        ipLimit = maxWebhookRequestsPerIp;
+        userLimit = 0;
+      } else if (isMarketplacePath) {
+        ipLimit = isMarketplaceOfferRead
+            ? maxMarketplaceReadRequestsPerIp
+            : maxMarketplaceWriteRequestsPerIp;
+        userLimit = isMarketplaceOfferRead
+            ? maxMarketplaceReadRequestsPerUser
+            : maxMarketplaceWriteRequestsPerUser;
+      } else {
+        ipLimit = isAuthPath ? maxAuthRequestsPerIp : maxRequestsPerIp;
+        userLimit = isAuthPath ? maxAuthRequestsPerUser : maxRequestsPerUser;
+      }
+
       if (!consume(ipBuckets, ipKey, currentUtc, ipLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
@@ -76,10 +106,8 @@ Middleware rateLimitMiddleware({
       }
 
       final userId = request.requestContext.userId?.trim() ?? '';
-      final userLimit = isAuthPath
-          ? maxAuthRequestsPerUser
-          : maxRequestsPerUser;
-      if (userId.isNotEmpty &&
+      if (userLimit > 0 &&
+          userId.isNotEmpty &&
           !consume(userBuckets, userId, currentUtc, userLimit)) {
         return Future<Response>.value(
           jsonErrorResponse(
