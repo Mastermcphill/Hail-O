@@ -26,7 +26,7 @@ Middleware rateLimitMiddleware({
   int maxMarketplaceWriteRequestsPerUser = 80,
   int maxWebhookRequestsPerIp = 300,
   bool trustProxyHeaders = true,
-  Set<String> exemptPaths = const <String>{'health', 'api/healthz'},
+  Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
   NowProvider? nowProvider,
 }) {
   final ipBuckets = <String, _CounterBucket>{};
@@ -69,6 +69,7 @@ Middleware rateLimitMiddleware({
       final method = request.method.toUpperCase();
       final isAuthPath = path.startsWith('auth/');
       final isMarketplacePath = path.startsWith('marketplace/');
+      final isOrgPath = path == 'orgs' || path.startsWith('orgs/');
       final isMarketplaceOfferRead =
           isMarketplacePath &&
           method == 'GET' &&
@@ -81,7 +82,7 @@ Middleware rateLimitMiddleware({
       if (isWebhookPath) {
         ipLimit = maxWebhookRequestsPerIp;
         userLimit = 0;
-      } else if (isMarketplacePath) {
+      } else if (isMarketplacePath || isOrgPath) {
         ipLimit = isMarketplaceOfferRead
             ? maxMarketplaceReadRequestsPerIp
             : maxMarketplaceWriteRequestsPerIp;

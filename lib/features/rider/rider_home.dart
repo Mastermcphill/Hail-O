@@ -48,6 +48,27 @@ class RiderHome extends StatelessWidget {
                 },
                 child: const Text('Next-of-kin'),
               ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/offers');
+                },
+                child: const Text('Marketplace'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/billing');
+                },
+                child: const Text('Marketplace Billing'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
+                  context.go('/marketplace/invites');
+                },
+                child: const Text('Marketplace Invites'),
+              ),
             ],
           ),
         ),

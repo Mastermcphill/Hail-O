@@ -9,6 +9,13 @@ import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
+import '../../features/marketplace/marketplace_module.dart';
+import '../../features/marketplace/ui/billing_screen.dart';
+import '../../features/marketplace/ui/invite_screen.dart';
+import '../../features/marketplace/ui/offers_screen.dart';
+import '../../features/marketplace/ui/paywall_screen.dart';
+import '../../features/marketplace/ui/seats_screen.dart';
+import '../../features/marketplace/ui/timeline_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
 import '../../features/rider/offers_screen.dart';
 import '../../features/rider/paywall_screen.dart';
@@ -23,6 +30,7 @@ class AppRouter {
   AppRouter({required ApiClient apiClient, required TokenStorage tokenStorage})
     : _apiClient = apiClient,
       _tokenStorage = tokenStorage {
+    _marketplaceModule = MarketplaceModule(apiClient: _apiClient);
     router = GoRouter(
       initialLocation: '/login',
       routes: <RouteBase>[
@@ -115,6 +123,47 @@ class AppRouter {
               ),
             ),
             GoRoute(
+              path: '/marketplace/offers',
+              builder: (context, state) => MarketplaceOffersScreen(
+                controller: _marketplaceModule.controller,
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/paywall',
+              builder: (context, state) => MarketplacePaywallScreen(
+                controller: _marketplaceModule.controller,
+                offerId: state.uri.queryParameters['offerId'] ?? '',
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/seats',
+              builder: (context, state) => MarketplaceSeatsScreen(
+                controller: _marketplaceModule.controller,
+                offerId: state.uri.queryParameters['offerId'] ?? '',
+                purchaseId: state.uri.queryParameters['purchaseId'],
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/billing',
+              builder: (context, state) => MarketplaceBillingScreen(
+                controller: _marketplaceModule.controller,
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/invites',
+              builder: (context, state) => MarketplaceInviteScreen(
+                controller: _marketplaceModule.controller,
+                initialToken: state.uri.queryParameters['token'],
+              ),
+            ),
+            GoRoute(
+              path: '/marketplace/timeline',
+              builder: (context, state) => MarketplaceTimelineScreen(
+                controller: _marketplaceModule.controller,
+                purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+              ),
+            ),
+            GoRoute(
               path: '/driver',
               builder: (context, state) => const DriverHome(),
             ),
@@ -164,7 +213,12 @@ class AppRouter {
 
   final ApiClient _apiClient;
   final TokenStorage _tokenStorage;
+  late final MarketplaceModule _marketplaceModule;
   late final GoRouter router;
+
+  void dispose() {
+    _marketplaceModule.dispose();
+  }
 
   Future<String?> _handleRedirect(
     BuildContext context,
@@ -397,6 +451,24 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/rider')) {
     return 'Rider';
   }
+  if (_isSelectedPath(path, '/marketplace/offers')) {
+    return 'Marketplace Offers';
+  }
+  if (_isSelectedPath(path, '/marketplace/paywall')) {
+    return 'Marketplace Paywall';
+  }
+  if (_isSelectedPath(path, '/marketplace/seats')) {
+    return 'Marketplace Seats';
+  }
+  if (_isSelectedPath(path, '/marketplace/billing')) {
+    return 'Marketplace Billing';
+  }
+  if (_isSelectedPath(path, '/marketplace/invites')) {
+    return 'Marketplace Invites';
+  }
+  if (_isSelectedPath(path, '/marketplace/timeline')) {
+    return 'Marketplace Timeline';
+  }
   if (_isSelectedPath(path, '/driver')) {
     return 'Driver';
   }
@@ -411,6 +483,9 @@ String _titleForPath(String path) {
 
 String? _roleFromPath(String path) {
   if (_isSelectedPath(path, '/rider')) {
+    return 'rider';
+  }
+  if (_isSelectedPath(path, '/marketplace')) {
     return 'rider';
   }
   if (_isSelectedPath(path, '/driver')) {

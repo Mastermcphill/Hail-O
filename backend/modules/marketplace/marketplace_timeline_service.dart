@@ -22,7 +22,12 @@ class MarketplaceTimelineService {
   Future<List<Map<String, Object?>>> listEvents(
     String purchaseId, {
     int limit = 100,
+    DateTime? sinceUtc,
   }) {
-    return _repository.listTimelineEvents(purchaseId, limit: limit);
+    return _repository.listTimelineEvents(
+      purchaseId,
+      limit: limit,
+      sinceUtc: sinceUtc,
+    );
   }
 }

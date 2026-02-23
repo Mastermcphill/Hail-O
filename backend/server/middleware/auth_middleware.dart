@@ -11,6 +11,7 @@ Middleware authMiddleware(
     'auth/register',
     'auth/login',
     'health',
+    'healthz',
     'api/healthz',
   },
   Set<String> protectedPrefixes = const <String>{
@@ -19,6 +20,8 @@ Middleware authMiddleware(
     'settlement/',
     'disputes',
     'marketplace/',
+    'orgs',
+    'orgs/',
     'admin/',
     'api/admin/',
     'metrics',

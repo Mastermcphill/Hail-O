@@ -23,6 +23,8 @@ void main() {
     final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
     final ledgerSql = sqlByName['006_billing_ledger_entries.sql'] ?? '';
     final entitlementsSql = sqlByName['007_marketplace_entitlements.sql'] ?? '';
+    final syncSql = sqlByName['008_marketplace_sync_versions.sql'] ?? '';
+    final orgSql = sqlByName['009_orgs_rbac.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -66,6 +68,57 @@ void main() {
       ),
       isTrue,
       reason: 'single active entitlement row per type must exist',
+    );
+    expect(
+      syncSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_marketplace_purchases_id_row_version',
+      ),
+      isTrue,
+      reason: 'purchase version lookup index must exist',
+    );
+    expect(
+      syncSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_marketplace_assignments_purchase_row_version',
+      ),
+      isTrue,
+      reason: 'assignment version lookup index must exist',
+    );
+    expect(
+      syncSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_marketplace_timeline_purchase_event_seq',
+      ),
+      isTrue,
+      reason: 'timeline sequence index must exist',
+    );
+    expect(
+      orgSql.contains('CREATE TABLE IF NOT EXISTS orgs'),
+      isTrue,
+      reason: 'orgs table must exist',
+    );
+    expect(
+      orgSql.contains('CREATE TABLE IF NOT EXISTS org_members'),
+      isTrue,
+      reason: 'org_members table must exist',
+    );
+    expect(
+      orgSql.contains('CREATE TABLE IF NOT EXISTS org_invites'),
+      isTrue,
+      reason: 'org_invites table must exist',
+    );
+    expect(
+      orgSql.contains('UNIQUE(org_id, user_id)'),
+      isTrue,
+      reason: 'org member uniqueness must exist',
+    );
+    expect(
+      orgSql.contains('CREATE INDEX IF NOT EXISTS idx_org_invites_org_email'),
+      isTrue,
+      reason: 'org invite lookup index must exist',
+    );
+    expect(
+      orgSql.contains('ADD COLUMN IF NOT EXISTS org_id'),
+      isTrue,
+      reason: 'marketplace purchases must be linked to org',
     );
   });
 }

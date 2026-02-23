@@ -25,6 +25,8 @@ import '../modules/marketplace/marketplace_reconciliation_service.dart';
 import '../modules/marketplace/marketplace_repository.dart';
 import '../modules/marketplace/marketplace_repository_memory.dart';
 import '../modules/marketplace/marketplace_timeline_service.dart';
+import '../modules/marketplace/org_controller.dart';
+import '../modules/marketplace/org_repository.dart';
 import '../modules/marketplace/payment_service.dart';
 import '../modules/marketplace/payments_webhook_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
@@ -69,6 +71,9 @@ Handler buildApiRouter({
   final marketplaceRepository = postgresProvider != null
       ? PostgresMarketplaceRepository(postgresProvider)
       : InMemoryMarketplaceRepository();
+  final orgRepository = postgresProvider != null
+      ? PostgresOrgRepository(postgresProvider)
+      : InMemoryOrgRepository();
   final billingLedgerRepository = postgresProvider != null
       ? PostgresBillingLedgerRepository(postgresProvider)
       : InMemoryBillingLedgerRepository();
@@ -96,10 +101,17 @@ Handler buildApiRouter({
   );
   final marketplaceController = MarketplaceController(
     marketplaceRepository: marketplaceRepository,
+    orgRepository: orgRepository,
     timelineService: timelineService,
     entitlementService: entitlementService,
     paymentService: paymentService,
     requestMetrics: requestMetrics,
+  );
+  final orgController = OrgController(
+    orgRepository: orgRepository,
+    marketplaceRepository: marketplaceRepository,
+    billingLedgerRepository: billingLedgerRepository,
+    entitlementService: entitlementService,
   );
   final paymentsWebhookController = PaymentsWebhookController(
     paymentService: paymentService,
@@ -122,6 +134,10 @@ Handler buildApiRouter({
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..get(
+      '/healthz',
+      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+    )
+    ..get(
       '/api/healthz',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
@@ -132,6 +148,7 @@ Handler buildApiRouter({
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/marketplace/', marketplaceController.router.call)
+    ..mount('/orgs', orgController.router.call)
     ..mount('/webhooks/', paymentsWebhookController.router.call)
     ..mount('/drivers/', driversController.router.call)
     ..mount('/settlement/', settlementController.router.call)

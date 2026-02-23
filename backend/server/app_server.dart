@@ -98,6 +98,7 @@ class AppServer {
       'auth/register',
       'auth/login',
       'health',
+      'healthz',
       'api/healthz',
       if (metricsPublic) 'metrics',
     };

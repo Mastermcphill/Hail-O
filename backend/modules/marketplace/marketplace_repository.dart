@@ -15,6 +15,7 @@ abstract class MarketplaceRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? orgId,
     List<Map<String, Object?>> assignments,
   });
 
@@ -25,10 +26,18 @@ abstract class MarketplaceRepository {
     required String idempotencyKey,
   });
 
+  Future<Map<String, Object?>?> findPurchaseByIdempotencyAccessible({
+    required String userId,
+    required String idempotencyKey,
+    required List<String> orgIds,
+  });
+
   Future<Map<String, Object?>?> findPurchaseByProviderRef({
     required String provider,
     required String providerRef,
   });
+
+  Future<List<Map<String, Object?>>> listPurchasesByOrg(String orgId);
 
   Future<void> updatePurchaseStatus({
     required String purchaseId,
@@ -53,6 +62,7 @@ abstract class MarketplaceRepository {
   Future<void> replaceAssignments({
     required String purchaseId,
     required List<Map<String, Object?>> assignments,
+    bool bumpPurchaseVersion,
   });
 
   Future<void> appendTimelineEvent({
@@ -65,6 +75,7 @@ abstract class MarketplaceRepository {
   Future<List<Map<String, Object?>>> listTimelineEvents(
     String purchaseId, {
     int limit,
+    DateTime? sinceUtc,
   });
 
   Future<bool> recordWebhookEvent({
@@ -153,6 +164,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? orgId,
     List<Map<String, Object?>> assignments = const <Map<String, Object?>>[],
   }) async {
     final offer = await findOfferById(offerId);
@@ -173,6 +185,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           price_minor,
           seats_total,
           provider,
+          org_id,
           idempotency_key,
           created_at,
           updated_at
@@ -186,6 +199,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           @price_minor,
           @seats_total,
           @provider,
+          @org_id,
           @idempotency_key,
           @created_at,
           @updated_at
@@ -205,7 +219,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         ''',
         substitutionValues: <String, Object?>{
           'id': purchaseId,
@@ -216,6 +232,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           'price_minor': offer['price_minor'],
           'seats_total': seatCount,
           'provider': provider,
+          'org_id': orgId,
           'idempotency_key': idempotencyKey,
           'created_at': nowUtc,
           'updated_at': nowUtc,
@@ -268,7 +285,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         FROM marketplace_purchases
         WHERE id = @id
         LIMIT 1
@@ -304,7 +323,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         FROM marketplace_purchases
         WHERE user_id = @user_id AND idempotency_key = @idempotency_key
         LIMIT 1
@@ -312,6 +333,64 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
         substitutionValues: <String, Object?>{
           'user_id': userId,
           'idempotency_key': idempotencyKey,
+        },
+      ),
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return _purchaseFromRow(rows.first);
+  }
+
+  @override
+  Future<Map<String, Object?>?> findPurchaseByIdempotencyAccessible({
+    required String userId,
+    required String idempotencyKey,
+    required List<String> orgIds,
+  }) async {
+    final normalizedOrgIds = orgIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    final orgIdsCsv = normalizedOrgIds.join(',');
+    final rows = await _provider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT
+          id,
+          user_id,
+          offer_id,
+          status,
+          currency,
+          price_minor,
+          seats_total,
+          provider,
+          provider_customer_id,
+          provider_subscription_id,
+          provider_payment_intent_id,
+          idempotency_key,
+          created_at,
+          updated_at,
+          org_id,
+          row_version
+        FROM marketplace_purchases
+        WHERE idempotency_key = @idempotency_key
+          AND (
+            user_id = @user_id
+            OR (
+              @org_ids_csv <> ''
+              AND org_id IS NOT NULL
+              AND org_id::text = ANY(string_to_array(@org_ids_csv, ','))
+            )
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
+        ''',
+        substitutionValues: <String, Object?>{
+          'user_id': userId,
+          'idempotency_key': idempotencyKey,
+          'org_ids_csv': orgIdsCsv,
         },
       ),
     );
@@ -343,7 +422,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         FROM marketplace_purchases
         WHERE provider = @provider AND provider_payment_intent_id = @provider_ref
         LIMIT 1
@@ -358,6 +439,38 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
       return null;
     }
     return _purchaseFromRow(rows.first);
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> listPurchasesByOrg(String orgId) async {
+    final rows = await _provider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT
+          id,
+          user_id,
+          offer_id,
+          status,
+          currency,
+          price_minor,
+          seats_total,
+          provider,
+          provider_customer_id,
+          provider_subscription_id,
+          provider_payment_intent_id,
+          idempotency_key,
+          created_at,
+          updated_at,
+          org_id,
+          row_version
+        FROM marketplace_purchases
+        WHERE org_id = @org_id
+        ORDER BY created_at DESC
+        ''',
+        substitutionValues: <String, Object?>{'org_id': orgId},
+      ),
+    );
+    return rows.map(_purchaseFromRow).toList(growable: false);
   }
 
   @override
@@ -377,7 +490,8 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_customer_id = COALESCE(@provider_customer_id, provider_customer_id),
           provider_subscription_id = COALESCE(@provider_subscription_id, provider_subscription_id),
           provider_payment_intent_id = COALESCE(@provider_payment_intent_id, provider_payment_intent_id),
-          updated_at = NOW()
+          updated_at = NOW(),
+          row_version = row_version + 1
         WHERE id = @id
         ''',
         substitutionValues: <String, Object?>{
@@ -400,7 +514,10 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
       (connection) => connection.query(
         '''
         UPDATE marketplace_purchases
-        SET seats_total = @seats_total, updated_at = NOW()
+        SET
+          seats_total = @seats_total,
+          updated_at = NOW(),
+          row_version = row_version + 1
         WHERE id = @id
         RETURNING
           id,
@@ -416,7 +533,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         ''',
         substitutionValues: <String, Object?>{
           'id': purchaseId,
@@ -443,7 +562,12 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
       (connection) => connection.query(
         '''
         UPDATE marketplace_purchases
-        SET offer_id = @offer_id, currency = @currency, price_minor = @price_minor, updated_at = NOW()
+        SET
+          offer_id = @offer_id,
+          currency = @currency,
+          price_minor = @price_minor,
+          updated_at = NOW(),
+          row_version = row_version + 1
         WHERE id = @id
         RETURNING
           id,
@@ -459,7 +583,9 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
           provider_payment_intent_id,
           idempotency_key,
           created_at,
-          updated_at
+          updated_at,
+          org_id,
+          row_version
         ''',
         substitutionValues: <String, Object?>{
           'id': purchaseId,
@@ -480,7 +606,15 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
     final rows = await _provider.withConnection(
       (connection) => connection.query(
         '''
-        SELECT id, purchase_id, seat_index, assignee_user_id, role, created_at, updated_at
+        SELECT
+          id,
+          purchase_id,
+          seat_index,
+          assignee_user_id,
+          role,
+          created_at,
+          updated_at,
+          row_version
         FROM marketplace_seat_assignments
         WHERE purchase_id = @purchase_id
         ORDER BY seat_index ASC, created_at ASC
@@ -495,8 +629,32 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
   Future<void> replaceAssignments({
     required String purchaseId,
     required List<Map<String, Object?>> assignments,
+    bool bumpPurchaseVersion = false,
   }) async {
     await _provider.withTxn((txn) async {
+      final purchaseRows = await txn.query(
+        '''
+        UPDATE marketplace_purchases
+        SET
+          updated_at = NOW(),
+          row_version = CASE
+            WHEN @bump_version THEN row_version + 1
+            ELSE row_version
+          END
+        WHERE id = @purchase_id
+        RETURNING row_version
+        ''',
+        substitutionValues: <String, Object?>{
+          'purchase_id': purchaseId,
+          'bump_version': bumpPurchaseVersion,
+        },
+      );
+      if (purchaseRows.isEmpty) {
+        throw StateError('purchase_not_found');
+      }
+      final assignmentRowVersion =
+          (purchaseRows.first[0] as num?)?.toInt() ?? 1;
+
       await txn.execute(
         'DELETE FROM marketplace_seat_assignments WHERE purchase_id = @purchase_id',
         substitutionValues: <String, Object?>{'purchase_id': purchaseId},
@@ -517,10 +675,24 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
         await txn.execute(
           '''
           INSERT INTO marketplace_seat_assignments(
-            id, purchase_id, seat_index, assignee_user_id, role, created_at, updated_at
+            id,
+            purchase_id,
+            seat_index,
+            assignee_user_id,
+            role,
+            created_at,
+            updated_at,
+            row_version
           )
           VALUES(
-            @id, @purchase_id, @seat_index, @assignee_user_id, @role, @created_at, @updated_at
+            @id,
+            @purchase_id,
+            @seat_index,
+            @assignee_user_id,
+            @role,
+            @created_at,
+            @updated_at,
+            @row_version
           )
           ''',
           substitutionValues: <String, Object?>{
@@ -532,6 +704,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
                 ((row['role'] as String?)?.trim().toLowerCase() ?? 'member'),
             'created_at': DateTime.now().toUtc(),
             'updated_at': DateTime.now().toUtc(),
+            'row_version': assignmentRowVersion,
           },
         );
       }
@@ -566,18 +739,21 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
   Future<List<Map<String, Object?>>> listTimelineEvents(
     String purchaseId, {
     int limit = 50,
+    DateTime? sinceUtc,
   }) async {
     final rows = await _provider.withConnection(
       (connection) => connection.query(
         '''
-        SELECT id, purchase_id, event_type, event_data, created_at
+        SELECT id, purchase_id, event_type, event_data, created_at, event_seq
         FROM marketplace_timeline_events
         WHERE purchase_id = @purchase_id
-        ORDER BY created_at ASC
+          AND (@since_utc::timestamptz IS NULL OR created_at > @since_utc)
+        ORDER BY created_at ASC, event_seq ASC
         LIMIT @limit
         ''',
         substitutionValues: <String, Object?>{
           'purchase_id': purchaseId,
+          'since_utc': sinceUtc,
           'limit': limit <= 0 ? 50 : limit,
         },
       ),
@@ -689,6 +865,8 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
     'idempotency_key': row[11] as String,
     'created_at': ((row[12] as DateTime?) ?? DateTime.now()).toUtc(),
     'updated_at': ((row[13] as DateTime?) ?? DateTime.now()).toUtc(),
+    'org_id': row[14] as String?,
+    'row_version': (row[15] as num?)?.toInt() ?? 1,
   };
 
   Map<String, Object?> _assignmentFromRow(List<Object?> row) =>
@@ -700,6 +878,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
         'role': (row[4] as String?) ?? 'member',
         'created_at': ((row[5] as DateTime?) ?? DateTime.now()).toUtc(),
         'updated_at': ((row[6] as DateTime?) ?? DateTime.now()).toUtc(),
+        'row_version': (row[7] as num?)?.toInt() ?? 1,
       };
 
   Map<String, Object?> _timelineFromRow(List<Object?> row) => <String, Object?>{
@@ -708,6 +887,7 @@ class PostgresMarketplaceRepository implements MarketplaceRepository {
     'event_type': row[2] as String,
     'event_data': _decodeJson(row[3], fallback: const <String, Object?>{}),
     'created_at': ((row[4] as DateTime?) ?? DateTime.now()).toUtc(),
+    'event_seq': (row[5] as num?)?.toInt() ?? 0,
   };
 
   Map<String, Object?> _webhookFromRow(List<Object?> row) => <String, Object?>{

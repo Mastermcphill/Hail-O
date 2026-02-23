@@ -79,6 +79,7 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
       <String, List<Map<String, Object?>>>{};
   final Map<String, Map<String, Object?>> _webhooks =
       <String, Map<String, Object?>>{};
+  int _timelineEventSeq = 0;
 
   @override
   Future<List<Map<String, Object?>>> listOffers() async {
@@ -107,6 +108,7 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? orgId,
     List<Map<String, Object?>> assignments = const <Map<String, Object?>>[],
   }) async {
     final offer = _offers[offerId];
@@ -139,6 +141,8 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
       'idempotency_key': idempotencyKey,
       'created_at': nowUtc,
       'updated_at': nowUtc,
+      'org_id': orgId,
+      'row_version': 1,
     };
     _purchases[purchaseId] = purchase;
     _idempotencyLookup[replayKey] = purchaseId;
@@ -178,6 +182,44 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
   }
 
   @override
+  Future<Map<String, Object?>?> findPurchaseByIdempotencyAccessible({
+    required String userId,
+    required String idempotencyKey,
+    required List<String> orgIds,
+  }) async {
+    final normalizedOrgIds = orgIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    Map<String, Object?>? found;
+    for (final purchase in _purchases.values) {
+      if (purchase['idempotency_key'] != idempotencyKey) {
+        continue;
+      }
+      final ownerId = (purchase['user_id'] as String?) ?? '';
+      final orgId = (purchase['org_id'] as String?) ?? '';
+      if (ownerId != userId &&
+          (orgId.isEmpty || !normalizedOrgIds.contains(orgId))) {
+        continue;
+      }
+      if (found == null) {
+        found = purchase;
+        continue;
+      }
+      final foundCreated =
+          (found['created_at'] as DateTime?) ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      final candidateCreated =
+          (purchase['created_at'] as DateTime?) ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      if (candidateCreated.isAfter(foundCreated)) {
+        found = purchase;
+      }
+    }
+    return found == null ? null : Map<String, Object?>.from(found);
+  }
+
+  @override
   Future<Map<String, Object?>?> findPurchaseByProviderRef({
     required String provider,
     required String providerRef,
@@ -189,6 +231,24 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
       }
     }
     return null;
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> listPurchasesByOrg(String orgId) async {
+    final purchases = _purchases.values
+        .where((purchase) => purchase['org_id'] == orgId)
+        .map((purchase) => Map<String, Object?>.from(purchase))
+        .toList(growable: false);
+    purchases.sort((left, right) {
+      final leftCreated =
+          (left['created_at'] as DateTime?) ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      final rightCreated =
+          (right['created_at'] as DateTime?) ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      return rightCreated.compareTo(leftCreated);
+    });
+    return purchases;
   }
 
   @override
@@ -214,6 +274,8 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
       purchase['provider_payment_intent_id'] = providerPaymentIntentId;
     }
     purchase['updated_at'] = DateTime.now().toUtc();
+    purchase['row_version'] =
+        ((purchase['row_version'] as num?)?.toInt() ?? 1) + 1;
   }
 
   @override
@@ -227,6 +289,8 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
     }
     purchase['seats_total'] = seatCount;
     purchase['updated_at'] = DateTime.now().toUtc();
+    purchase['row_version'] =
+        ((purchase['row_version'] as num?)?.toInt() ?? 1) + 1;
     return Map<String, Object?>.from(purchase);
   }
 
@@ -247,6 +311,8 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
     purchase['currency'] = offer['currency'];
     purchase['price_minor'] = offer['price_minor'];
     purchase['updated_at'] = DateTime.now().toUtc();
+    purchase['row_version'] =
+        ((purchase['row_version'] as num?)?.toInt() ?? 1) + 1;
     return Map<String, Object?>.from(purchase);
   }
 
@@ -263,7 +329,20 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
   Future<void> replaceAssignments({
     required String purchaseId,
     required List<Map<String, Object?>> assignments,
+    bool bumpPurchaseVersion = false,
   }) async {
+    final purchase = _purchases[purchaseId];
+    if (purchase == null) {
+      throw StateError('purchase_not_found');
+    }
+    if (bumpPurchaseVersion) {
+      purchase['row_version'] =
+          ((purchase['row_version'] as num?)?.toInt() ?? 1) + 1;
+      purchase['updated_at'] = DateTime.now().toUtc();
+    }
+    final assignmentRowVersion =
+        (purchase['row_version'] as num?)?.toInt() ?? 1;
+
     final nowUtc = DateTime.now().toUtc();
     final seenAssignees = <String>{};
     final rows = <Map<String, Object?>>[];
@@ -289,6 +368,7 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
             (assignment['role'] as String?)?.trim().toLowerCase() ?? 'member',
         'created_at': nowUtc,
         'updated_at': nowUtc,
+        'row_version': assignmentRowVersion,
       });
     }
     _assignments[purchaseId] = rows;
@@ -311,6 +391,7 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
       'event_type': eventType,
       'event_data': Map<String, Object?>.from(eventData),
       'created_at': (createdAtUtc ?? DateTime.now().toUtc()),
+      'event_seq': ++_timelineEventSeq,
     });
   }
 
@@ -318,9 +399,19 @@ class InMemoryMarketplaceRepository implements MarketplaceRepository {
   Future<List<Map<String, Object?>>> listTimelineEvents(
     String purchaseId, {
     int limit = 50,
+    DateTime? sinceUtc,
   }) async {
     final timeline = _timeline[purchaseId] ?? const <Map<String, Object?>>[];
-    return timeline
+    final filtered = sinceUtc == null
+        ? timeline
+        : timeline.where((event) {
+            final createdAt = event['created_at'];
+            if (createdAt is! DateTime) {
+              return true;
+            }
+            return createdAt.isAfter(sinceUtc);
+          });
+    return filtered
         .take(limit <= 0 ? 50 : limit)
         .map((event) => Map<String, Object?>.from(event))
         .toList(growable: false);

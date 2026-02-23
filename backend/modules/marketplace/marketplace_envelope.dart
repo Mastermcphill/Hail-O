@@ -22,16 +22,21 @@ Response marketplaceError(
   required int statusCode,
   required String errorCode,
   required String message,
+  Object? data,
   Map<String, String>? headers,
 }) {
+  final payload = <String, Object?>{
+    'ok': false,
+    'trace_id': _resolveTraceId(request),
+    'error_code': errorCode,
+    'message': message,
+  };
+  if (data != null) {
+    payload['data'] = data;
+  }
   return jsonResponse(
     statusCode,
-    <String, Object?>{
-      'ok': false,
-      'trace_id': _resolveTraceId(request),
-      'error_code': errorCode,
-      'message': message,
-    },
+    payload,
     headers: <String, String>{'x-error-code': errorCode, ...?headers},
   );
 }

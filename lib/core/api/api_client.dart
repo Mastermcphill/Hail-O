@@ -8,6 +8,20 @@ import 'api_config.dart';
 import 'api_errors.dart';
 import 'api_paths.dart';
 
+class ApiResult {
+  const ApiResult({
+    required this.statusCode,
+    required this.headers,
+    required this.data,
+  });
+
+  final int statusCode;
+  final Map<String, String> headers;
+  final Map<String, dynamic> data;
+
+  bool get notModified => statusCode == 304;
+}
+
 class ApiClient {
   ApiClient({required TokenStorage tokenStorage, http.Client? httpClient})
     : _tokenStorage = tokenStorage,
@@ -19,27 +33,45 @@ class ApiClient {
   final http.Client _httpClient;
 
   Future<Map<String, dynamic>> get(String path) async {
+    final result = await getDetailed(path);
+    return result.data;
+  }
+
+  Future<ApiResult> getDetailed(
+    String path, {
+    Map<String, String>? extraHeaders,
+  }) async {
     final normalizedPath = _normalizePath(path);
     if (ApiConfig.mockMode && _supportsMock('GET', normalizedPath)) {
-      return _mockGet(normalizedPath);
+      return ApiResult(
+        statusCode: 200,
+        headers: const <String, String>{},
+        data: await _mockGet(normalizedPath),
+      );
     }
 
     try {
-      final requestId = newRequestId();
-      final headers = await _buildHeaders(requestId: requestId);
-      final response = await _httpClient.get(
-        _buildUri(normalizedPath),
-        headers: headers,
+      return _send(
+        method: 'GET',
+        path: normalizedPath,
+        extraHeaders: extraHeaders,
       );
-      return _decodeResponse(response);
     } on ApiException catch (error) {
       if (error.statusCode == 404 && _supportsMock('GET', normalizedPath)) {
-        return _mockGet(normalizedPath);
+        return ApiResult(
+          statusCode: 200,
+          headers: const <String, String>{},
+          data: await _mockGet(normalizedPath),
+        );
       }
       rethrow;
     } catch (_) {
       if (ApiConfig.mockMode && _supportsMock('GET', normalizedPath)) {
-        return _mockGet(normalizedPath);
+        return ApiResult(
+          statusCode: 200,
+          headers: const <String, String>{},
+          data: await _mockGet(normalizedPath),
+        );
       }
       rethrow;
     }
@@ -49,41 +81,71 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? body,
   }) async {
+    final result = await postDetailed(path, body: body);
+    return result.data;
+  }
+
+  Future<ApiResult> postDetailed(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+    String? idempotencyKey,
+  }) async {
     final normalizedPath = _normalizePath(path);
     final payload = body ?? <String, dynamic>{};
     if (ApiConfig.mockMode && _supportsMock('POST', normalizedPath)) {
-      return _mockPost(normalizedPath, payload);
+      return ApiResult(
+        statusCode: 200,
+        headers: const <String, String>{},
+        data: await _mockPost(normalizedPath, payload),
+      );
     }
 
     try {
-      final requestId = newRequestId();
-      final idempotencyKey = newIdempotencyKey();
-      final headers = await _buildHeaders(
-        requestId: requestId,
-        idempotencyKey: idempotencyKey,
-        includeJsonContentType: true,
+      final result = await _send(
+        method: 'POST',
+        path: normalizedPath,
+        body: payload,
+        extraHeaders: extraHeaders,
+        idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
       );
-      final response = await _httpClient.post(
-        _buildUri(normalizedPath),
-        headers: headers,
-        body: jsonEncode(payload),
-      );
-      final decoded = _decodeResponse(response);
       if (normalizedPath == ApiPaths.ridesRequest) {
-        _rememberRideContext(requestBody: payload, responseBody: decoded);
+        _rememberRideContext(requestBody: payload, responseBody: result.data);
       }
-      return decoded;
+      return result;
     } on ApiException catch (error) {
       if (error.statusCode == 404 && _supportsMock('POST', normalizedPath)) {
-        return _mockPost(normalizedPath, payload);
+        return ApiResult(
+          statusCode: 200,
+          headers: const <String, String>{},
+          data: await _mockPost(normalizedPath, payload),
+        );
       }
       rethrow;
     } catch (_) {
       if (ApiConfig.mockMode && _supportsMock('POST', normalizedPath)) {
-        return _mockPost(normalizedPath, payload);
+        return ApiResult(
+          statusCode: 200,
+          headers: const <String, String>{},
+          data: await _mockPost(normalizedPath, payload),
+        );
       }
       rethrow;
     }
+  }
+
+  Future<ApiResult> patchDetailed(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+  }) {
+    final normalizedPath = _normalizePath(path);
+    return _send(
+      method: 'PATCH',
+      path: normalizedPath,
+      body: body ?? const <String, dynamic>{},
+      extraHeaders: extraHeaders,
+    );
   }
 
   void close() {
@@ -106,6 +168,7 @@ class ApiClient {
     required String requestId,
     String? idempotencyKey,
     bool includeJsonContentType = false,
+    Map<String, String>? extraHeaders,
   }) async {
     final headers = <String, String>{
       'Accept': 'application/json',
@@ -123,10 +186,72 @@ class ApiClient {
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
     }
+    if (extraHeaders != null && extraHeaders.isNotEmpty) {
+      headers.addAll(extraHeaders);
+    }
     return headers;
   }
 
-  Map<String, dynamic> _decodeResponse(http.Response response) {
+  Future<ApiResult> _send({
+    required String method,
+    required String path,
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+    String? idempotencyKey,
+  }) async {
+    final requestId = newRequestId();
+    final includeBody =
+        method == 'POST' || method == 'PATCH' || method == 'PUT';
+    final headers = await _buildHeaders(
+      requestId: requestId,
+      idempotencyKey: idempotencyKey,
+      includeJsonContentType: includeBody,
+      extraHeaders: extraHeaders,
+    );
+
+    late final http.Response response;
+    final uri = _buildUri(path);
+    switch (method.toUpperCase()) {
+      case 'GET':
+        response = await _httpClient.get(uri, headers: headers);
+        break;
+      case 'POST':
+        response = await _httpClient.post(
+          uri,
+          headers: headers,
+          body: jsonEncode(body ?? const <String, dynamic>{}),
+        );
+        break;
+      case 'PATCH':
+        response = await _httpClient.patch(
+          uri,
+          headers: headers,
+          body: jsonEncode(body ?? const <String, dynamic>{}),
+        );
+        break;
+      case 'PUT':
+        response = await _httpClient.put(
+          uri,
+          headers: headers,
+          body: jsonEncode(body ?? const <String, dynamic>{}),
+        );
+        break;
+      default:
+        throw UnsupportedError('Unsupported HTTP method: $method');
+    }
+
+    return _decodeResponse(response);
+  }
+
+  ApiResult _decodeResponse(http.Response response) {
+    if (response.statusCode == 304) {
+      return ApiResult(
+        statusCode: response.statusCode,
+        headers: response.headers,
+        data: const <String, dynamic>{},
+      );
+    }
+
     final rawBody = response.body;
     final decodedBody = _tryParseJson(rawBody);
     final payload = decodedBody != null ? _mapFromDynamic(decodedBody) : null;
@@ -148,13 +273,25 @@ class ApiClient {
     }
 
     if (payload != null) {
-      return payload;
+      return ApiResult(
+        statusCode: response.statusCode,
+        headers: response.headers,
+        data: payload,
+      );
     }
 
     if (rawBody.trim().isEmpty) {
-      return <String, dynamic>{};
+      return ApiResult(
+        statusCode: response.statusCode,
+        headers: response.headers,
+        data: const <String, dynamic>{},
+      );
     }
-    return <String, dynamic>{'raw_body': rawBody};
+    return ApiResult(
+      statusCode: response.statusCode,
+      headers: response.headers,
+      data: <String, dynamic>{'raw_body': rawBody},
+    );
   }
 
   ApiException _buildException({
@@ -162,7 +299,9 @@ class ApiClient {
     required Map<String, dynamic>? payload,
     required String rawBody,
   }) {
-    final code = _stringOrNull(payload?['code']);
+    final code =
+        _stringOrNull(payload?['code']) ??
+        _stringOrNull(payload?['error_code']);
     final traceId = _stringOrNull(payload?['trace_id']);
     final rawMessage = rawBody.trim();
     final message =

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf_io.dart' as io;
@@ -195,7 +197,8 @@ Future<void> main() async {
     environmentMap: env,
   ).buildHandler();
 
-  final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
+  final port = int.parse(Platform.environment['PORT'] ?? '8080');
+  const listenHost = '0.0.0.0';
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
   );
@@ -205,6 +208,100 @@ Future<void> main() async {
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
   stdout.writeln(
-    'Hail-O backend listening on http://${server.address.host}:${server.port}',
+    jsonEncode(<String, Object?>{
+      'event': 'server_listen',
+      'host': listenHost,
+      'port': server.port,
+    }),
   );
+  stdout.writeln(
+    'Hail-O backend listening on http://$listenHost:${server.port}',
+  );
+
+  try {
+    await _verifyBindContract(port: server.port);
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'bind_check_ok',
+        'path': '/api/healthz',
+        'port': server.port,
+      }),
+    );
+  } catch (error) {
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'bind_check_failed',
+        'path': '/api/healthz',
+        'port': server.port,
+        'reason': error.toString(),
+      }),
+    );
+    await server.close(force: true);
+    await db.close();
+    if (postgresProvider != null) {
+      await postgresProvider.close();
+    }
+    rethrow;
+  }
+
+  final shutdownCompleter = Completer<void>();
+  final signalSubscriptions = <StreamSubscription<ProcessSignal>>[];
+
+  void triggerShutdown(String signal) {
+    if (shutdownCompleter.isCompleted) {
+      return;
+    }
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'event': 'shutdown_signal',
+        'signal': signal,
+      }),
+    );
+    shutdownCompleter.complete();
+  }
+
+  if (!Platform.isWindows) {
+    signalSubscriptions.add(
+      ProcessSignal.sigterm.watch().listen((_) => triggerShutdown('sigterm')),
+    );
+  }
+  signalSubscriptions.add(
+    ProcessSignal.sigint.watch().listen((_) => triggerShutdown('sigint')),
+  );
+
+  await shutdownCompleter.future;
+  for (final subscription in signalSubscriptions) {
+    await subscription.cancel();
+  }
+  await server.close(force: false);
+  await db.close();
+  if (postgresProvider != null) {
+    await postgresProvider.close();
+  }
+  stdout.writeln(
+    jsonEncode(<String, Object?>{
+      'event': 'server_stopped',
+      'port': server.port,
+    }),
+  );
+}
+
+Future<void> _verifyBindContract({required int port}) async {
+  final client = HttpClient();
+  client.connectionTimeout = const Duration(seconds: 3);
+  try {
+    final request = await client
+        .getUrl(Uri.parse('http://127.0.0.1:$port/api/healthz'))
+        .timeout(const Duration(seconds: 5));
+    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final response = await request.close().timeout(const Duration(seconds: 5));
+    final body = await utf8.decoder.bind(response).join();
+    if (response.statusCode != 200) {
+      throw StateError(
+        'bind contract expected 200 from /api/healthz, got ${response.statusCode}, body=$body',
+      );
+    }
+  } finally {
+    client.close(force: true);
+  }
 }
