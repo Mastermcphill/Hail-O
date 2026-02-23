@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:test/test.dart';
 
+import '../infra/request_metrics.dart';
 import '../modules/payments/manual_payment_provider.dart';
 import '../modules/payments/payment_service.dart';
 import '../modules/payments/paystack_payment_provider.dart';
@@ -35,8 +36,12 @@ void main() {
     test(
       'returns signature exception when provider signature is invalid',
       () async {
+        final metrics = RequestMetrics();
+        final logs = <String>[];
         final service = PaymentService(
           provider: PaystackPaymentProvider(secretKey: 'super-secret'),
+          metrics: metrics,
+          logSink: logs.add,
         );
         final body = jsonEncode(<String, Object?>{
           'event': 'charge.success',
@@ -48,8 +53,8 @@ void main() {
           },
         });
 
-        expect(
-          () => service.handleWebhook(
+        await expectLater(
+          service.handleWebhook(
             headers: const <String, String>{
               'x-paystack-signature': 'invalid-signature',
             },
@@ -57,6 +62,16 @@ void main() {
           ),
           throwsA(isA<PaymentWebhookSignatureException>()),
         );
+
+        final snapshot = metrics.snapshot();
+        final webhookEvents =
+            snapshot['marketplace_webhook_events_total'] as Map<String, int>;
+        expect(webhookEvents, isA<Map<String, int>>());
+        expect(logs, isNotEmpty);
+        final parsed = jsonDecode(logs.first) as Map<String, dynamic>;
+        expect(parsed['component'], 'payment_webhook');
+        expect(parsed['verified'], isFalse);
+        expect(parsed['action'], 'signature_invalid');
       },
     );
   });

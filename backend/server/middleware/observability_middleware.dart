@@ -18,21 +18,43 @@ Middleware observabilityMiddleware({
       watch.stop();
 
       final errorCode = response.headers['x-error-code'];
-      metrics.record(statusCode: response.statusCode, errorCode: errorCode);
+      final latencyMs = watch.elapsedMilliseconds;
+      final path = request.url.path;
+
+      metrics.recordRequest(
+        statusCode: response.statusCode,
+        method: request.method,
+        path: path,
+        latencyMs: latencyMs,
+        errorCode: errorCode,
+      );
+      final webhookProvider = response.headers['x-payment-provider'] ?? '';
+      final webhookAction = response.headers['x-webhook-action'] ?? '';
+
+      if (response.statusCode >= 400 &&
+          path.startsWith('marketplace/') &&
+          path.contains('/purchases')) {
+        metrics.recordMarketplacePaymentFailure();
+      }
 
       sink(
         jsonEncode(<String, Object?>{
           'trace_id': request.requestContext.traceId,
+          'route': path,
           'method': request.method,
-          'path': request.url.path,
-          'status': response.statusCode,
-          'latency_ms': watch.elapsedMilliseconds,
+          'status_code': response.statusCode,
+          'latency_ms': latencyMs,
           'user_id': request.requestContext.userId,
           'idempotency_key': _hashIdempotencyKey(
             request.requestContext.idempotencyKey,
           ),
+          'purchase_id':
+              response.headers['x-marketplace-purchase-id'] ??
+              _extractPurchaseIdFromPath(request.url.pathSegments),
           if (errorCode != null && errorCode.isNotEmpty)
             'error_code': errorCode,
+          if (webhookProvider.isNotEmpty) 'webhook_provider': webhookProvider,
+          if (webhookAction.isNotEmpty) 'webhook_action': webhookAction,
         }),
       );
       return response;
@@ -46,4 +68,14 @@ String? _hashIdempotencyKey(String? key) {
   }
   final digest = sha256.convert(utf8.encode(key)).toString();
   return digest.substring(0, 16);
+}
+
+String? _extractPurchaseIdFromPath(List<String> pathSegments) {
+  for (final segment in pathSegments) {
+    final trimmed = segment.trim();
+    if (trimmed.length == 36 && trimmed.contains('-')) {
+      return trimmed;
+    }
+  }
+  return null;
 }

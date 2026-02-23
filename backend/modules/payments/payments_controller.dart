@@ -36,6 +36,10 @@ class PaymentsController {
           'duplicate': result.duplicate,
           'signature_valid': result.signatureValid,
         },
+        headers: <String, String>{
+          'x-payment-provider': result.provider,
+          'x-webhook-action': result.action,
+        },
       );
     } on PaymentWebhookSignatureException {
       return _error(
@@ -43,6 +47,10 @@ class PaymentsController {
         401,
         errorCode: 'INVALID_WEBHOOK_SIGNATURE',
         message: 'Webhook signature verification failed',
+        headers: <String, String>{
+          'x-payment-provider': _paymentService.providerName,
+          'x-webhook-action': 'signature_invalid',
+        },
       );
     } on FormatException catch (error) {
       return _error(

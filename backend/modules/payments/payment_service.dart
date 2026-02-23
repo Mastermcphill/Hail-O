@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:postgres/postgres.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../infra/request_metrics.dart';
 import '../../infra/postgres_provider.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import 'manual_payment_provider.dart';
@@ -34,10 +35,14 @@ class PaymentService {
   PaymentService({
     required PaymentProvider provider,
     PostgresProvider? postgresProvider,
+    RequestMetrics? metrics,
+    void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
   }) : _provider = provider,
        _postgresProvider = postgresProvider,
+       _metrics = metrics,
+       _logSink = logSink ?? print,
        _uuid = uuid ?? const Uuid(),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
 
@@ -46,6 +51,8 @@ class PaymentService {
     String? configuredProvider,
     String? paystackSecretKey,
     String? stripeWebhookSecret,
+    RequestMetrics? metrics,
+    void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
   }) {
@@ -65,6 +72,8 @@ class PaymentService {
     return PaymentService(
       provider: provider,
       postgresProvider: postgresProvider,
+      metrics: metrics,
+      logSink: logSink,
       uuid: uuid,
       nowUtc: nowUtc,
     );
@@ -72,6 +81,8 @@ class PaymentService {
 
   final PaymentProvider _provider;
   final PostgresProvider? _postgresProvider;
+  final RequestMetrics? _metrics;
+  final void Function(String line) _logSink;
   final Uuid _uuid;
   final DateTime Function() _nowUtc;
   final Set<String> _memoryWebhookDedup = <String>{};
@@ -104,11 +115,31 @@ class PaymentService {
       rawBody: rawBody,
     );
     if (!event.signatureValid) {
+      _metrics?.recordMarketplaceWebhookEvent(
+        provider: event.provider,
+        action: 'signature_invalid',
+      );
+      _logWebhookOutcome(
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        verified: false,
+        action: 'signature_invalid',
+      );
       throw const PaymentWebhookSignatureException();
     }
 
     final duplicate = await _recordWebhook(event: event, rawBody: rawBody);
     if (duplicate) {
+      _metrics?.recordMarketplaceWebhookEvent(
+        provider: event.provider,
+        action: 'duplicate_ignored',
+      );
+      _logWebhookOutcome(
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        verified: true,
+        action: 'duplicate_ignored',
+      );
       return PaymentWebhookProcessResult(
         provider: event.provider,
         providerEventId: event.providerEventId,
@@ -119,6 +150,16 @@ class PaymentService {
     }
 
     final action = await _applyWebhookEvent(event);
+    _metrics?.recordMarketplaceWebhookEvent(
+      provider: event.provider,
+      action: action,
+    );
+    _logWebhookOutcome(
+      provider: event.provider,
+      providerEventId: event.providerEventId,
+      verified: true,
+      action: action,
+    );
     return PaymentWebhookProcessResult(
       provider: event.provider,
       providerEventId: event.providerEventId,
@@ -186,6 +227,7 @@ class PaymentService {
     final purchaseId = _looksLikeUuid(event.purchaseId)
         ? event.purchaseId
         : null;
+    final watch = Stopwatch()..start();
     final insertedRows = await _postgresProvider.withConnection(
       (connection) => connection.query(
         '''
@@ -230,6 +272,11 @@ class PaymentService {
           'created_at': _nowUtc(),
         },
       ),
+    );
+    watch.stop();
+    _metrics?.recordMarketplaceDbQueryLatency(
+      op: 'insert_webhook_event',
+      latencyMs: watch.elapsedMilliseconds,
     );
     return insertedRows.isEmpty;
   }
@@ -347,5 +394,22 @@ class PaymentService {
       return false;
     }
     return _uuidPattern.hasMatch(value.trim());
+  }
+
+  void _logWebhookOutcome({
+    required String provider,
+    required String providerEventId,
+    required bool verified,
+    required String action,
+  }) {
+    _logSink(
+      jsonEncode(<String, Object?>{
+        'component': 'payment_webhook',
+        'provider': provider,
+        'provider_event_id': providerEventId,
+        'verified': verified,
+        'action': action,
+      }),
+    );
   }
 }

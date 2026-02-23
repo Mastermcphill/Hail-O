@@ -84,6 +84,7 @@ Handler buildApiRouter({
     stripeWebhookSecret:
         Platform.environment['STRIPE_WEBHOOK_SECRET'] ??
         Platform.environment['PAYMENT_PROVIDER_SECRET'],
+    metrics: requestMetrics,
   );
   final marketplaceRouter = MarketplaceRouter(
     handlers: MarketplaceHandlers(
