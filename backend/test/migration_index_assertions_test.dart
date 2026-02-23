@@ -22,14 +22,14 @@ void main() {
     final opsSql = sqlByName['004_operational_records.sql'] ?? '';
     final marketplaceSql = sqlByName['005_marketplace_core.sql'] ?? '';
     final marketplaceWebhookSql =
-        sqlByName['006_marketplace_webhooks.sql'] ?? '';
-    final billingLedgerSql = sqlByName['007_billing_ledger_entries.sql'] ?? '';
-    final entitlementSql = sqlByName['008_marketplace_entitlements.sql'] ?? '';
-    final referralCouponSql = sqlByName['009_referrals_coupons.sql'] ?? '';
-    final creditsSql = sqlByName['010_credits_wallet.sql'] ?? '';
+        sqlByName['007_marketplace_webhooks.sql'] ?? '';
+    final billingLedgerSql = sqlByName['008_billing_ledger_entries.sql'] ?? '';
+    final entitlementSql = sqlByName['010_marketplace_entitlements.sql'] ?? '';
+    final referralCouponSql = sqlByName['013_referrals_coupons.sql'] ?? '';
+    final creditsSql = sqlByName['014_credits_wallet.sql'] ?? '';
     final invoicesDunningCommsSql =
-        sqlByName['011_invoices_dunning_comms.sql'] ?? '';
-    final riskSql = sqlByName['012_risk_engine.sql'] ?? '';
+        sqlByName['015_invoices_dunning_comms.sql'] ?? '';
+    final riskSql = sqlByName['016_risk_engine.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
