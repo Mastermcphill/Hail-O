@@ -3,6 +3,7 @@ import 'package:hailo_core/features/marketplace/data/marketplace_dev_settings.da
 import 'package:hailo_core/features/marketplace/data/marketplace_repository.dart';
 import 'package:hailo_core/features/marketplace/models/offer.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
+import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
 import 'package:hailo_core/features/marketplace/models/seat_selection.dart';
 import 'package:hailo_core/features/marketplace/models/timeline_event.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -115,6 +116,62 @@ class _FakeRepository implements MarketplaceRepository {
   @override
   Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey) async {
     return 'purchase_1';
+  }
+
+  @override
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId) async {
+    return PurchaseReceipt(
+      purchaseId: purchaseId,
+      offerId: 'offer_1',
+      offerTitle: 'Offer',
+      seatCount: 1,
+      totalPriceMinor: 1000,
+      status: 'CONFIRMED',
+      createdAt: DateTime.now().toUtc(),
+      assignments: const <SeatAssignment>[],
+    );
+  }
+
+  @override
+  Future<PurchaseReceipt> updateSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  }) async {
+    return PurchaseReceipt(
+      purchaseId: purchaseId,
+      offerId: 'offer_1',
+      offerTitle: 'Offer',
+      seatCount: seatCount,
+      totalPriceMinor: seatCount * 1000,
+      status: 'SEATS_UPDATED',
+      createdAt: DateTime.now().toUtc(),
+      assignments: const <SeatAssignment>[],
+    );
+  }
+
+  @override
+  Future<PurchaseReceipt> updateAssignments({
+    required String purchaseId,
+    required List<SeatAssignment> assignments,
+  }) async {
+    return PurchaseReceipt(
+      purchaseId: purchaseId,
+      offerId: 'offer_1',
+      offerTitle: 'Offer',
+      seatCount: assignments.length,
+      totalPriceMinor: assignments.length * 1000,
+      status: 'ASSIGNMENT_UPDATED',
+      createdAt: DateTime.now().toUtc(),
+      assignments: assignments,
+    );
+  }
+
+  @override
+  Future<String> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  }) async {
+    return 'purchase_changed';
   }
 
   @override

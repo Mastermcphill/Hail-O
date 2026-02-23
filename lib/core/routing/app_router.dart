@@ -11,9 +11,12 @@ import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/marketplace/data/marketplace_repository.dart';
+import '../../features/marketplace/ui/manage_seats_screen.dart';
 import '../../features/marketplace/state/marketplace_controller.dart';
 import '../../features/marketplace/ui/offers_screen.dart';
 import '../../features/marketplace/ui/paywall_screen.dart';
+import '../../features/marketplace/ui/plan_change_preview_screen.dart';
+import '../../features/marketplace/ui/receipt_screen.dart';
 import '../../features/marketplace/ui/seats_screen.dart';
 import '../../features/marketplace/ui/timeline_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
@@ -146,7 +149,10 @@ class AppRouter {
               routes: <RouteBase>[
                 GoRoute(
                   path: '/marketplace/offers',
-                  builder: (context, state) => const MarketplaceOffersScreen(),
+                  builder: (context, state) => MarketplaceOffersScreen(
+                    currentPurchaseId: state.uri.queryParameters['purchaseId'],
+                    currentOfferId: state.uri.queryParameters['currentOfferId'],
+                  ),
                 ),
                 GoRoute(
                   path: '/marketplace/paywall',
@@ -170,6 +176,64 @@ class AppRouter {
                       );
                     }
                     return MarketplaceSeatsScreen(offerId: offerId);
+                  },
+                ),
+                GoRoute(
+                  path: '/marketplace/upgrade',
+                  builder: (context, state) {
+                    final purchaseId =
+                        state.uri.queryParameters['purchaseId'] ?? '';
+                    final currentOfferId =
+                        state.uri.queryParameters['currentOfferId'] ?? '';
+                    final newOfferId =
+                        state.uri.queryParameters['newOfferId'] ?? '';
+                    if (purchaseId.isEmpty ||
+                        currentOfferId.isEmpty ||
+                        newOfferId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message:
+                            'Missing query parameter: purchaseId, currentOfferId, or newOfferId',
+                      );
+                    }
+                    return MarketplacePlanChangePreviewScreen(
+                      purchaseId: purchaseId,
+                      currentOfferId: currentOfferId,
+                      newOfferId: newOfferId,
+                    );
+                  },
+                ),
+                GoRoute(
+                  path: '/marketplace/receipt',
+                  builder: (context, state) {
+                    final purchaseId =
+                        state.uri.queryParameters['purchaseId'] ?? '';
+                    if (purchaseId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message: 'Missing query parameter: purchaseId',
+                      );
+                    }
+                    return MarketplaceReceiptScreen(
+                      purchaseId: purchaseId,
+                      fallbackOfferId: state.uri.queryParameters['offerId'],
+                      fallbackSeatCount: int.tryParse(
+                        state.uri.queryParameters['seatCount'] ?? '',
+                      ),
+                      fallbackTotalPriceMinor: int.tryParse(
+                        state.uri.queryParameters['totalPrice'] ?? '',
+                      ),
+                    );
+                  },
+                ),
+                GoRoute(
+                  path: '/marketplace/seats/manage/:purchaseId',
+                  builder: (context, state) {
+                    final purchaseId = state.pathParameters['purchaseId'] ?? '';
+                    if (purchaseId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message: 'Missing path parameter: purchaseId',
+                      );
+                    }
+                    return MarketplaceManageSeatsScreen(purchaseId: purchaseId);
                   },
                 ),
                 GoRoute(
@@ -488,8 +552,17 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/marketplace/paywall')) {
     return 'Marketplace Paywall';
   }
+  if (_isSelectedPath(path, '/marketplace/upgrade')) {
+    return 'Marketplace Upgrade';
+  }
+  if (_isSelectedPath(path, '/marketplace/seats/manage')) {
+    return 'Manage Seats';
+  }
   if (_isSelectedPath(path, '/marketplace/seats')) {
     return 'Marketplace Seats';
+  }
+  if (_isSelectedPath(path, '/marketplace/receipt')) {
+    return 'Marketplace Receipt';
   }
   if (_isSelectedPath(path, '/marketplace/timeline')) {
     return 'Marketplace Timeline';

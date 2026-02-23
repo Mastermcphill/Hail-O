@@ -7,6 +7,7 @@ import '../data/marketplace_local_store.dart';
 import '../data/marketplace_repository.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 
@@ -27,10 +28,14 @@ class MarketplaceController extends ChangeNotifier {
   bool _loadingOffers = false;
   bool _loadingPaywall = false;
   bool _loadingTimeline = false;
+  bool _loadingReceipt = false;
   bool _submittingCheckout = false;
+  bool _updatingPurchase = false;
+  bool _changingPlan = false;
   int _seatCount = 1;
   String? _pendingCheckoutOfferId;
   String? _pendingCheckoutIdempotencyKey;
+  PurchaseReceipt? _activeReceipt;
   List<SeatAssignment> _assignments = <SeatAssignment>[
     const SeatAssignment(seatNumber: 1, name: '', email: ''),
   ];
@@ -42,10 +47,14 @@ class MarketplaceController extends ChangeNotifier {
   bool get loadingOffers => _loadingOffers;
   bool get loadingPaywall => _loadingPaywall;
   bool get loadingTimeline => _loadingTimeline;
+  bool get loadingReceipt => _loadingReceipt;
   bool get submittingCheckout => _submittingCheckout;
+  bool get updatingPurchase => _updatingPurchase;
+  bool get changingPlan => _changingPlan;
   int get seatCount => _seatCount;
   List<SeatAssignment> get assignments => _assignments;
   String? get pendingCheckoutIdempotencyKey => _pendingCheckoutIdempotencyKey;
+  PurchaseReceipt? get activeReceipt => _activeReceipt;
 
   bool hasPendingCheckoutForOffer(String offerId) {
     return _pendingCheckoutOfferId == offerId &&
@@ -167,21 +176,31 @@ class MarketplaceController extends ChangeNotifier {
         selection,
         idempotencyKey: idempotencyKey,
       );
+      _setLocalReceiptFromSelection(
+        selection: selection,
+        purchaseId: purchaseId,
+      );
       await _finalizeCheckoutSuccess(
         offerId: offerId,
         idempotencyKey: idempotencyKey,
         purchaseId: purchaseId,
       );
+      await _tryHydrateReceipt(purchaseId);
       return purchaseId;
     } catch (error) {
       if (idempotencyKey != null && idempotencyKey.isNotEmpty) {
         final restored = await _tryRestoreCheckout(idempotencyKey);
         if (restored != null && restored.isNotEmpty) {
+          _setLocalReceiptFromSelection(
+            selection: selection,
+            purchaseId: restored,
+          );
           await _finalizeCheckoutSuccess(
             offerId: offerId,
             idempotencyKey: idempotencyKey,
             purchaseId: restored,
           );
+          await _tryHydrateReceipt(restored);
           return restored;
         }
       }
@@ -219,6 +238,7 @@ class MarketplaceController extends ChangeNotifier {
         idempotencyKey: key,
         purchaseId: restored,
       );
+      await _tryHydrateReceipt(restored);
       return restored;
     } finally {
       _submittingCheckout = false;
@@ -226,9 +246,170 @@ class MarketplaceController extends ChangeNotifier {
     }
   }
 
+  Offer? offerById(String offerId) {
+    for (final offer in _offers) {
+      if (offer.id == offerId) {
+        return offer;
+      }
+    }
+    return null;
+  }
+
+  Future<PurchaseReceipt?> loadPurchaseReceipt(String purchaseId) async {
+    if (_loadingReceipt) {
+      return _activeReceipt;
+    }
+    _loadingReceipt = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final receipt = await _repository.fetchPurchaseReceipt(purchaseId);
+      _activeReceipt = receipt;
+      if (receipt != null) {
+        _seatCount = _clampSeatCount(receipt.seatCount);
+        _assignments = receipt.assignments.isEmpty
+            ? <SeatAssignment>[
+                const SeatAssignment(seatNumber: 1, name: '', email: ''),
+              ]
+            : receipt.assignments;
+        _syncAssignmentsToSeatCount();
+      }
+      return receipt;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return null;
+    } finally {
+      _loadingReceipt = false;
+      notifyListeners();
+    }
+  }
+
+  Future<PurchaseReceipt?> updatePurchaseSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  }) async {
+    if (_updatingPurchase) {
+      return null;
+    }
+    _updatingPurchase = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final updated = await _repository.updateSeatCount(
+        purchaseId: purchaseId,
+        seatCount: seatCount,
+      );
+      _activeReceipt = updated;
+      _seatCount = _clampSeatCount(updated.seatCount);
+      _assignments = updated.assignments;
+      _syncAssignmentsToSeatCount();
+      await loadTimeline(purchaseId);
+      return updated;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return null;
+    } finally {
+      _updatingPurchase = false;
+      notifyListeners();
+    }
+  }
+
+  Future<PurchaseReceipt?> updatePurchaseAssignments({
+    required String purchaseId,
+  }) async {
+    if (_updatingPurchase) {
+      return null;
+    }
+    _updatingPurchase = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final payload = _assignments.take(_seatCount).toList(growable: false);
+      final updated = await _repository.updateAssignments(
+        purchaseId: purchaseId,
+        assignments: payload,
+      );
+      _activeReceipt = updated;
+      _assignments = updated.assignments;
+      _syncAssignmentsToSeatCount();
+      await loadTimeline(purchaseId);
+      return updated;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return null;
+    } finally {
+      _updatingPurchase = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  }) async {
+    if (_changingPlan) {
+      return null;
+    }
+    _changingPlan = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final newPurchaseId = await _repository.changePlan(
+        purchaseId: purchaseId,
+        newOfferId: newOfferId,
+      );
+      await loadPurchaseReceipt(newPurchaseId);
+      await loadTimeline(newPurchaseId);
+      return newPurchaseId;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return null;
+    } finally {
+      _changingPlan = false;
+      notifyListeners();
+    }
+  }
+
   void clearError() {
     _errorMessage = null;
     notifyListeners();
+  }
+
+  void _setLocalReceiptFromSelection({
+    required SeatSelection selection,
+    required String purchaseId,
+  }) {
+    final offer = offerById(selection.offerId);
+    final offerTitle = offer?.title ?? selection.offerId;
+    final basePrice = offer?.priceMinor ?? 0;
+    _activeReceipt = PurchaseReceipt(
+      purchaseId: purchaseId,
+      offerId: selection.offerId,
+      offerTitle: offerTitle,
+      seatCount: selection.seatCount,
+      totalPriceMinor: basePrice * selection.seatCount,
+      status: 'CONFIRMED',
+      createdAt: DateTime.now().toUtc(),
+      assignments: selection.assignments,
+    );
+  }
+
+  Future<void> _tryHydrateReceipt(String purchaseId) async {
+    try {
+      final receipt = await _repository.fetchPurchaseReceipt(purchaseId);
+      if (receipt != null) {
+        _activeReceipt = receipt;
+        _seatCount = _clampSeatCount(receipt.seatCount);
+        _assignments = receipt.assignments;
+        _syncAssignmentsToSeatCount();
+      }
+    } catch (_) {
+      // Keep local receipt snapshot if hydration fails.
+    }
   }
 
   Future<String> _resolveIdempotencyKey({

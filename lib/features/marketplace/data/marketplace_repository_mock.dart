@@ -3,6 +3,7 @@ import 'dart:math';
 import '../../../core/util/ids.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_repository.dart';
@@ -17,6 +18,8 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   final bool delayFirstRestore;
   final Map<String, List<TimelineEvent>> _timelineByPurchaseId =
       <String, List<TimelineEvent>>{};
+  final Map<String, PurchaseReceipt> _purchaseById =
+      <String, PurchaseReceipt>{};
   final Map<String, String> _purchaseIdByIdempotencyKey = <String, String>{};
   final Set<String> _failedCreateKeys = <String>{};
   final Set<String> _firstRestoreAttempted = <String>{};
@@ -53,11 +56,29 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
 
     final purchaseId = 'purchase_${newRequestId().replaceAll('-', '')}';
     _purchaseIdByIdempotencyKey[idempotencyKey] = purchaseId;
+    final offer = _findOffer(selection.offerId);
+    final seatCount = min(max(selection.seatCount, 1), 50);
+    final assignments = _normalizeAssignments(
+      provided: selection.assignments,
+      seatCount: seatCount,
+    );
+    final totalPrice = offer.priceMinor * seatCount;
+
+    _purchaseById[purchaseId] = PurchaseReceipt(
+      purchaseId: purchaseId,
+      offerId: offer.id,
+      offerTitle: offer.title,
+      seatCount: seatCount,
+      totalPriceMinor: totalPrice,
+      status: 'CONFIRMED',
+      createdAt: DateTime.now().toUtc(),
+      assignments: assignments,
+    );
     _timelineByPurchaseId[purchaseId] = _buildTimeline(
       purchaseId: purchaseId,
-      offerId: selection.offerId,
-      seatCount: selection.seatCount,
-      priceMinor: _priceForOffer(selection.offerId, selection.seatCount),
+      offerId: offer.id,
+      seatCount: seatCount,
+      priceMinor: totalPrice,
     );
     if (failFirstCreateCheckout &&
         !_failedCreateKeys.contains(idempotencyKey)) {
@@ -87,6 +108,140 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   }
 
   @override
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    return _purchaseById[purchaseId];
+  }
+
+  @override
+  Future<PurchaseReceipt> updateSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 130));
+    final existing = _purchaseById[purchaseId];
+    if (existing == null) {
+      throw const MarketplaceRepositoryException(
+        'Could not find purchase to update seats.',
+        code: 'purchase_not_found',
+      );
+    }
+
+    final clampedSeatCount = min(max(seatCount, 1), 50);
+    final offer = _findOffer(existing.offerId);
+    final existingAssignments = existing.assignments;
+    final updatedAssignments = <SeatAssignment>[];
+    for (var index = 0; index < clampedSeatCount; index++) {
+      if (index < existingAssignments.length) {
+        final assignment = existingAssignments[index];
+        updatedAssignments.add(assignment.copyWith(seatNumber: index + 1));
+      } else {
+        updatedAssignments.add(
+          SeatAssignment(seatNumber: index + 1, name: '', email: ''),
+        );
+      }
+    }
+
+    final updated = existing.copyWith(
+      seatCount: clampedSeatCount,
+      totalPriceMinor: offer.priceMinor * clampedSeatCount,
+      assignments: updatedAssignments,
+      status: 'SEATS_UPDATED',
+    );
+    _purchaseById[purchaseId] = updated;
+
+    _appendTimelineEvent(
+      purchaseId: purchaseId,
+      title: 'SEATS_UPDATED',
+      description: 'Seat count adjusted to $clampedSeatCount.',
+      status: TimelineEventStatus.success,
+    );
+    return updated;
+  }
+
+  @override
+  Future<PurchaseReceipt> updateAssignments({
+    required String purchaseId,
+    required List<SeatAssignment> assignments,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 130));
+    final existing = _purchaseById[purchaseId];
+    if (existing == null) {
+      throw const MarketplaceRepositoryException(
+        'Could not find purchase to update assignments.',
+        code: 'purchase_not_found',
+      );
+    }
+
+    final updatedAssignments = _normalizeAssignments(
+      provided: assignments,
+      seatCount: existing.seatCount,
+    );
+    final updated = existing.copyWith(
+      assignments: updatedAssignments,
+      status: 'ASSIGNMENT_UPDATED',
+    );
+    _purchaseById[purchaseId] = updated;
+    _appendTimelineEvent(
+      purchaseId: purchaseId,
+      title: 'ASSIGNMENT_UPDATED',
+      description: 'Passenger assignment details were updated.',
+      status: TimelineEventStatus.pending,
+    );
+    return updated;
+  }
+
+  @override
+  Future<String> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    final current = _purchaseById[purchaseId];
+    if (current == null) {
+      throw const MarketplaceRepositoryException(
+        'Purchase not found for plan change.',
+        code: 'purchase_not_found',
+      );
+    }
+    final newOffer = _findOffer(newOfferId);
+    final newPurchaseId = 'purchase_${newRequestId().replaceAll('-', '')}';
+    final updated = current.copyWith(
+      purchaseId: newPurchaseId,
+      offerId: newOffer.id,
+      offerTitle: newOffer.title,
+      totalPriceMinor: newOffer.priceMinor * current.seatCount,
+      status: 'PLAN_CHANGED',
+      createdAt: DateTime.now().toUtc(),
+    );
+    _purchaseById[newPurchaseId] = updated;
+
+    final previousEvents =
+        _timelineByPurchaseId[purchaseId] ??
+        <TimelineEvent>[
+          TimelineEvent(
+            id: 'evt_${newRequestId()}',
+            title: 'Purchase initialized',
+            description: 'Purchase $purchaseId created.',
+            occurredAt: DateTime.now().toUtc(),
+            status: TimelineEventStatus.pending,
+          ),
+        ];
+    _timelineByPurchaseId[newPurchaseId] = <TimelineEvent>[
+      ...previousEvents,
+      TimelineEvent(
+        id: 'evt_${newRequestId()}',
+        title: 'PLAN_CHANGED',
+        description:
+            'Plan changed from ${current.offerTitle} to ${newOffer.title}.',
+        occurredAt: DateTime.now().toUtc(),
+        status: TimelineEventStatus.success,
+      ),
+    ];
+    return newPurchaseId;
+  }
+
+  @override
   Future<List<TimelineEvent>> fetchTimeline(String purchaseId) async {
     await Future<void>.delayed(const Duration(milliseconds: 130));
     final events = _timelineByPurchaseId[purchaseId];
@@ -106,13 +261,47 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
     ];
   }
 
-  int _priceForOffer(String offerId, int seatCount) {
-    final offer = _offers.firstWhere(
+  Offer _findOffer(String offerId) {
+    return _offers.firstWhere(
       (item) => item.id == offerId,
       orElse: () => _offers.first,
     );
-    final multiplier = min(max(seatCount, 1), 50);
-    return offer.priceMinor * multiplier;
+  }
+
+  List<SeatAssignment> _normalizeAssignments({
+    required List<SeatAssignment> provided,
+    required int seatCount,
+  }) {
+    final normalized = <SeatAssignment>[];
+    for (var index = 0; index < seatCount; index++) {
+      if (index < provided.length) {
+        normalized.add(provided[index].copyWith(seatNumber: index + 1));
+      } else {
+        normalized.add(
+          SeatAssignment(seatNumber: index + 1, name: '', email: ''),
+        );
+      }
+    }
+    return normalized;
+  }
+
+  void _appendTimelineEvent({
+    required String purchaseId,
+    required String title,
+    required String description,
+    required TimelineEventStatus status,
+  }) {
+    final existing = _timelineByPurchaseId[purchaseId] ?? <TimelineEvent>[];
+    _timelineByPurchaseId[purchaseId] = <TimelineEvent>[
+      ...existing,
+      TimelineEvent(
+        id: 'evt_${newRequestId()}',
+        title: title,
+        description: description,
+        occurredAt: DateTime.now().toUtc(),
+        status: status,
+      ),
+    ];
   }
 
   List<TimelineEvent> _buildTimeline({

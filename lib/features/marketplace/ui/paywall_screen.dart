@@ -102,6 +102,17 @@ class _MarketplacePaywallScreenState extends State<MarketplacePaywallScreen> {
                 child: Text(paywall.ctaLabel),
               ),
               const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('marketplace_paywall_change_plan_button'),
+                onPressed: () {
+                  context.go(
+                    '/marketplace/offers?currentOfferId='
+                    '${Uri.encodeQueryComponent(widget.offerId)}',
+                  );
+                },
+                child: const Text('Change plan'),
+              ),
+              const SizedBox(height: 8),
               FilledButton.tonal(
                 onPressed: () => controller.loadPaywall(widget.offerId),
                 child: const Text('Refresh'),

@@ -73,5 +73,46 @@ void main() {
       expect(first, isNotEmpty);
       expect(second, first);
     });
+
+    test('updates seats and assignments and appends timeline events', () async {
+      final offers = await repository.fetchOffers();
+      final offerId = offers.first.id;
+      final purchaseId = await repository.createCheckout(
+        SeatSelection(
+          offerId: offerId,
+          seatCount: 2,
+          assignments: const <SeatAssignment>[
+            SeatAssignment(seatNumber: 1, name: 'Ada', email: 'ada@test.dev'),
+            SeatAssignment(
+              seatNumber: 2,
+              name: 'Kunle',
+              email: 'kunle@test.dev',
+            ),
+          ],
+        ),
+        idempotencyKey: 'manage_seats_idem',
+      );
+
+      final updatedSeats = await repository.updateSeatCount(
+        purchaseId: purchaseId,
+        seatCount: 3,
+      );
+      expect(updatedSeats.seatCount, 3);
+
+      final updatedAssignments = await repository.updateAssignments(
+        purchaseId: purchaseId,
+        assignments: const <SeatAssignment>[
+          SeatAssignment(seatNumber: 1, name: 'Ada', email: 'ada@test.dev'),
+          SeatAssignment(seatNumber: 2, name: 'Kunle', email: 'kunle@test.dev'),
+          SeatAssignment(seatNumber: 3, name: 'Tobi', email: 'tobi@test.dev'),
+        ],
+      );
+      expect(updatedAssignments.assignments.length, 3);
+
+      final timeline = await repository.fetchTimeline(purchaseId);
+      final titles = timeline.map((event) => event.title).toList();
+      expect(titles, contains('SEATS_UPDATED'));
+      expect(titles, contains('ASSIGNMENT_UPDATED'));
+    });
   });
 }

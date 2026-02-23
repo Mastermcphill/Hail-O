@@ -4,6 +4,14 @@ class MarketplaceEndpoints {
       '/marketplace/offers/$offerId/paywall';
 
   static const purchases = '/marketplace/purchases';
+  static String purchase(String purchaseId) =>
+      '/marketplace/purchases/$purchaseId';
+  static String purchaseSeats(String purchaseId) =>
+      '/marketplace/purchases/$purchaseId/seats';
+  static String purchaseAssignments(String purchaseId) =>
+      '/marketplace/purchases/$purchaseId/assignments';
+  static String changePlan(String purchaseId) =>
+      '/marketplace/purchases/$purchaseId/change-plan';
   static String purchaseTimeline(String purchaseId) =>
       '/marketplace/purchases/$purchaseId/timeline';
 

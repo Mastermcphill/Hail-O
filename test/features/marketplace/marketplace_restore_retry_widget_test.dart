@@ -5,6 +5,7 @@ import 'package:hailo_core/features/marketplace/data/marketplace_repository_mock
 import 'package:hailo_core/features/marketplace/state/marketplace_controller.dart';
 import 'package:hailo_core/features/marketplace/ui/offers_screen.dart';
 import 'package:hailo_core/features/marketplace/ui/paywall_screen.dart';
+import 'package:hailo_core/features/marketplace/ui/receipt_screen.dart';
 import 'package:hailo_core/features/marketplace/ui/seats_screen.dart';
 import 'package:hailo_core/features/marketplace/ui/timeline_screen.dart';
 import 'package:provider/provider.dart';
@@ -51,6 +52,12 @@ void main() {
               ),
             ),
             GoRoute(
+              path: '/marketplace/receipt',
+              builder: (context, state) => MarketplaceReceiptScreen(
+                purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
+              ),
+            ),
+            GoRoute(
               path: '/marketplace/timeline',
               builder: (context, state) => MarketplaceTimelineScreen(
                 purchaseId: state.uri.queryParameters['purchaseId'] ?? '',
@@ -86,6 +93,13 @@ void main() {
 
     await tester.tap(
       find.byKey(const Key('marketplace_resume_purchase_button')),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Booking Receipt'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('marketplace_receipt_timeline_button')),
     );
     await tester.pump();
     await tester.pumpAndSettle();

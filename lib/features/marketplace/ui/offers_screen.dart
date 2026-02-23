@@ -5,7 +5,14 @@ import 'package:provider/provider.dart';
 import '../state/marketplace_controller.dart';
 
 class MarketplaceOffersScreen extends StatefulWidget {
-  const MarketplaceOffersScreen({super.key});
+  const MarketplaceOffersScreen({
+    super.key,
+    this.currentPurchaseId,
+    this.currentOfferId,
+  });
+
+  final String? currentPurchaseId;
+  final String? currentOfferId;
 
   @override
   State<MarketplaceOffersScreen> createState() =>
@@ -51,6 +58,8 @@ class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final offer = controller.offers[index];
+              final isCurrentOffer = widget.currentOfferId == offer.id;
+              final isPlanChange = (widget.currentPurchaseId ?? '').isNotEmpty;
               return Card(
                 key: Key('marketplace_offer_card_$index'),
                 child: Padding(
@@ -62,6 +71,13 @@ class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
                         offer.title,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
+                      if (isCurrentOffer) ...<Widget>[
+                        const SizedBox(height: 6),
+                        const Chip(
+                          label: Text('Current plan'),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 8,
@@ -88,13 +104,30 @@ class _MarketplaceOffersScreenState extends State<MarketplaceOffersScreen> {
                         alignment: Alignment.centerRight,
                         child: FilledButton(
                           key: Key('marketplace_offer_continue_$index'),
-                          onPressed: () {
-                            context.push(
-                              '/marketplace/paywall?offerId='
-                              '${Uri.encodeQueryComponent(offer.id)}',
-                            );
-                          },
-                          child: const Text('Continue'),
+                          onPressed: isPlanChange && isCurrentOffer
+                              ? null
+                              : () {
+                                  if (isPlanChange) {
+                                    context.push(
+                                      '/marketplace/upgrade?purchaseId='
+                                      '${Uri.encodeQueryComponent(widget.currentPurchaseId!)}'
+                                      '&currentOfferId=${Uri.encodeQueryComponent(widget.currentOfferId ?? '')}'
+                                      '&newOfferId=${Uri.encodeQueryComponent(offer.id)}',
+                                    );
+                                    return;
+                                  }
+                                  context.push(
+                                    '/marketplace/paywall?offerId='
+                                    '${Uri.encodeQueryComponent(offer.id)}',
+                                  );
+                                },
+                          child: Text(
+                            isPlanChange
+                                ? (isCurrentOffer
+                                      ? 'Current plan'
+                                      : 'Preview change')
+                                : 'Continue',
+                          ),
                         ),
                       ),
                     ],

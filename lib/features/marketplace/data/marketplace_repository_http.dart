@@ -2,6 +2,7 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_errors.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_endpoints.dart';
@@ -119,6 +120,96 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       throw _mapError(
         error,
         fallbackMessage: 'Unable to restore purchase at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId) async {
+    try {
+      final response = await _apiClient.get(
+        MarketplaceEndpoints.purchase(purchaseId),
+      );
+      return PurchaseReceipt.fromMap(response);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to load purchase details at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<PurchaseReceipt> updateSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  }) async {
+    try {
+      final response = await _apiClient.patch(
+        MarketplaceEndpoints.purchaseSeats(purchaseId),
+        body: <String, dynamic>{'seat_count': seatCount},
+      );
+      return PurchaseReceipt.fromMap(response);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to update seat count right now.',
+      );
+    }
+  }
+
+  @override
+  Future<PurchaseReceipt> updateAssignments({
+    required String purchaseId,
+    required List<SeatAssignment> assignments,
+  }) async {
+    try {
+      final response = await _apiClient.patch(
+        MarketplaceEndpoints.purchaseAssignments(purchaseId),
+        body: <String, dynamic>{
+          'assignments': assignments
+              .map((assignment) => assignment.toMap())
+              .toList(growable: false),
+        },
+      );
+      return PurchaseReceipt.fromMap(response);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to update seat assignments right now.',
+      );
+    }
+  }
+
+  @override
+  Future<String> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.changePlan(purchaseId),
+        body: <String, dynamic>{'new_offer_id': newOfferId},
+      );
+      final direct = _readString(response['purchase_id']);
+      if (direct.isNotEmpty) {
+        return direct;
+      }
+      final purchaseMap = _asMap(response['purchase']);
+      final nested = _readString(purchaseMap['id']).isNotEmpty
+          ? _readString(purchaseMap['id'])
+          : _readString(purchaseMap['purchase_id']);
+      if (nested.isNotEmpty) {
+        return nested;
+      }
+      throw const MarketplaceRepositoryException(
+        'Plan change completed but purchase id was missing.',
+        code: 'missing_purchase_id',
+      );
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to change plan right now.',
       );
     }
   }

@@ -96,8 +96,10 @@ class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
                               return;
                             }
                             router.push(
-                              '/marketplace/timeline?purchaseId='
-                              '${Uri.encodeQueryComponent(purchaseId)}',
+                              '/marketplace/receipt?purchaseId='
+                              '${Uri.encodeQueryComponent(purchaseId)}'
+                              '&offerId=${Uri.encodeQueryComponent(widget.offerId)}'
+                              '&seatCount=${controller.seatCount}',
                             );
                           },
                     child: const Text('Resume purchase'),
@@ -127,8 +129,10 @@ class _MarketplaceSeatsScreenState extends State<MarketplaceSeatsScreen> {
                             return;
                           }
                           router.push(
-                            '/marketplace/timeline?purchaseId='
-                            '${Uri.encodeQueryComponent(purchaseId)}',
+                            '/marketplace/receipt?purchaseId='
+                            '${Uri.encodeQueryComponent(purchaseId)}'
+                            '&offerId=${Uri.encodeQueryComponent(widget.offerId)}'
+                            '&seatCount=${controller.seatCount}',
                           );
                         },
                   child: controller.submittingCheckout

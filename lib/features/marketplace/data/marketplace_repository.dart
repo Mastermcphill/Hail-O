@@ -2,6 +2,7 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_config.dart';
 import '../models/offer.dart';
 import '../models/paywall_copy.dart';
+import '../models/purchase_receipt.dart';
 import '../models/seat_selection.dart';
 import '../models/timeline_event.dart';
 import 'marketplace_dev_settings.dart';
@@ -19,6 +20,23 @@ abstract class MarketplaceRepository {
   });
 
   Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey);
+
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId);
+
+  Future<PurchaseReceipt> updateSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  });
+
+  Future<PurchaseReceipt> updateAssignments({
+    required String purchaseId,
+    required List<SeatAssignment> assignments,
+  });
+
+  Future<String> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  });
 
   Future<List<TimelineEvent>> fetchTimeline(String purchaseId);
 }
@@ -94,6 +112,65 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
           _httpRepository.restorePurchaseByIdempotencyKey(idempotencyKey),
       mockCall: () =>
           _mockRepository.restorePurchaseByIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @override
+  Future<PurchaseReceipt?> fetchPurchaseReceipt(String purchaseId) {
+    return _execute(
+      httpCall: () => _httpRepository.fetchPurchaseReceipt(purchaseId),
+      mockCall: () => _mockRepository.fetchPurchaseReceipt(purchaseId),
+    );
+  }
+
+  @override
+  Future<PurchaseReceipt> updateSeatCount({
+    required String purchaseId,
+    required int seatCount,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.updateSeatCount(
+        purchaseId: purchaseId,
+        seatCount: seatCount,
+      ),
+      mockCall: () => _mockRepository.updateSeatCount(
+        purchaseId: purchaseId,
+        seatCount: seatCount,
+      ),
+    );
+  }
+
+  @override
+  Future<PurchaseReceipt> updateAssignments({
+    required String purchaseId,
+    required List<SeatAssignment> assignments,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.updateAssignments(
+        purchaseId: purchaseId,
+        assignments: assignments,
+      ),
+      mockCall: () => _mockRepository.updateAssignments(
+        purchaseId: purchaseId,
+        assignments: assignments,
+      ),
+    );
+  }
+
+  @override
+  Future<String> changePlan({
+    required String purchaseId,
+    required String newOfferId,
+  }) {
+    return _execute(
+      httpCall: () => _httpRepository.changePlan(
+        purchaseId: purchaseId,
+        newOfferId: newOfferId,
+      ),
+      mockCall: () => _mockRepository.changePlan(
+        purchaseId: purchaseId,
+        newOfferId: newOfferId,
+      ),
     );
   }
 
