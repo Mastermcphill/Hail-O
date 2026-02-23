@@ -6,10 +6,7 @@ import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
 
 class RideRequestScreen extends StatefulWidget {
-  const RideRequestScreen({
-    super.key,
-    required this.apiClient,
-  });
+  const RideRequestScreen({super.key, required this.apiClient});
 
   final ApiClient apiClient;
 
@@ -18,17 +15,24 @@ class RideRequestScreen extends StatefulWidget {
 }
 
 class _RideRequestScreenState extends State<RideRequestScreen> {
-  final _scheduledDepartureController = TextEditingController();
-  final _distanceMetersController = TextEditingController(text: '12000');
-  final _durationSecondsController = TextEditingController(text: '1800');
+  final _pickupController = TextEditingController();
+  final _dropoffController = TextEditingController();
+  final _passengersController = TextEditingController(text: '1');
   final _luggageCountController = TextEditingController(text: '0');
+  final _scheduledDepartureController = TextEditingController();
   final _vehicleClassController = TextEditingController(text: 'sedan');
   final _baseFareMinorController = TextEditingController(text: '0');
   final _premiumMarkupMinorController = TextEditingController(text: '0');
   final _connectionFeeMinorController = TextEditingController(text: '0');
 
   String _tripScope = 'intra_city';
+  bool _charterMode = false;
   bool _isSubmitting = false;
+  bool _isEstimating = false;
+  bool _isCheckingGate = true;
+  int _distanceMeters = 12000;
+  int _durationSeconds = 1800;
+  String _distanceSource = 'stub';
 
   @override
   void initState() {
@@ -37,19 +41,73 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         .toUtc()
         .add(const Duration(minutes: 10))
         .toIso8601String();
+    _ensureNextOfKinGate();
   }
 
   @override
   void dispose() {
-    _scheduledDepartureController.dispose();
-    _distanceMetersController.dispose();
-    _durationSecondsController.dispose();
+    _pickupController.dispose();
+    _dropoffController.dispose();
+    _passengersController.dispose();
     _luggageCountController.dispose();
+    _scheduledDepartureController.dispose();
     _vehicleClassController.dispose();
     _baseFareMinorController.dispose();
     _premiumMarkupMinorController.dispose();
     _connectionFeeMinorController.dispose();
     super.dispose();
+  }
+
+  Future<void> _ensureNextOfKinGate() async {
+    setState(() {
+      _isCheckingGate = true;
+    });
+    try {
+      await widget.apiClient.get(ApiPaths.meNextOfKin);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final shouldGate =
+          error is ApiException &&
+          (error.statusCode == 404 || error.code == 'next_of_kin_not_set');
+      if (shouldGate) {
+        context.go('/rider/next-of-kin?return_to=/rider/request');
+        return;
+      }
+      _showErrorSnackBar(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingGate = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _estimateDistance() async {
+    final pickup = _pickupController.text.trim();
+    final dropoff = _dropoffController.text.trim();
+    if (pickup.isEmpty || dropoff.isEmpty) {
+      _showSnackBar('Enter pickup and dropoff first.');
+      return;
+    }
+    setState(() {
+      _isEstimating = true;
+    });
+    try {
+      setState(() {
+        _distanceMeters = 12000;
+        _durationSeconds = 1800;
+        _distanceSource = 'stub';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEstimating = false;
+        });
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -59,15 +117,26 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     });
 
     try {
+      final pickup = _pickupController.text.trim();
+      final dropoff = _dropoffController.text.trim();
+      _distanceMeters = 12000;
+      _durationSeconds = 1800;
+      _distanceSource = 'stub';
+
       final scheduledAt = DateTime.parse(
         _scheduledDepartureController.text.trim(),
       ).toUtc();
+
       final payload = <String, dynamic>{
         'scheduled_departure_at': scheduledAt.toIso8601String(),
         'trip_scope': _tripScopeToBackendValue(_tripScope),
-        'distance_meters': _parseInt(_distanceMetersController.text),
-        'duration_seconds': _parseInt(_durationSecondsController.text),
+        'pickup': pickup,
+        'dropoff': dropoff,
+        'passengers': _parseInt(_passengersController.text),
         'luggage_count': _parseInt(_luggageCountController.text),
+        'charter_mode': _charterMode,
+        'distance_meters': _distanceMeters,
+        'duration_seconds': _durationSeconds,
         'vehicle_class': _vehicleClassController.text.trim().isEmpty
             ? 'sedan'
             : _vehicleClassController.text.trim(),
@@ -88,7 +157,11 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       if (!mounted) {
         return;
       }
-      context.go('/rider/status/${Uri.encodeComponent(rideId)}');
+      context.go(
+        '/rider/offers/${Uri.encodeComponent(rideId)}'
+        '?luggage_count=${_parseInt(_luggageCountController.text)}'
+        '&charter_mode=$_charterMode',
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -105,6 +178,10 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isCheckingGate) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -119,11 +196,29 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: _scheduledDepartureController,
+                controller: _pickupController,
                 decoration: const InputDecoration(
-                  labelText: 'scheduled_departure_at (UTC ISO)',
+                  labelText: 'pickup',
                   border: OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _dropoffController,
+                decoration: const InputDecoration(
+                  labelText: 'dropoff',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _passengersController,
+                label: 'passengers',
+              ),
+              const SizedBox(height: 12),
+              _LabeledTextField(
+                controller: _luggageCountController,
+                label: 'luggage_count',
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -155,20 +250,24 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                   });
                 },
               ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _distanceMetersController,
-                label: 'distance_meters',
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Charter mode'),
+                value: _charterMode,
+                onChanged: (value) {
+                  setState(() {
+                    _charterMode = value;
+                  });
+                },
               ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _durationSecondsController,
-                label: 'duration_seconds',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _luggageCountController,
-                label: 'luggage_count',
+              const SizedBox(height: 8),
+              TextField(
+                controller: _scheduledDepartureController,
+                decoration: const InputDecoration(
+                  labelText: 'scheduled_departure_at (UTC ISO)',
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 12),
               _LabeledTextField(
@@ -191,7 +290,36 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
                 controller: _connectionFeeMinorController,
                 label: 'connection_fee_minor',
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('distance_meters: $_distanceMeters'),
+                      const SizedBox(height: 4),
+                      Text('duration_seconds: $_durationSeconds'),
+                      const SizedBox(height: 4),
+                      Text('distance_source: $_distanceSource'),
+                      const SizedBox(height: 8),
+                      FilledButton.tonal(
+                        onPressed: _isEstimating ? null : _estimateDistance,
+                        child: _isEstimating
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Estimate Distance'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: _isSubmitting ? null : _submit,
                 child: _isSubmitting
@@ -210,9 +338,14 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   }
 
   void _showErrorSnackBar(Object error) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_errorText(error))),
-    );
+    final message = formatApiError(error);
+    _showSnackBar(message);
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
@@ -268,8 +401,4 @@ String? _resolveRideId(Map<String, dynamic> response) {
     }
   }
   return null;
-}
-
-String _errorText(Object error) {
-  return formatApiError(error);
 }

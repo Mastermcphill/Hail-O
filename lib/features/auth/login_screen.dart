@@ -62,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) {
         return;
       }
-      context.go('/health');
+      context.go(_homeRouteForRole(role));
     } catch (error) {
       if (!mounted) {
         return;
@@ -153,4 +153,18 @@ String _normalizeRole(String? role) {
 
 String _buildErrorMessage(Object error) {
   return 'Login failed: ${formatApiError(error)}';
+}
+
+String _homeRouteForRole(String role) {
+  switch (role) {
+    case 'driver':
+      return '/driver';
+    case 'fleet_owner':
+      return '/fleet';
+    case 'admin':
+      return '/admin';
+    case 'rider':
+    default:
+      return '/rider';
+  }
 }
