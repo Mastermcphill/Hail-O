@@ -28,6 +28,12 @@ Middleware observabilityMiddleware({
         latencyMs: latencyMs,
         errorCode: errorCode,
       );
+
+      // Suppress high-frequency healthz probes to keep logs signal-rich.
+      if (_shouldSuppressRequestLog(path)) {
+        return response;
+      }
+
       final webhookProvider = response.headers['x-payment-provider'] ?? '';
       final webhookAction = response.headers['x-webhook-action'] ?? '';
 
@@ -60,6 +66,10 @@ Middleware observabilityMiddleware({
       return response;
     };
   };
+}
+
+bool _shouldSuppressRequestLog(String path) {
+  return path == 'healthz' || path == 'api/healthz';
 }
 
 String? _hashIdempotencyKey(String? key) {

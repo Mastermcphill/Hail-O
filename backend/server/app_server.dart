@@ -39,6 +39,7 @@ class AppServer {
     this.maxMarketplaceWriteRequestsPerIp = 40,
     this.maxMarketplaceWriteRequestsPerUser = 80,
     this.maxWebhookRequestsPerIp = 300,
+    this.maxWebhookRequestsPerUser = 120,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
@@ -46,7 +47,6 @@ class AppServer {
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
-    this.postgresProvider,
     this.environmentMap = const <String, String>{},
   });
 
@@ -70,6 +70,7 @@ class AppServer {
   final int maxMarketplaceWriteRequestsPerIp;
   final int maxMarketplaceWriteRequestsPerUser;
   final int maxWebhookRequestsPerIp;
+  final int maxWebhookRequestsPerUser;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
@@ -77,7 +78,6 @@ class AppServer {
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
-  final PostgresProvider? postgresProvider;
   final Map<String, String> environmentMap;
 
   Handler buildHandler() {
@@ -140,6 +140,7 @@ class AppServer {
                         maxMarketplaceWriteRequestsPerUser:
                             maxMarketplaceWriteRequestsPerUser,
                         maxWebhookRequestsPerIp: maxWebhookRequestsPerIp,
+                        maxWebhookRequestsPerUser: maxWebhookRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
                       ),
                     )

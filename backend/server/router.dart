@@ -46,11 +46,14 @@ Handler buildApiRouter({
   required RequestMetrics requestMetrics,
   required Map<String, Object?> runtimeConfigSnapshot,
   PostgresProvider? postgresProvider,
+  Map<String, String> environmentMap = const <String, String>{},
   bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
 }) {
+  final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
+
   final authController = AuthController(
     authService: AuthService(db, externalStore: authCredentialsStore),
     tokenService: tokenService,
@@ -97,13 +100,11 @@ Handler buildApiRouter({
     postgresProvider: postgresProvider,
     billingLedgerRepository: billingLedgerRepository,
     entitlementService: entitlementService,
-    configuredProvider: Platform.environment['PAYMENT_PROVIDER'],
+    configuredProvider: env['PAYMENT_PROVIDER'],
     paystackSecretKey:
-        Platform.environment['PAYSTACK_SECRET_KEY'] ??
-        Platform.environment['PAYMENT_PROVIDER_SECRET'],
+        env['PAYSTACK_SECRET_KEY'] ?? env['PAYMENT_PROVIDER_SECRET'],
     stripeWebhookSecret:
-        Platform.environment['STRIPE_WEBHOOK_SECRET'] ??
-        Platform.environment['PAYMENT_PROVIDER_SECRET'],
+        env['STRIPE_WEBHOOK_SECRET'] ?? env['PAYMENT_PROVIDER_SECRET'],
     metrics: requestMetrics,
   );
   final revenueService = MarketplaceRevenueService(
@@ -133,17 +134,18 @@ Handler buildApiRouter({
         jsonEncode({
           'ok': true,
           'service': 'hail-o-backend',
-          'env':
-              Platform.environment['FLIPTRYBE_ENV'] ??
-              Platform.environment['ENV'] ??
-              'unknown',
-          'commit': Platform.environment['RENDER_GIT_COMMIT'] ?? 'unknown',
+          'env': env['FLIPTRYBE_ENV'] ?? env['ENV'] ?? 'unknown',
+          'commit': env['RENDER_GIT_COMMIT'] ?? 'unknown',
         }),
         headers: {'content-type': 'application/json'},
       );
     })
     ..get(
       '/health',
+      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+    )
+    ..get(
+      '/healthz',
       (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
     )
     ..get(

@@ -81,6 +81,12 @@ Future<void> main() async {
       80;
   final rateLimitWebhookPerIp =
       int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '300').trim()) ?? 300;
+  final rateLimitWebhookPerUser =
+      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_USER'] ?? '').trim()) ??
+      int.tryParse(
+        (env['RATE_LIMIT_WEBHOOK_MAX_REQUESTS_PER_USER'] ?? '').trim(),
+      ) ??
+      rateLimitMaxRequestsPerUser;
   final trustProxyHeaders =
       (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() != 'false';
   final metricsPublic =
@@ -161,6 +167,7 @@ Future<void> main() async {
     'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
     'rate_limit_marketplace_write_per_user': rateLimitMarketplaceWritePerUser,
     'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
+    'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
     'trust_proxy_headers': trustProxyHeaders,
     'metrics_public': metricsPublic,
     'metrics_protected': !metricsPublic,
@@ -190,6 +197,7 @@ Future<void> main() async {
     maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
     maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
     maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
+    maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
@@ -197,17 +205,14 @@ Future<void> main() async {
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,
-    postgresProvider: postgresProvider,
     environmentMap: env,
   ).buildHandler();
 
-  final port = int.parse(Platform.environment['PORT'] ?? '8080');
+  final configuredPortRaw = (env['PORT'] ?? '').trim();
+  final port = int.tryParse(configuredPortRaw) ?? 8080;
   const listenHost = '0.0.0.0';
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
-  );
-  stdout.writeln(
-    'Port config: PORT=$configuredPortRaw resolved_port=$port bind_host=0.0.0.0',
   );
   stdout.writeln(
     'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
@@ -218,7 +223,8 @@ Future<void> main() async {
     jsonEncode(<String, Object?>{
       'event': 'server_listen',
       'host': listenHost,
-      'port': server.port,
+      'resolved_port': server.port,
+      'configured_port': configuredPortRaw.isEmpty ? null : configuredPortRaw,
     }),
   );
   stdout.writeln(
