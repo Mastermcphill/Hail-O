@@ -6,7 +6,10 @@ import '../http_utils.dart';
 const String _headerIdempotencyKey = 'idempotency-key';
 
 Middleware idempotencyMiddleware({
-  Set<String> exemptWritePaths = const <String>{'auth/login'},
+  Set<String> exemptWritePaths = const <String>{
+    'auth/login',
+    'webhooks/payments',
+  },
 }) {
   return (Handler innerHandler) {
     return (Request request) {

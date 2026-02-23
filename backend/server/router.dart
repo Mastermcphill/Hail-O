@@ -9,6 +9,7 @@ import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
+import '../infra/postgres_provider.dart';
 import '../infra/request_context.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
@@ -17,6 +18,15 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/drivers/drivers_controller.dart';
+import '../modules/marketplace/billing_ledger_repository.dart';
+import '../modules/marketplace/marketplace_controller.dart';
+import '../modules/marketplace/marketplace_entitlement_service.dart';
+import '../modules/marketplace/marketplace_reconciliation_service.dart';
+import '../modules/marketplace/marketplace_repository.dart';
+import '../modules/marketplace/marketplace_repository_memory.dart';
+import '../modules/marketplace/marketplace_timeline_service.dart';
+import '../modules/marketplace/payment_service.dart';
+import '../modules/marketplace/payments_webhook_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -34,6 +44,8 @@ Handler buildApiRouter({
   AuthCredentialsStore? authCredentialsStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
+  PostgresProvider? postgresProvider,
+  Map<String, String> environmentMap = const <String, String>{},
 }) {
   final authController = AuthController(
     authService: AuthService(db, externalStore: authCredentialsStore),
@@ -54,10 +66,53 @@ Handler buildApiRouter({
   final disputesController = DisputesController(
     disputeService: DisputeService(db),
   );
+  final marketplaceRepository = postgresProvider != null
+      ? PostgresMarketplaceRepository(postgresProvider)
+      : InMemoryMarketplaceRepository();
+  final billingLedgerRepository = postgresProvider != null
+      ? PostgresBillingLedgerRepository(postgresProvider)
+      : InMemoryBillingLedgerRepository();
+  final entitlementRepository = postgresProvider != null
+      ? PostgresMarketplaceEntitlementRepository(postgresProvider)
+      : InMemoryMarketplaceEntitlementRepository();
+  final timelineService = MarketplaceTimelineService(marketplaceRepository);
+  final entitlementService = MarketplaceEntitlementService(
+    entitlementRepository: entitlementRepository,
+  );
+  final paymentService = PaymentService.fromEnvironment(
+    environment: environmentMap,
+    marketplaceRepository: marketplaceRepository,
+    billingLedgerRepository: billingLedgerRepository,
+    timelineService: timelineService,
+    entitlementService: entitlementService,
+    requestMetrics: requestMetrics,
+  );
+  final reconciliationService = MarketplaceReconciliationService(
+    marketplaceRepository: marketplaceRepository,
+    billingLedgerRepository: billingLedgerRepository,
+    entitlementService: entitlementService,
+    timelineService: timelineService,
+    requestMetrics: requestMetrics,
+  );
+  final marketplaceController = MarketplaceController(
+    marketplaceRepository: marketplaceRepository,
+    timelineService: timelineService,
+    entitlementService: entitlementService,
+    paymentService: paymentService,
+    requestMetrics: requestMetrics,
+  );
+  final paymentsWebhookController = PaymentsWebhookController(
+    paymentService: paymentService,
+    requestMetrics: requestMetrics,
+  );
   final adminController = AdminController(
     walletReversalService: WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
+    marketplaceRepository: marketplaceRepository,
+    billingLedgerRepository: billingLedgerRepository,
+    entitlementService: entitlementService,
+    reconciliationService: reconciliationService,
   );
   final driversController = DriversController();
 
@@ -76,6 +131,8 @@ Handler buildApiRouter({
     )
     ..mount('/auth/', authController.router.call)
     ..mount('/rides/', ridesController.router.call)
+    ..mount('/marketplace/', marketplaceController.router.call)
+    ..mount('/webhooks/', paymentsWebhookController.router.call)
     ..mount('/drivers/', driversController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)

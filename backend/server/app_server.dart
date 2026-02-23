@@ -1,6 +1,7 @@
 import 'package:shelf/shelf.dart';
 import 'package:hail_o_finance_core/sqlite_api.dart';
 
+import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
@@ -33,12 +34,19 @@ class AppServer {
     this.maxRequestsPerUser = 120,
     this.maxAuthRequestsPerIp = 20,
     this.maxAuthRequestsPerUser = 40,
+    this.maxMarketplaceReadRequestsPerIp = 120,
+    this.maxMarketplaceReadRequestsPerUser = 240,
+    this.maxMarketplaceWriteRequestsPerIp = 40,
+    this.maxMarketplaceWriteRequestsPerUser = 80,
+    this.maxWebhookRequestsPerIp = 300,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
     this.authCredentialsStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
+    this.postgresProvider,
+    this.environmentMap = const <String, String>{},
   });
 
   final Database db;
@@ -56,12 +64,19 @@ class AppServer {
   final int maxRequestsPerUser;
   final int maxAuthRequestsPerIp;
   final int maxAuthRequestsPerUser;
+  final int maxMarketplaceReadRequestsPerIp;
+  final int maxMarketplaceReadRequestsPerUser;
+  final int maxMarketplaceWriteRequestsPerIp;
+  final int maxMarketplaceWriteRequestsPerUser;
+  final int maxWebhookRequestsPerIp;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
   final AuthCredentialsStore? authCredentialsStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
+  final PostgresProvider? postgresProvider;
+  final Map<String, String> environmentMap;
 
   Handler buildHandler() {
     final router = buildApiRouter(
@@ -76,6 +91,8 @@ class AppServer {
       requestMetrics: requestMetrics,
       metricsPublic: metricsPublic,
       runtimeConfigSnapshot: runtimeConfigSnapshot,
+      postgresProvider: postgresProvider,
+      environmentMap: environmentMap,
     );
     final authPublicPaths = <String>{
       'auth/register',
@@ -110,6 +127,15 @@ class AppServer {
                         maxRequestsPerUser: maxRequestsPerUser,
                         maxAuthRequestsPerIp: maxAuthRequestsPerIp,
                         maxAuthRequestsPerUser: maxAuthRequestsPerUser,
+                        maxMarketplaceReadRequestsPerIp:
+                            maxMarketplaceReadRequestsPerIp,
+                        maxMarketplaceReadRequestsPerUser:
+                            maxMarketplaceReadRequestsPerUser,
+                        maxMarketplaceWriteRequestsPerIp:
+                            maxMarketplaceWriteRequestsPerIp,
+                        maxMarketplaceWriteRequestsPerUser:
+                            maxMarketplaceWriteRequestsPerUser,
+                        maxWebhookRequestsPerIp: maxWebhookRequestsPerIp,
                         trustProxyHeaders: trustProxyHeaders,
                       ),
                     )

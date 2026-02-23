@@ -18,6 +18,7 @@ Middleware authMiddleware(
     'drivers/',
     'settlement/',
     'disputes',
+    'marketplace/',
     'admin/',
     'api/admin/',
     'metrics',

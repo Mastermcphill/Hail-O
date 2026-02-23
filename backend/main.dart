@@ -54,6 +54,28 @@ Future<void> main() async {
   final rateLimitAuthMaxRequestsPerUser =
       int.tryParse((env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '40').trim()) ??
       40;
+  final rateLimitMarketplaceReadPerIp =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '120').trim(),
+      ) ??
+      120;
+  final rateLimitMarketplaceReadPerUser =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '240').trim(),
+      ) ??
+      240;
+  final rateLimitMarketplaceWritePerIp =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '40').trim(),
+      ) ??
+      40;
+  final rateLimitMarketplaceWritePerUser =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '80').trim(),
+      ) ??
+      80;
+  final rateLimitWebhookPerIp =
+      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '300').trim()) ?? 300;
   final trustProxyHeaders =
       (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() != 'false';
   final metricsPublic =
@@ -129,6 +151,11 @@ Future<void> main() async {
     'rate_limit_auth_per_ip_per_min': rateLimitAuthMaxRequestsPerIp,
     'rate_limit_burst': rateLimitAuthMaxRequestsPerIp,
     'rate_limit_auth_per_user_per_min': rateLimitAuthMaxRequestsPerUser,
+    'rate_limit_marketplace_read_per_ip': rateLimitMarketplaceReadPerIp,
+    'rate_limit_marketplace_read_per_user': rateLimitMarketplaceReadPerUser,
+    'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
+    'rate_limit_marketplace_write_per_user': rateLimitMarketplaceWritePerUser,
+    'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
     'trust_proxy_headers': trustProxyHeaders,
     'metrics_public': metricsPublic,
     'metrics_protected': !metricsPublic,
@@ -153,12 +180,19 @@ Future<void> main() async {
     maxRequestsPerUser: rateLimitMaxRequestsPerUser,
     maxAuthRequestsPerIp: rateLimitAuthMaxRequestsPerIp,
     maxAuthRequestsPerUser: rateLimitAuthMaxRequestsPerUser,
+    maxMarketplaceReadRequestsPerIp: rateLimitMarketplaceReadPerIp,
+    maxMarketplaceReadRequestsPerUser: rateLimitMarketplaceReadPerUser,
+    maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
+    maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
+    maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     authCredentialsStore: authCredentialsStore,
     rideRequestMetadataStore: rideRequestMetadataStore,
     operationalRecordStore: operationalRecordStore,
+    postgresProvider: postgresProvider,
+    environmentMap: env,
   ).buildHandler();
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
