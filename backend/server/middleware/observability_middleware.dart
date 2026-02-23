@@ -21,13 +21,7 @@ Middleware observabilityMiddleware({
       final latencyMs = watch.elapsedMilliseconds;
       final path = request.url.path;
 
-      metrics.recordRequest(
-        statusCode: response.statusCode,
-        method: request.method,
-        path: path,
-        latencyMs: latencyMs,
-        errorCode: errorCode,
-      );
+      metrics.record(statusCode: response.statusCode, errorCode: errorCode);
 
       // Suppress high-frequency healthz probes to keep logs signal-rich.
       if (_shouldSuppressRequestLog(path)) {
@@ -36,12 +30,6 @@ Middleware observabilityMiddleware({
 
       final webhookProvider = response.headers['x-payment-provider'] ?? '';
       final webhookAction = response.headers['x-webhook-action'] ?? '';
-
-      if (response.statusCode >= 400 &&
-          path.startsWith('marketplace/') &&
-          path.contains('/purchases')) {
-        metrics.recordMarketplacePaymentFailure();
-      }
 
       sink(
         jsonEncode(<String, Object?>{
