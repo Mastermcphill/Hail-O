@@ -1,2 +1,2 @@
-export 'package:hail_o_finance_core/sqlite_api.dart';
+export 'package:hailo_shared/sqlite_api.dart';
 

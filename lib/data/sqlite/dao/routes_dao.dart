@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../../domain/models/route_chain.dart';
 import '../../../domain/models/route_node.dart';

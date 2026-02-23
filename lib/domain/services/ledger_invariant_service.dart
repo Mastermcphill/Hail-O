@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../data/sqlite/dao/payout_records_dao.dart';
 import '../../data/sqlite/dao/wallet_ledger_dao.dart';

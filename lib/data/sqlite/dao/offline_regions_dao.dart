@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../../domain/models/offline_region_record.dart';
 import '../table_names.dart';

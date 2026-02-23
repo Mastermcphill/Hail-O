@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 class ReconciliationService {
   ReconciliationService(this.db, {DateTime Function()? nowUtc})

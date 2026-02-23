@@ -1,4 +1,4 @@
-import 'package:hail_o_finance_core/sqlite_api.dart';
+import 'package:hailo_shared/sqlite_api.dart';
 
 import '../../../domain/errors/domain_errors.dart';
 import '../../../domain/models/dispute_event.dart';
