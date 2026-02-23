@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -48,6 +49,15 @@ class RiderHome extends StatelessWidget {
                 },
                 child: const Text('Next-of-kin'),
               ),
+              if (kDebugMode) ...<Widget>[
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () {
+                    context.go('/marketplace/offers');
+                  },
+                  child: const Text('Marketplace (Debug)'),
+                ),
+              ],
             ],
           ),
         ),

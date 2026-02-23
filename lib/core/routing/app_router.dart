@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
@@ -9,6 +10,12 @@ import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
+import '../../features/marketplace/data/marketplace_repository.dart';
+import '../../features/marketplace/state/marketplace_controller.dart';
+import '../../features/marketplace/ui/offers_screen.dart';
+import '../../features/marketplace/ui/paywall_screen.dart';
+import '../../features/marketplace/ui/seats_screen.dart';
+import '../../features/marketplace/ui/timeline_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
 import '../../features/rider/offers_screen.dart';
 import '../../features/rider/paywall_screen.dart';
@@ -126,6 +133,59 @@ class AppRouter {
                 purchaseId: state.pathParameters['purchaseId'] ?? '',
                 rideId: state.uri.queryParameters['rideId'],
               ),
+            ),
+            ShellRoute(
+              builder: (context, state, child) {
+                return ChangeNotifierProvider<MarketplaceController>(
+                  create: (_) => MarketplaceController(
+                    repository: createMarketplaceRepository(_apiClient),
+                  ),
+                  child: child,
+                );
+              },
+              routes: <RouteBase>[
+                GoRoute(
+                  path: '/marketplace/offers',
+                  builder: (context, state) => const MarketplaceOffersScreen(),
+                ),
+                GoRoute(
+                  path: '/marketplace/paywall',
+                  builder: (context, state) {
+                    final offerId = state.uri.queryParameters['offerId'] ?? '';
+                    if (offerId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message: 'Missing query parameter: offerId',
+                      );
+                    }
+                    return MarketplacePaywallScreen(offerId: offerId);
+                  },
+                ),
+                GoRoute(
+                  path: '/marketplace/seats',
+                  builder: (context, state) {
+                    final offerId = state.uri.queryParameters['offerId'] ?? '';
+                    if (offerId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message: 'Missing query parameter: offerId',
+                      );
+                    }
+                    return MarketplaceSeatsScreen(offerId: offerId);
+                  },
+                ),
+                GoRoute(
+                  path: '/marketplace/timeline',
+                  builder: (context, state) {
+                    final purchaseId =
+                        state.uri.queryParameters['purchaseId'] ?? '';
+                    if (purchaseId.isEmpty) {
+                      return const _MissingRouteParamScreen(
+                        message: 'Missing query parameter: purchaseId',
+                      );
+                    }
+                    return MarketplaceTimelineScreen(purchaseId: purchaseId);
+                  },
+                ),
+              ],
             ),
             GoRoute(
               path: '/driver',
@@ -268,6 +328,26 @@ class RoleNavigationScaffold extends StatelessWidget {
   }
 }
 
+class _MissingRouteParamScreen extends StatelessWidget {
+  const _MissingRouteParamScreen({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      ),
+    );
+  }
+}
+
 class _NavItem {
   const _NavItem({required this.path, required this.label, required this.icon});
 
@@ -402,6 +482,18 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/rider/timeline')) {
     return 'Timeline';
   }
+  if (_isSelectedPath(path, '/marketplace/offers')) {
+    return 'Marketplace Offers';
+  }
+  if (_isSelectedPath(path, '/marketplace/paywall')) {
+    return 'Marketplace Paywall';
+  }
+  if (_isSelectedPath(path, '/marketplace/seats')) {
+    return 'Marketplace Seats';
+  }
+  if (_isSelectedPath(path, '/marketplace/timeline')) {
+    return 'Marketplace Timeline';
+  }
   if (_isSelectedPath(path, '/driver/offer')) {
     return 'Driver Offer';
   }
@@ -428,6 +520,9 @@ String _titleForPath(String path) {
 
 String? _roleFromPath(String path) {
   if (_isSelectedPath(path, '/rider')) {
+    return 'rider';
+  }
+  if (_isSelectedPath(path, '/marketplace')) {
     return 'rider';
   }
   if (_isSelectedPath(path, '/driver')) {
