@@ -25,7 +25,7 @@ Middleware rateLimitMiddleware({
   int maxMarketplaceWriteRequestsPerIp = 40,
   int maxMarketplaceWriteRequestsPerUser = 80,
   int maxWebhookRequestsPerIp = 300,
-  int maxWebhookRequestsPerUser = 120,
+  int? maxWebhookRequestsPerUser,
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
   NowProvider? nowProvider,
@@ -33,6 +33,8 @@ Middleware rateLimitMiddleware({
   final ipBuckets = <String, _CounterBucket>{};
   final userBuckets = <String, _CounterBucket>{};
   final now = nowProvider ?? () => DateTime.now().toUtc();
+  final webhookRequestsPerUser =
+      maxWebhookRequestsPerUser ?? maxRequestsPerUser;
 
   bool consume(
     Map<String, _CounterBucket> buckets,
@@ -83,7 +85,7 @@ Middleware rateLimitMiddleware({
       int userLimit;
       if (isWebhookPath) {
         ipLimit = maxWebhookRequestsPerIp;
-        userLimit = maxWebhookRequestsPerUser;
+        userLimit = webhookRequestsPerUser;
       } else if (isMarketplacePath || isOrgPath) {
         ipLimit = isMarketplaceOfferRead
             ? maxMarketplaceReadRequestsPerIp
