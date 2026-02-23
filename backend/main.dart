@@ -161,9 +161,13 @@ Future<void> main() async {
     operationalRecordStore: operationalRecordStore,
   ).buildHandler();
 
-  final port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
+  final configuredPortRaw = (Platform.environment['PORT'] ?? '').trim();
+  final port = int.tryParse(configuredPortRaw) ?? 10000;
   stdout.writeln(
     'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
+  );
+  stdout.writeln(
+    'Port config: PORT=$configuredPortRaw resolved_port=$port bind_host=0.0.0.0',
   );
   stdout.writeln(
     'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser trust_proxy_headers=$trustProxyHeaders',
