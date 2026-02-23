@@ -57,6 +57,31 @@ Future<void> main() async {
   final rateLimitAuthMaxRequestsPerUser =
       int.tryParse((env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '40').trim()) ??
       40;
+  final rateLimitMarketplaceReadPerIp =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '180').trim(),
+      ) ??
+      180;
+  final rateLimitMarketplaceReadPerUser =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '360').trim(),
+      ) ??
+      360;
+  final rateLimitMarketplaceWritePerIp =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '30').trim(),
+      ) ??
+      30;
+  final rateLimitMarketplaceWritePerUser =
+      int.tryParse(
+        (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '60').trim(),
+      ) ??
+      60;
+  final rateLimitWebhookPerIp =
+      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '600').trim()) ?? 600;
+  final rateLimitWebhookPerUser =
+      int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_USER'] ?? '1200').trim()) ??
+      1200;
   final trustProxyHeaders =
       (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() != 'false';
   final metricsPublic =
@@ -132,6 +157,12 @@ Future<void> main() async {
     'rate_limit_auth_per_ip_per_min': rateLimitAuthMaxRequestsPerIp,
     'rate_limit_burst': rateLimitAuthMaxRequestsPerIp,
     'rate_limit_auth_per_user_per_min': rateLimitAuthMaxRequestsPerUser,
+    'rate_limit_marketplace_read_per_ip': rateLimitMarketplaceReadPerIp,
+    'rate_limit_marketplace_read_per_user': rateLimitMarketplaceReadPerUser,
+    'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
+    'rate_limit_marketplace_write_per_user': rateLimitMarketplaceWritePerUser,
+    'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
+    'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
     'trust_proxy_headers': trustProxyHeaders,
     'metrics_public': metricsPublic,
     'metrics_protected': !metricsPublic,
@@ -156,6 +187,12 @@ Future<void> main() async {
     maxRequestsPerUser: rateLimitMaxRequestsPerUser,
     maxAuthRequestsPerIp: rateLimitAuthMaxRequestsPerIp,
     maxAuthRequestsPerUser: rateLimitAuthMaxRequestsPerUser,
+    maxMarketplaceReadRequestsPerIp: rateLimitMarketplaceReadPerIp,
+    maxMarketplaceReadRequestsPerUser: rateLimitMarketplaceReadPerUser,
+    maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
+    maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
+    maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
+    maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
     trustProxyHeaders: trustProxyHeaders,
     maxRequestBodyBytes: requestMaxBodyBytes,
     runtimeConfigSnapshot: runtimeConfigSnapshot,
@@ -174,7 +211,7 @@ Future<void> main() async {
     'Port config: PORT=$configuredPortRaw resolved_port=$port bind_host=0.0.0.0',
   );
   stdout.writeln(
-    'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser trust_proxy_headers=$trustProxyHeaders',
+    'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
   );
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);

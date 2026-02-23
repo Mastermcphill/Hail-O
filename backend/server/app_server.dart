@@ -34,6 +34,12 @@ class AppServer {
     this.maxRequestsPerUser = 120,
     this.maxAuthRequestsPerIp = 20,
     this.maxAuthRequestsPerUser = 40,
+    this.maxMarketplaceReadRequestsPerIp = 180,
+    this.maxMarketplaceReadRequestsPerUser = 360,
+    this.maxMarketplaceWriteRequestsPerIp = 30,
+    this.maxMarketplaceWriteRequestsPerUser = 60,
+    this.maxWebhookRequestsPerIp = 600,
+    this.maxWebhookRequestsPerUser = 1200,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.runtimeConfigSnapshot = const <String, Object?>{},
@@ -58,6 +64,12 @@ class AppServer {
   final int maxRequestsPerUser;
   final int maxAuthRequestsPerIp;
   final int maxAuthRequestsPerUser;
+  final int maxMarketplaceReadRequestsPerIp;
+  final int maxMarketplaceReadRequestsPerUser;
+  final int maxMarketplaceWriteRequestsPerIp;
+  final int maxMarketplaceWriteRequestsPerUser;
+  final int maxWebhookRequestsPerIp;
+  final int maxWebhookRequestsPerUser;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final Map<String, Object?> runtimeConfigSnapshot;
@@ -115,6 +127,16 @@ class AppServer {
                         maxRequestsPerUser: maxRequestsPerUser,
                         maxAuthRequestsPerIp: maxAuthRequestsPerIp,
                         maxAuthRequestsPerUser: maxAuthRequestsPerUser,
+                        maxMarketplaceReadRequestsPerIp:
+                            maxMarketplaceReadRequestsPerIp,
+                        maxMarketplaceReadRequestsPerUser:
+                            maxMarketplaceReadRequestsPerUser,
+                        maxMarketplaceWriteRequestsPerIp:
+                            maxMarketplaceWriteRequestsPerIp,
+                        maxMarketplaceWriteRequestsPerUser:
+                            maxMarketplaceWriteRequestsPerUser,
+                        maxWebhookRequestsPerIp: maxWebhookRequestsPerIp,
+                        maxWebhookRequestsPerUser: maxWebhookRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
                       ),
                     )
