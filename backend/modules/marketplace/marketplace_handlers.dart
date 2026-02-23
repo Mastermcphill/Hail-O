@@ -69,10 +69,33 @@ class MarketplaceHandlers {
       return body.response!;
     }
 
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
     final payload = body.payload!;
-    final offerId = (payload['offerId'] as String?)?.trim() ?? '';
-    final seatCount = _toInt(payload['seatCount']);
+    final offerId =
+        (payload['offerId'] as String?)?.trim() ??
+        (payload['offer_id'] as String?)?.trim() ??
+        '';
+    final seatCount =
+        _toInt(payload['seatCount']) ?? _toInt(payload['seat_count']);
     final idempotencyKey = (request.headers['idempotency-key'] ?? '').trim();
+
+    if (idempotencyKey.isEmpty) {
+      return _error(
+        request,
+        400,
+        errorCode: 'MISSING_IDEMPOTENCY_KEY',
+        message: 'Idempotency-Key header is required',
+      );
+    }
 
     if (offerId.isEmpty || seatCount == null || seatCount < 1) {
       return _error(
@@ -83,17 +106,53 @@ class MarketplaceHandlers {
       );
     }
 
-    final responseHeaders = idempotencyKey.isNotEmpty
-        ? <String, String>{'x-idempotency-key': idempotencyKey}
-        : null;
-    return _notImplemented(
-      request,
-      message: 'Marketplace purchase creation is not implemented yet.',
-      headers: responseHeaders,
-    );
+    try {
+      final purchase = await _offerRepository.createOrGetPurchase(
+        userId: userId,
+        offerId: offerId,
+        seatCount: seatCount,
+        idempotencyKey: idempotencyKey,
+        provider: 'manual',
+      );
+      return _ok(
+        request,
+        data: _purchasePayload(purchase),
+        headers: <String, String>{
+          'x-idempotency-key': idempotencyKey,
+          'x-marketplace-purchase-id': purchase.id,
+        },
+      );
+    } on MarketplaceRepositoryStateException catch (error) {
+      if (error.code == 'offer_not_found') {
+        return _error(
+          request,
+          404,
+          errorCode: 'NOT_FOUND',
+          message: 'Offer not found',
+        );
+      }
+      return _error(request, 409, errorCode: 'CONFLICT', message: error.code);
+    } catch (_) {
+      return _error(
+        request,
+        500,
+        errorCode: 'INTERNAL_ERROR',
+        message: 'Unable to create purchase',
+      );
+    }
   }
 
-  Response restorePurchase(Request request) {
+  Future<Response> restorePurchase(Request request) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
     final idempotencyKey = (request.url.queryParameters['idempotencyKey'] ?? '')
         .trim();
     if (idempotencyKey.isEmpty) {
@@ -105,16 +164,60 @@ class MarketplaceHandlers {
       );
     }
 
-    return _notImplemented(
+    final purchase = await _offerRepository.findPurchaseByIdempotencyKey(
+      userId: userId,
+      idempotencyKey: idempotencyKey,
+    );
+    if (purchase == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found for idempotency key',
+      );
+    }
+
+    return _ok(
       request,
-      message: 'Marketplace purchase restore is not implemented yet.',
+      data: _purchasePayload(purchase),
+      headers: <String, String>{
+        'x-idempotency-key': idempotencyKey,
+        'x-marketplace-purchase-id': purchase.id,
+      },
     );
   }
 
-  Response getPurchase(Request request, String purchaseId) {
-    return _notImplemented(
+  Future<Response> getPurchase(Request request, String purchaseId) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    final purchase = await _offerRepository.findPurchaseById(
+      userId: userId,
+      purchaseId: purchaseId,
+    );
+    if (purchase == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+
+    return _ok(
       request,
-      message: 'Marketplace purchase fetch is not implemented yet.',
+      data: <String, Object?>{
+        ..._purchasePayload(purchase),
+        'assignments': const <Map<String, Object?>>[],
+      },
+      headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
     );
   }
 
@@ -234,6 +337,27 @@ class MarketplaceHandlers {
       return value.toInt();
     }
     return null;
+  }
+
+  String? _requireUserId(Request request) {
+    final userId = request.requestContext.userId?.trim() ?? '';
+    if (userId.isEmpty) {
+      return null;
+    }
+    return userId;
+  }
+
+  Map<String, Object?> _purchasePayload(MarketplacePurchaseRecord purchase) {
+    return <String, Object?>{
+      'purchaseId': purchase.id,
+      'offerId': purchase.offerId,
+      'seatCount': purchase.seatCount,
+      'status': purchase.status,
+      'createdAt': purchase.createdAt.toUtc().toIso8601String(),
+      'totalAmount': purchase.totalAmountMinor,
+      'currency': purchase.currency,
+      'offerTitle': purchase.offerTitle,
+    };
   }
 }
 

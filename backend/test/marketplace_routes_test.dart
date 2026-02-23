@@ -6,6 +6,7 @@ import 'package:shelf/shelf.dart' as shelf;
 import 'package:test/test.dart';
 
 import '../infra/db_provider.dart';
+import '../infra/request_context.dart';
 import '../infra/request_metrics.dart';
 import '../infra/runtime_config.dart';
 import '../infra/token_service.dart';
@@ -20,11 +21,6 @@ void main() {
     });
 
     final notImplementedCases = <_EndpointCase>[
-      const _EndpointCase(
-        method: 'GET',
-        path: '/marketplace/purchases/restore?idempotencyKey=test-key',
-      ),
-      const _EndpointCase(method: 'GET', path: '/marketplace/purchases/p-123'),
       const _EndpointCase(
         method: 'PATCH',
         path: '/marketplace/purchases/p-123/seats',
@@ -140,42 +136,98 @@ void main() {
           handler,
           method: 'POST',
           path: '/marketplace/purchases',
+          userId: 'user-rider-1',
           body: const <String, Object?>{
-            'offerId': 'offer-basic',
+            'offerId': 'offer_sedan_01',
             'seatCount': 2,
           },
         );
 
-        expect(response.statusCode, 501);
+        expect(response.statusCode, 400);
         expect(response.headers['content-type'], contains('application/json'));
         final payload = await _decodeJsonMap(response);
         expect(payload['ok'], isFalse);
-        expect(payload['error_code'], 'NOT_IMPLEMENTED');
+        expect(payload['error_code'], 'MISSING_IDEMPOTENCY_KEY');
         expect((payload['trace_id'] as String?)?.isNotEmpty, isTrue);
       },
     );
 
     test(
-      'POST /marketplace/purchases accepts Idempotency-Key and does not crash',
+      'POST /marketplace/purchases accepts Idempotency-Key and is idempotent',
       () async {
-        final response = await _send(
+        final firstResponse = await _send(
           handler,
           method: 'POST',
           path: '/marketplace/purchases',
+          userId: 'user-rider-1',
           headers: const <String, String>{
             'idempotency-key': 'purchase-idempotency-1',
           },
           body: const <String, Object?>{
-            'offerId': 'offer-basic',
+            'offerId': 'offer_sedan_01',
             'seatCount': 3,
           },
         );
 
-        expect(response.statusCode, 501);
-        expect(response.headers['x-idempotency-key'], 'purchase-idempotency-1');
-        final payload = await _decodeJsonMap(response);
-        expect(payload['ok'], isFalse);
-        expect(payload['error_code'], 'NOT_IMPLEMENTED');
+        expect(firstResponse.statusCode, 200);
+        expect(
+          firstResponse.headers['x-idempotency-key'],
+          'purchase-idempotency-1',
+        );
+        final firstPayload = await _decodeJsonMap(firstResponse);
+        expect(firstPayload['ok'], isTrue);
+        final firstData = Map<String, Object?>.from(
+          firstPayload['data'] as Map,
+        );
+        expect((firstData['purchaseId'] as String?)?.isNotEmpty, isTrue);
+
+        final replayResponse = await _send(
+          handler,
+          method: 'POST',
+          path: '/marketplace/purchases',
+          userId: 'user-rider-1',
+          headers: const <String, String>{
+            'idempotency-key': 'purchase-idempotency-1',
+          },
+          body: const <String, Object?>{
+            'offerId': 'offer_sedan_01',
+            'seatCount': 3,
+          },
+        );
+        expect(replayResponse.statusCode, 200);
+        final replayPayload = await _decodeJsonMap(replayResponse);
+        final replayData = Map<String, Object?>.from(
+          replayPayload['data'] as Map,
+        );
+        expect(replayData['purchaseId'], firstData['purchaseId']);
+
+        final restoredResponse = await _send(
+          handler,
+          method: 'GET',
+          path:
+              '/marketplace/purchases/restore?idempotencyKey=purchase-idempotency-1',
+          userId: 'user-rider-1',
+        );
+        expect(restoredResponse.statusCode, 200);
+        final restoredPayload = await _decodeJsonMap(restoredResponse);
+        final restoredData = Map<String, Object?>.from(
+          restoredPayload['data'] as Map,
+        );
+        expect(restoredData['purchaseId'], firstData['purchaseId']);
+
+        final fetchedResponse = await _send(
+          handler,
+          method: 'GET',
+          path: '/marketplace/purchases/${firstData['purchaseId']}',
+          userId: 'user-rider-1',
+        );
+        expect(fetchedResponse.statusCode, 200);
+        final fetchedPayload = await _decodeJsonMap(fetchedResponse);
+        final fetchedData = Map<String, Object?>.from(
+          fetchedPayload['data'] as Map,
+        );
+        expect(fetchedData['purchaseId'], firstData['purchaseId']);
+        expect(fetchedData['assignments'], isA<List<dynamic>>());
       },
     );
 
@@ -186,8 +238,12 @@ void main() {
           handler,
           method: 'POST',
           path: '/marketplace/purchases',
+          userId: 'user-rider-1',
+          headers: const <String, String>{
+            'idempotency-key': 'purchase-validation-idempotency',
+          },
           body: const <String, Object?>{
-            'offerId': 'offer-basic',
+            'offerId': 'offer_sedan_01',
             'seatCount': 0,
           },
         );
@@ -274,20 +330,23 @@ Future<Response> _send(
   Handler handler, {
   required String method,
   required String path,
+  String? userId,
   Map<String, String>? headers,
   Map<String, Object?>? body,
 }) async {
-  return handler(
-    shelf.Request(
-      method,
-      Uri.parse('http://localhost$path'),
-      headers: <String, String>{
-        'content-type': 'application/json',
-        ...?headers,
-      },
-      body: body == null ? '' : jsonEncode(body),
-    ),
+  var request = shelf.Request(
+    method,
+    Uri.parse('http://localhost$path'),
+    headers: <String, String>{'content-type': 'application/json', ...?headers},
+    body: body == null ? '' : jsonEncode(body),
   );
+  if (userId != null && userId.trim().isNotEmpty) {
+    request = RequestContext.withContext(
+      request,
+      RequestContext(traceId: 'test-trace', userId: userId, role: 'rider'),
+    );
+  }
+  return handler(request);
 }
 
 Future<Map<String, Object?>> _decodeJsonMap(Response response) async {
