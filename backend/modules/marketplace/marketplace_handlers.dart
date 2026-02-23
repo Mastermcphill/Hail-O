@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
+import 'marketplace_entitlement_service.dart';
 import '../payments/payment_service.dart';
 import 'marketplace_offer_repository.dart';
 
@@ -10,13 +11,16 @@ class MarketplaceHandlers {
   MarketplaceHandlers({
     required MarketplaceOfferRepository offerRepository,
     PaymentService? paymentService,
+    MarketplaceEntitlementService? entitlementService,
     Uuid? uuid,
   }) : _offerRepository = offerRepository,
        _paymentService = paymentService,
+       _entitlementService = entitlementService,
        _uuid = uuid ?? const Uuid();
 
   final MarketplaceOfferRepository _offerRepository;
   final PaymentService? _paymentService;
+  final MarketplaceEntitlementService? _entitlementService;
   final Uuid _uuid;
 
   Future<Response> listOffers(Request request) async {
@@ -128,6 +132,13 @@ class MarketplaceHandlers {
         if (refreshed != null) {
           purchase = refreshed;
         }
+      }
+      final entitlementService = _entitlementService;
+      if (entitlementService != null) {
+        await entitlementService.syncPurchaseEntitlements(
+          purchase: purchase,
+          reason: 'purchase_create',
+        );
       }
       return _ok(
         request,
@@ -281,6 +292,13 @@ class MarketplaceHandlers {
         purchaseId: purchaseId,
         seatCount: seatCount,
       );
+      final entitlementService = _entitlementService;
+      if (entitlementService != null) {
+        await entitlementService.syncPurchaseEntitlements(
+          purchase: purchase,
+          reason: 'seat_count_changed',
+        );
+      }
       return _ok(
         request,
         data: _purchasePayload(purchase),
@@ -401,6 +419,13 @@ class MarketplaceHandlers {
         purchaseId: purchaseId,
         newOfferId: newOfferId,
       );
+      final entitlementService = _entitlementService;
+      if (entitlementService != null) {
+        await entitlementService.syncPurchaseEntitlements(
+          purchase: purchase,
+          reason: 'plan_changed',
+        );
+      }
       return _ok(
         request,
         data: _purchasePayload(purchase),

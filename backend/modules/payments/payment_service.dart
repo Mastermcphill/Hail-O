@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../infra/request_metrics.dart';
 import '../../infra/postgres_provider.dart';
 import '../marketplace/billing_ledger_repository.dart';
+import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import 'manual_payment_provider.dart';
 import 'paystack_payment_provider.dart';
@@ -37,6 +38,7 @@ class PaymentService {
     required PaymentProvider provider,
     PostgresProvider? postgresProvider,
     BillingLedgerRepository? billingLedgerRepository,
+    MarketplaceEntitlementService? entitlementService,
     RequestMetrics? metrics,
     void Function(String line)? logSink,
     Uuid? uuid,
@@ -45,6 +47,7 @@ class PaymentService {
        _postgresProvider = postgresProvider,
        _billingLedgerRepository =
            billingLedgerRepository ?? InMemoryBillingLedgerRepository(),
+       _entitlementService = entitlementService,
        _metrics = metrics,
        _logSink = logSink ?? print,
        _uuid = uuid ?? const Uuid(),
@@ -53,6 +56,7 @@ class PaymentService {
   factory PaymentService.fromEnvironment({
     required PostgresProvider? postgresProvider,
     BillingLedgerRepository? billingLedgerRepository,
+    MarketplaceEntitlementService? entitlementService,
     String? configuredProvider,
     String? paystackSecretKey,
     String? stripeWebhookSecret,
@@ -78,6 +82,7 @@ class PaymentService {
       provider: provider,
       postgresProvider: postgresProvider,
       billingLedgerRepository: billingLedgerRepository,
+      entitlementService: entitlementService,
       metrics: metrics,
       logSink: logSink,
       uuid: uuid,
@@ -88,6 +93,7 @@ class PaymentService {
   final PaymentProvider _provider;
   final PostgresProvider? _postgresProvider;
   final BillingLedgerRepository _billingLedgerRepository;
+  final MarketplaceEntitlementService? _entitlementService;
   final RequestMetrics? _metrics;
   final void Function(String line) _logSink;
   final Uuid _uuid;
@@ -247,6 +253,13 @@ class PaymentService {
         );
       }
     });
+    final entitlementService = _entitlementService;
+    if (entitlementService != null) {
+      await entitlementService.syncByPurchaseId(
+        purchaseId: purchaseId,
+        reason: 'payment_capture',
+      );
+    }
   }
 
   Future<bool> _recordWebhook({
@@ -352,7 +365,7 @@ class PaymentService {
       return eventType.isEmpty ? 'webhook_recorded' : eventType;
     }
 
-    return _postgresProvider.withTxn((txn) async {
+    final timelineAction = await _postgresProvider.withTxn((txn) async {
       String? status;
       String timelineType;
       switch (eventType) {
@@ -416,6 +429,26 @@ class PaymentService {
       );
       return timelineType;
     });
+
+    final entitlementService = _entitlementService;
+    if (entitlementService != null) {
+      if (timelineAction == 'payment_succeeded' ||
+          timelineAction == 'invoice_paid') {
+        await entitlementService.syncByPurchaseId(
+          purchaseId: purchaseId,
+          reason: 'payment_status_active',
+        );
+      } else if (timelineAction == 'payment_failed' ||
+          timelineAction == 'subscription_canceled' ||
+          timelineAction == 'chargeback' ||
+          timelineAction == 'refund_succeeded') {
+        await entitlementService.revokeByPurchaseId(
+          purchaseId: purchaseId,
+          reason: 'payment_status_$timelineAction',
+        );
+      }
+    }
+    return timelineAction;
   }
 
   Future<_FinancialContext> _resolveFinancialContext({
