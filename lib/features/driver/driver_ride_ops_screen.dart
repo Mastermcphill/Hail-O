@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
+import '../../core/util/polling.dart';
 import '../shared/ride_snapshot_card.dart';
+import '../shared/ride_timeline_widget.dart';
 
 class DriverRideOpsScreen extends StatefulWidget {
   const DriverRideOpsScreen({
@@ -21,6 +25,7 @@ class DriverRideOpsScreen extends StatefulWidget {
 
 class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
   late final TextEditingController _rideIdController;
+  final PollingController _pollingController = PollingController();
   bool _isBusy = false;
   Map<String, dynamic>? _snapshot;
   String? _inlineError;
@@ -29,32 +34,64 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
   void initState() {
     super.initState();
     _rideIdController = TextEditingController(text: widget.initialRideId ?? '');
+    unawaited(
+      _pollingController.start(
+        interval: const Duration(seconds: 3),
+        runImmediately: false,
+        onPoll: () => _fetchSnapshot(silent: true),
+      ),
+    );
+    if (_rideIdController.text.trim().isNotEmpty) {
+      unawaited(_fetchSnapshot());
+    }
   }
 
   @override
   void dispose() {
+    _pollingController.dispose();
     _rideIdController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchSnapshot() async {
+  Future<void> _fetchSnapshot({bool silent = false}) async {
     final rideId = _rideIdController.text.trim();
     if (rideId.isEmpty) {
-      _showErrorSnackBar('Enter a ride id first.');
+      if (!silent) {
+        _showErrorSnackBar('Enter a ride id first.');
+      }
       return;
     }
-    await _run(
-      operation: () async {
-        final response = await widget.apiClient.get(ApiPaths.rideSnapshot(rideId));
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _snapshot = response;
-          _inlineError = null;
-        });
-      },
-    );
+    if (!silent) {
+      await _run(
+        operation: () async {
+          final response = await widget.apiClient.get(
+            ApiPaths.rideSnapshot(rideId),
+          );
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _snapshot = response;
+            _inlineError = null;
+          });
+        },
+      );
+      return;
+    }
+    try {
+      final response = await widget.apiClient.get(
+        ApiPaths.rideSnapshot(rideId),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _snapshot = response;
+        _inlineError = null;
+      });
+    } catch (_) {
+      // Keep silent polling truly silent.
+    }
   }
 
   Future<void> _acceptRide() async {
@@ -74,9 +111,7 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
   Future<void> _completeRide() async {
     await _postAndRefresh(
       pathBuilder: ApiPaths.rideComplete,
-      body: const <String, dynamic>{
-        'settlement_trigger': 'manual_override',
-      },
+      body: const <String, dynamic>{'settlement_trigger': 'manual_override'},
     );
   }
 
@@ -92,7 +127,9 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
     await _run(
       operation: () async {
         await widget.apiClient.post(pathBuilder(rideId), body: body);
-        final snapshot = await widget.apiClient.get(ApiPaths.rideSnapshot(rideId));
+        final snapshot = await widget.apiClient.get(
+          ApiPaths.rideSnapshot(rideId),
+        );
         if (!mounted) {
           return;
         }
@@ -104,9 +141,7 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
     );
   }
 
-  Future<void> _run({
-    required Future<void> Function() operation,
-  }) async {
+  Future<void> _run({required Future<void> Function() operation}) async {
     setState(() {
       _isBusy = true;
     });
@@ -158,7 +193,7 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
                 runSpacing: 10,
                 children: <Widget>[
                   FilledButton.tonal(
-                    onPressed: _isBusy ? null : _fetchSnapshot,
+                    onPressed: _isBusy ? null : () => _fetchSnapshot(),
                     child: const Text('Fetch Snapshot'),
                   ),
                   FilledButton(
@@ -187,7 +222,11 @@ class _DriverRideOpsScreenState extends State<DriverRideOpsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-              if (_snapshot != null) RideSnapshotCard(snapshot: _snapshot!),
+              if (_snapshot != null) ...<Widget>[
+                RideTimelineWidget(snapshot: _snapshot!),
+                const SizedBox(height: 12),
+                RideSnapshotCard(snapshot: _snapshot!),
+              ],
             ],
           ),
         ),

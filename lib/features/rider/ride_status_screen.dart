@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
@@ -5,6 +7,7 @@ import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
 import '../../core/util/polling.dart';
 import '../shared/ride_snapshot_card.dart';
+import '../shared/ride_timeline_widget.dart';
 
 class RideStatusScreen extends StatefulWidget {
   const RideStatusScreen({
@@ -32,13 +35,13 @@ class _RideStatusScreenState extends State<RideStatusScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _startPolling();
+    unawaited(_startPolling());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startPolling();
+      unawaited(_startPolling());
       return;
     }
     if (state == AppLifecycleState.paused ||
@@ -131,10 +134,7 @@ class _RideStatusScreenState extends State<RideStatusScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            'Ride Status',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('Ride Status', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 4),
           SelectableText('ride_id: ${widget.rideId}'),
           const SizedBox(height: 12),
@@ -164,7 +164,14 @@ class _RideStatusScreenState extends State<RideStatusScreen>
           else if (_snapshot != null)
             Expanded(
               child: SingleChildScrollView(
-                child: RideSnapshotCard(snapshot: _snapshot!),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    RideTimelineWidget(snapshot: _snapshot!),
+                    const SizedBox(height: 12),
+                    RideSnapshotCard(snapshot: _snapshot!),
+                  ],
+                ),
               ),
             )
           else
