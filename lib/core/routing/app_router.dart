@@ -32,6 +32,7 @@ import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
+import '../../features/settings/about_screen.dart';
 import '../api/api_client.dart';
 import 'role_routes.dart';
 
@@ -276,6 +277,10 @@ class AppRouter {
               path: '/admin',
               builder: (context, state) => const AdminHome(),
             ),
+            GoRoute(
+              path: '/settings/about',
+              builder: (context, state) => const AboutScreen(),
+            ),
           ],
         ),
       ],
@@ -354,6 +359,11 @@ class RoleNavigationScaffold extends StatelessWidget {
       appBar: AppBar(
         title: Text(_titleForPath(currentPath)),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'About',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => context.go('/settings/about'),
+          ),
           IconButton(
             tooltip: 'Logout',
             icon: const Icon(Icons.logout),
@@ -521,6 +531,9 @@ String _titleForPath(String path) {
   }
   if (isSelectedPath(path, '/admin')) {
     return 'Admin';
+  }
+  if (isSelectedPath(path, '/settings/about')) {
+    return 'About';
   }
   return 'Hail-O Core';
 }

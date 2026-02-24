@@ -60,6 +60,7 @@ dependencies:
   go_router: ^14.0.0
   shared_preferences: ^2.3.2
   provider: ^6.1.2
+  package_info_plus: ^8.1.1
   hailo_shared:
     path: packages/hailo_shared
 

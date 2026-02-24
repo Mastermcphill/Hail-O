@@ -6,6 +6,7 @@ import 'core/api/server_warmup_notifier.dart';
 import 'core/routing/app_router.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/session/auth_session.dart';
+import 'theme/brand_theme.dart';
 
 class HailoCoreApp extends StatefulWidget {
   const HailoCoreApp({super.key});
@@ -56,10 +57,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
       ],
       child: MaterialApp.router(
         title: 'Hail-O Core',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-          useMaterial3: true,
-        ),
+        theme: BrandTheme.light(),
         routerConfig: _appRouter.router,
         builder: (context, child) {
           final warming = context.watch<ServerWarmupNotifier>().isWarming;

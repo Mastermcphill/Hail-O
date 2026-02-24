@@ -69,19 +69,31 @@ class LandingScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: () => context.go('/login'),
-                    child: const Text('Sign in'),
+                  Semantics(
+                    label: 'Sign in button',
+                    button: true,
+                    child: FilledButton(
+                      onPressed: () => context.go('/login'),
+                      child: const Text('Sign in'),
+                    ),
                   ),
                   const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: () => context.go('/signup'),
-                    child: const Text('Create account'),
+                  Semantics(
+                    label: 'Create account button',
+                    button: true,
+                    child: OutlinedButton(
+                      onPressed: () => context.go('/signup'),
+                      child: const Text('Create account'),
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => context.go('/admin-login'),
-                    child: const Text('Admin login'),
+                  Semantics(
+                    label: 'Admin login button',
+                    button: true,
+                    child: TextButton(
+                      onPressed: () => context.go('/admin-login'),
+                      child: const Text('Admin login'),
+                    ),
                   ),
                 ],
               ),
