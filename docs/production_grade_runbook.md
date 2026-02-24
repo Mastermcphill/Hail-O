@@ -106,3 +106,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 4 complete: Added flavor-aware API environment resolution, Android product flavors, iOS shared flavor schemes, and branded launcher/splash asset generation.
 - Phase 5 complete: Added Sentry initialization in Flutter and backend, request-id breadcrumbs/tags, JSON request-id log enrichment, and PII scrubbing for outgoing client events.
 - Phase 6 complete: Added fast timeout-bounded `/health`, new `/version` and `/api/version` endpoints, strict staging/prod config validation, and tighter auth rate-limit defaults.
+- Phase 7 complete: Added PR CI gates (`flutter analyze`, Flutter tests with coverage threshold, backend analyze/tests) and expanded auth/routing/error/validation test coverage.
