@@ -3,6 +3,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../features/admin/admin_home.dart';
+import '../../features/auth/presentation/admin_login_screen.dart';
+import '../../features/auth/presentation/landing_screen.dart';
+import '../../features/auth/presentation/signup_screen.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_home.dart';
@@ -36,12 +39,25 @@ class AppRouter {
       _tokenStorage = tokenStorage {
     _marketplaceModule = MarketplaceModule(apiClient: _apiClient);
     router = GoRouter(
-      initialLocation: '/login',
+      initialLocation: '/',
       routes: <RouteBase>[
+        GoRoute(path: '/', builder: (context, state) => const LandingScreen()),
         GoRoute(
           path: '/login',
           builder: (context, state) =>
               LoginScreen(apiClient: _apiClient, tokenStorage: _tokenStorage),
+        ),
+        GoRoute(
+          path: '/signup',
+          builder: (context, state) =>
+              SignupScreen(apiClient: _apiClient, tokenStorage: _tokenStorage),
+        ),
+        GoRoute(
+          path: '/admin-login',
+          builder: (context, state) => AdminLoginScreen(
+            apiClient: _apiClient,
+            tokenStorage: _tokenStorage,
+          ),
         ),
         ShellRoute(
           builder: (context, state, child) {
@@ -62,6 +78,10 @@ class AppRouter {
             GoRoute(
               path: '/health',
               builder: (context, state) => HealthScreen(apiClient: _apiClient),
+            ),
+            GoRoute(
+              path: '/home',
+              builder: (context, state) => const RiderHome(),
             ),
             GoRoute(
               path: '/rider',
@@ -280,21 +300,25 @@ class AppRouter {
     final token = await _tokenStorage.readToken();
     final isAuthenticated = token != null && token.isNotEmpty;
     final path = state.uri.path;
-    final isLoginPath = path == '/login';
+    final isPublicPath = _publicPaths.contains(path);
 
     if (!isAuthenticated) {
-      if (!isLoginPath) {
-        return '/login';
+      if (!isPublicPath) {
+        return '/';
       }
       return null;
     }
 
-    if (isLoginPath) {
-      final role = _normalizeRole(await _tokenStorage.readRole());
+    final role = _normalizeRole(await _tokenStorage.readRole());
+
+    if (path == '/home') {
       return _homeRouteForRole(role);
     }
 
-    final role = _normalizeRole(await _tokenStorage.readRole());
+    if (isPublicPath) {
+      return _homeRouteForRole(role);
+    }
+
     if (_isRoleRoute(path) && !_isRoleAllowed(path, role)) {
       return _homeRouteForRole(role);
     }
@@ -333,7 +357,7 @@ class RoleNavigationScaffold extends StatelessWidget {
               if (!context.mounted) {
                 return;
               }
-              context.go('/login');
+              context.go('/');
             },
           ),
         ],
@@ -368,6 +392,13 @@ class _NavItem {
   final String label;
   final IconData icon;
 }
+
+const Set<String> _publicPaths = <String>{
+  '/',
+  '/login',
+  '/signup',
+  '/admin-login',
+};
 
 String _normalizeRole(String? role) {
   final normalized = (role ?? '').trim().toLowerCase();
@@ -501,6 +532,9 @@ String _titleForPath(String path) {
   if (_isSelectedPath(path, '/driver/offer')) {
     return 'Driver Offer';
   }
+  if (_isSelectedPath(path, '/home')) {
+    return 'Rider';
+  }
   if (_isSelectedPath(path, '/rider')) {
     return 'Rider';
   }
@@ -535,6 +569,9 @@ String _titleForPath(String path) {
 }
 
 String? _roleFromPath(String path) {
+  if (_isSelectedPath(path, '/home')) {
+    return 'rider';
+  }
   if (_isSelectedPath(path, '/rider')) {
     return 'rider';
   }

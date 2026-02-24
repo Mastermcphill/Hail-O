@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/api/api_client.dart';
-import '../../core/storage/token_storage.dart';
-import 'data/auth_api.dart';
+import '../../../core/api/api_client.dart';
+import '../../../core/storage/token_storage.dart';
+import '../data/auth_api.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({
+class AdminLoginScreen extends StatefulWidget {
+  const AdminLoginScreen({
     super.key,
     required this.apiClient,
     required this.tokenStorage,
@@ -16,10 +16,10 @@ class LoginScreen extends StatefulWidget {
   final TokenStorage tokenStorage;
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<AdminLoginScreen> createState() => _AdminLoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -57,13 +57,21 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+
+      if (!session.isAdmin) {
+        setState(() {
+          _errorMessage = 'Not authorized.';
+        });
+        return;
+      }
+
       await widget.tokenStorage.saveToken(session.token);
       await widget.tokenStorage.saveRole(session.role);
 
       if (!mounted) {
         return;
       }
-      context.go(_homeRouteForRole(session.role));
+      context.go('/admin');
     } catch (error) {
       if (!mounted) {
         return;
@@ -83,45 +91,36 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
+      appBar: AppBar(title: const Text('Admin login')),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Form(
               key: _formKey,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   SizedBox(
-                    height: 52,
+                    height: 48,
                     child: Image.asset(
                       'assets/brand/logo_mark.png',
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.local_taxi,
-                        size: 36,
+                        Icons.admin_panel_settings_outlined,
+                        size: 34,
                         color: colorScheme.primary,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Welcome back',
-                    textAlign: TextAlign.center,
-                    style: textTheme.titleLarge,
                   ),
                   const SizedBox(height: 20),
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    autofillHints: const <String>[AutofillHints.email],
                     validator: (value) {
                       final email = (value ?? '').trim();
                       if (email.isEmpty) {
@@ -142,7 +141,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _passwordController,
                     obscureText: true,
                     textInputAction: TextInputAction.done,
-                    autofillHints: const <String>[AutofillHints.password],
                     onFieldSubmitted: (_) => _isLoading ? null : _login(),
                     validator: (value) {
                       if ((value ?? '').isEmpty) {
@@ -164,18 +162,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Sign in'),
+                        : const Text('Admin login'),
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: _isLoading ? null : () => context.go('/signup'),
-                    child: const Text('Create account'),
-                  ),
-                  TextButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => context.go('/admin-login'),
-                    child: const Text('Admin login'),
+                    onPressed: _isLoading ? null : () => context.go('/login'),
+                    child: const Text('Use rider login'),
                   ),
                   if (_errorMessage != null) ...<Widget>[
                     const SizedBox(height: 12),
@@ -198,18 +190,4 @@ class _LoginScreenState extends State<LoginScreen> {
 bool _looksLikeEmail(String value) {
   final regex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
   return regex.hasMatch(value.trim());
-}
-
-String _homeRouteForRole(String role) {
-  switch (normalizeAuthRole(role)) {
-    case 'driver':
-      return '/driver';
-    case 'fleet_owner':
-      return '/fleet';
-    case 'admin':
-      return '/admin';
-    case 'rider':
-    default:
-      return '/rider';
-  }
 }

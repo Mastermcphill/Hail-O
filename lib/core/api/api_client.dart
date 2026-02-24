@@ -723,12 +723,9 @@ class ApiClient {
   }
 }
 
-const int _maxRetryAttempts = 2;
-const Duration _requestTimeout = Duration(seconds: 12);
-const List<Duration> _retryBackoff = <Duration>[
-  Duration(milliseconds: 250),
-  Duration(milliseconds: 750),
-];
+const int _maxRetryAttempts = 1;
+const Duration _requestTimeout = Duration(seconds: 25);
+const List<Duration> _retryBackoff = <Duration>[Duration(milliseconds: 600)];
 
 Duration _retryDelayForAttempt(int attempt) {
   if (attempt >= 0 && attempt < _retryBackoff.length) {

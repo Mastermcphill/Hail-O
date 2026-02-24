@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/api/api_client.dart';
-import '../../core/storage/token_storage.dart';
-import 'data/auth_api.dart';
+import '../../../core/api/api_client.dart';
+import '../../../core/storage/token_storage.dart';
+import '../data/auth_api.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({
+class SignupScreen extends StatefulWidget {
+  const SignupScreen({
     super.key,
     required this.apiClient,
     required this.tokenStorage,
@@ -16,15 +16,16 @@ class LoginScreen extends StatefulWidget {
   final TokenStorage tokenStorage;
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   late final AuthApi _authApi;
-  bool _isLoading = false;
+  bool _isSubmitting = false;
   String? _errorMessage;
 
   @override
@@ -37,10 +38,11 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  Future<void> _login() async {
+  Future<void> _submit() async {
     final form = _formKey.currentState;
     if (form == null || !form.validate()) {
       return;
@@ -48,15 +50,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     FocusScope.of(context).unfocus();
     setState(() {
-      _isLoading = true;
+      _isSubmitting = true;
       _errorMessage = null;
     });
 
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
     try {
-      final session = await _authApi.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
+      await _authApi.register(email: email, password: password);
+      final session = await _authApi.login(email: email, password: password);
       await widget.tokenStorage.saveToken(session.token);
       await widget.tokenStorage.saveRole(session.role);
 
@@ -69,12 +72,12 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       setState(() {
-        _errorMessage = mapLoginErrorMessage(error);
+        _errorMessage = mapRegisterErrorMessage(error);
       });
     } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _isSubmitting = false;
         });
       }
     }
@@ -86,33 +89,32 @@ class _LoginScreenState extends State<LoginScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
+      appBar: AppBar(title: const Text('Create account')),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Form(
               key: _formKey,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   SizedBox(
-                    height: 52,
+                    height: 48,
                     child: Image.asset(
                       'assets/brand/logo_mark.png',
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) => Icon(
                         Icons.local_taxi,
-                        size: 36,
+                        size: 34,
                         color: colorScheme.primary,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   Text(
-                    'Welcome back',
+                    'Join Hail-O',
                     textAlign: TextAlign.center,
                     style: textTheme.titleLarge,
                   ),
@@ -121,7 +123,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    autofillHints: const <String>[AutofillHints.email],
+                    autofillHints: const <String>[AutofillHints.newUsername],
                     validator: (value) {
                       final email = (value ?? '').trim();
                       if (email.isEmpty) {
@@ -141,12 +143,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
-                    textInputAction: TextInputAction.done,
-                    autofillHints: const <String>[AutofillHints.password],
-                    onFieldSubmitted: (_) => _isLoading ? null : _login(),
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const <String>[AutofillHints.newPassword],
                     validator: (value) {
-                      if ((value ?? '').isEmpty) {
+                      final password = value ?? '';
+                      if (password.isEmpty) {
                         return 'Password is required';
+                      }
+                      if (password.length < 8) {
+                        return 'Password must be at least 8 characters';
                       }
                       return null;
                     },
@@ -155,27 +160,44 @@ class _LoginScreenState extends State<LoginScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _confirmPasswordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _isSubmitting ? null : _submit(),
+                    validator: (value) {
+                      final confirmPassword = value ?? '';
+                      if (confirmPassword.isEmpty) {
+                        return 'Confirm your password';
+                      }
+                      if (confirmPassword != _passwordController.text) {
+                        return 'Passwords do not match';
+                      }
+                      return null;
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Confirm password',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: _isLoading ? null : _login,
-                    child: _isLoading
+                    onPressed: _isSubmitting ? null : _submit,
+                    child: _isSubmitting
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Sign in'),
+                        : const Text('Create account'),
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: _isLoading ? null : () => context.go('/signup'),
-                    child: const Text('Create account'),
-                  ),
-                  TextButton(
-                    onPressed: _isLoading
+                    onPressed: _isSubmitting
                         ? null
-                        : () => context.go('/admin-login'),
-                    child: const Text('Admin login'),
+                        : () => context.go('/login'),
+                    child: const Text('Already have an account? Sign in'),
                   ),
                   if (_errorMessage != null) ...<Widget>[
                     const SizedBox(height: 12),
