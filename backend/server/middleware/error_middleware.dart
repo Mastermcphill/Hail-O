@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:shelf/shelf.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/ride_booking_guard_service.dart';
 import '../../../lib/domain/services/ride_lifecycle_guard_service.dart';
+import '../../infra/sentry_observability.dart';
 import '../http_utils.dart';
 
 Middleware errorMiddleware() {
@@ -38,7 +41,15 @@ Middleware errorMiddleware() {
         );
       } on FormatException catch (error) {
         return _errorResponse(request, 400, 'invalid_json', error.message);
-      } catch (_) {
+      } catch (error, stackTrace) {
+        unawaited(
+          BackendSentryObservability.captureException(
+            error,
+            stackTrace,
+            request: request,
+            source: 'error_middleware',
+          ),
+        );
         return _errorResponse(request, 500, 'internal_error', null);
       }
     };

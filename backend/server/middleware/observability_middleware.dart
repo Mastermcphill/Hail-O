@@ -34,6 +34,7 @@ Middleware observabilityMiddleware({
       sink(
         jsonEncode(<String, Object?>{
           'trace_id': request.requestContext.traceId,
+          'request_id': request.requestContext.traceId,
           'route': path,
           'method': request.method,
           'status_code': response.statusCode,

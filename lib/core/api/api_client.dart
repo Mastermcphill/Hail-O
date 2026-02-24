@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../observability/app_observability.dart';
 import '../storage/token_storage.dart';
 import '../util/ids.dart';
 import 'api_config.dart';
@@ -421,6 +422,14 @@ class ApiClient {
     required Map<String, String> headers,
     required int attempt,
   }) {
+    unawaited(
+      AppObservability.recordHttpRequest(
+        requestId: requestId,
+        method: method,
+        uri: uri,
+        attempt: attempt,
+      ),
+    );
     final redactedHeaders = _redactHeaders(headers);
     _debugLog(
       '[ApiClient][$requestId] ${method.toUpperCase()} $uri attempt=${attempt + 1} headers=$redactedHeaders',

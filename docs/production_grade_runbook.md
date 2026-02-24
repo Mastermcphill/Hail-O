@@ -104,3 +104,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 2 complete: Added API policy-driven retry/timeouts, unified API error envelope mapping, redacted request logging, and non-blocking server warmup banner.
 - Phase 3 complete: Added a shared brand theme, reusable loading/empty/error UI states, accessibility labels on auth entry points, and a new About/Diagnostics settings screen.
 - Phase 4 complete: Added flavor-aware API environment resolution, Android product flavors, iOS shared flavor schemes, and branded launcher/splash asset generation.
+- Phase 5 complete: Added Sentry initialization in Flutter and backend, request-id breadcrumbs/tags, JSON request-id log enrichment, and PII scrubbing for outgoing client events.

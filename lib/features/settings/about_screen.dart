@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../config/api_config.dart';
+import '../../core/observability/app_observability.dart';
 import '../../core/util/ids.dart';
 import '../../widgets/loading_overlay.dart';
 
@@ -98,7 +99,7 @@ class _AboutScreenState extends State<AboutScreen> {
       'base_url': ApiConfig.baseUrl,
       'release': _release,
       'commit': _commitSha,
-      'request_id': newRequestId(),
+      'request_id': AppObservability.lastRequestId ?? newRequestId(),
       'timestamp_utc': DateTime.now().toUtc().toIso8601String(),
     };
     final diagnosticsText = payload.entries
