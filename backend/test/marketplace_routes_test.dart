@@ -75,6 +75,38 @@ void main() {
     );
 
     test(
+      'GET /api/marketplace/offers returns etag and supports If-None-Match',
+      () async {
+        final first = await _send(
+          handler,
+          method: 'GET',
+          path: '/api/marketplace/offers',
+        );
+
+        expect(first.statusCode, 200);
+        final etag = first.headers['etag'];
+        expect(etag, isNotNull);
+        expect(etag!.isNotEmpty, isTrue);
+        final firstPayload = await _decodeJsonMap(first);
+        expect(firstPayload['ok'], isTrue);
+        expect(firstPayload['data'], isA<List<dynamic>>());
+
+        final notModified = await _send(
+          handler,
+          method: 'GET',
+          path: '/api/marketplace/offers',
+          headers: <String, String>{'if-none-match': etag},
+        );
+
+        expect(notModified.statusCode, 304);
+        expect(notModified.headers['etag'], etag);
+        expect(notModified.headers['x-error-code'], isNull);
+        final body = await notModified.readAsString();
+        expect(body, isEmpty);
+      },
+    );
+
+    test(
       'GET /marketplace/offers/{offerId}/paywall returns paywall envelope',
       () async {
         final response = await _send(

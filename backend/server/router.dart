@@ -116,6 +116,7 @@ Handler buildApiRouter({
     orgRepository: orgRepository,
   );
   final marketplaceRouter = MarketplaceRouter(handlers: marketplaceHandlers);
+  final marketplaceHandler = marketplaceRouter.router.call;
   final orgController = OrgController(
     orgRepository: orgRepository,
     marketplaceRepository: marketplaceRepository,
@@ -172,7 +173,8 @@ Handler buildApiRouter({
     ..mount('/rides/', ridesController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
-    ..mount('/marketplace/', marketplaceRouter.router.call)
+    ..mount('/api/marketplace/', marketplaceHandler)
+    ..mount('/marketplace/', marketplaceHandler)
     ..mount('/api/orgs', orgApiHandler)
     ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/admin/', adminController.router.call)
