@@ -7,7 +7,9 @@ import 'package:http/http.dart' as http;
 import '../storage/token_storage.dart';
 import '../util/ids.dart';
 import 'api_config.dart';
+import 'api_error.dart';
 import 'api_errors.dart';
+import 'api_policy.dart';
 import 'mock_backend_store.dart';
 
 const String _mockNextOfKinKey = 'rider_next_of_kin_local';
@@ -26,26 +28,35 @@ class ApiClient {
       return _mockResponse(method: 'GET', path: normalizedPath);
     }
 
+    final policy = ApiPolicy.forRequest(method: 'GET');
     final requestId = newRequestId();
     final headers = await _buildHeaders(requestId: requestId);
+    final uri = _buildUri(normalizedPath);
     for (var attempt = 0; ; attempt++) {
+      _logRequest(
+        requestId: requestId,
+        method: 'GET',
+        uri: uri,
+        headers: headers,
+        attempt: attempt,
+      );
       try {
         final response = await _httpClient
-            .get(_buildUri(normalizedPath), headers: headers)
-            .timeout(_requestTimeout);
+            .get(uri, headers: headers)
+            .timeout(policy.requestTimeout);
         return _decodeResponse(response);
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
           return _mockResponse(method: 'GET', path: normalizedPath);
         }
-        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryApiException(error, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         rethrow;
       } on TimeoutException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -55,8 +66,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on SocketException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -66,8 +77,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on http.ClientException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -95,9 +106,14 @@ class ApiClient {
       );
     }
 
+    final callerProvidedIdempotencyKey =
+        idempotencyKey != null && idempotencyKey.trim().isNotEmpty;
+    final policy = ApiPolicy.forRequest(
+      method: 'POST',
+      hasIdempotencyKey: callerProvidedIdempotencyKey,
+    );
     final requestId = newRequestId();
-    final resolvedIdempotencyKey =
-        (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
+    final resolvedIdempotencyKey = callerProvidedIdempotencyKey
         ? idempotencyKey.trim()
         : newIdempotencyKey();
     final headers = await _buildHeaders(
@@ -105,15 +121,19 @@ class ApiClient {
       idempotencyKey: resolvedIdempotencyKey,
       includeJsonContentType: true,
     );
+    final uri = _buildUri(normalizedPath);
     for (var attempt = 0; ; attempt++) {
+      _logRequest(
+        requestId: requestId,
+        method: 'POST',
+        uri: uri,
+        headers: headers,
+        attempt: attempt,
+      );
       try {
         final response = await _httpClient
-            .post(
-              _buildUri(normalizedPath),
-              headers: headers,
-              body: jsonEncode(requestBody),
-            )
-            .timeout(_requestTimeout);
+            .post(uri, headers: headers, body: jsonEncode(requestBody))
+            .timeout(policy.requestTimeout);
         return _decodeResponse(response);
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
@@ -123,14 +143,14 @@ class ApiClient {
             body: requestBody,
           );
         }
-        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryApiException(error, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         rethrow;
       } on TimeoutException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -140,8 +160,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on SocketException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -151,8 +171,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on http.ClientException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -180,21 +200,30 @@ class ApiClient {
       );
     }
 
+    final policy = ApiPolicy.forRequest(
+      method: 'PATCH',
+      hasIdempotencyKey:
+          idempotencyKey != null && idempotencyKey.trim().isNotEmpty,
+    );
     final requestId = newRequestId();
     final headers = await _buildHeaders(
       requestId: requestId,
       idempotencyKey: idempotencyKey,
       includeJsonContentType: true,
     );
+    final uri = _buildUri(normalizedPath);
     for (var attempt = 0; ; attempt++) {
+      _logRequest(
+        requestId: requestId,
+        method: 'PATCH',
+        uri: uri,
+        headers: headers,
+        attempt: attempt,
+      );
       try {
         final response = await _httpClient
-            .patch(
-              _buildUri(normalizedPath),
-              headers: headers,
-              body: jsonEncode(requestBody),
-            )
-            .timeout(_requestTimeout);
+            .patch(uri, headers: headers, body: jsonEncode(requestBody))
+            .timeout(policy.requestTimeout);
         return _decodeResponse(response);
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
@@ -204,14 +233,14 @@ class ApiClient {
             body: requestBody,
           );
         }
-        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryApiException(error, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         rethrow;
       } on TimeoutException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -221,8 +250,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on SocketException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -232,8 +261,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on http.ClientException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -261,6 +290,11 @@ class ApiClient {
       );
     }
 
+    final policy = ApiPolicy.forRequest(
+      method: 'DELETE',
+      hasIdempotencyKey:
+          idempotencyKey != null && idempotencyKey.trim().isNotEmpty,
+    );
     final requestId = newRequestId();
     final includeJsonContentType = requestBody.isNotEmpty;
     final headers = await _buildHeaders(
@@ -268,20 +302,28 @@ class ApiClient {
       idempotencyKey: idempotencyKey,
       includeJsonContentType: includeJsonContentType,
     );
+    final uri = _buildUri(normalizedPath);
     for (var attempt = 0; ; attempt++) {
+      _logRequest(
+        requestId: requestId,
+        method: 'DELETE',
+        uri: uri,
+        headers: headers,
+        attempt: attempt,
+      );
       try {
         http.Response response;
         if (requestBody.isEmpty) {
           response = await _httpClient
-              .delete(_buildUri(normalizedPath), headers: headers)
-              .timeout(_requestTimeout);
+              .delete(uri, headers: headers)
+              .timeout(policy.requestTimeout);
         } else {
-          final request = http.Request('DELETE', _buildUri(normalizedPath));
+          final request = http.Request('DELETE', uri);
           request.headers.addAll(headers);
           request.body = jsonEncode(requestBody);
           final streamed = await _httpClient
               .send(request)
-              .timeout(_requestTimeout);
+              .timeout(policy.requestTimeout);
           response = await http.Response.fromStream(streamed);
         }
         return _decodeResponse(response);
@@ -293,14 +335,14 @@ class ApiClient {
             body: requestBody,
           );
         }
-        if (_isRetryableApiException(error) && attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryApiException(error, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         rethrow;
       } on TimeoutException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -310,8 +352,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on SocketException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -321,8 +363,8 @@ class ApiClient {
           rawBody: error.toString(),
         );
       } on http.ClientException catch (error) {
-        if (attempt < _maxRetryAttempts) {
-          await Future<void>.delayed(_retryDelayForAttempt(attempt));
+        if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
+          await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
         throw ApiException(
@@ -370,6 +412,43 @@ class ApiClient {
       headers['Authorization'] = 'Bearer $token';
     }
     return headers;
+  }
+
+  void _logRequest({
+    required String requestId,
+    required String method,
+    required Uri uri,
+    required Map<String, String> headers,
+    required int attempt,
+  }) {
+    final redactedHeaders = _redactHeaders(headers);
+    _debugLog(
+      '[ApiClient][$requestId] ${method.toUpperCase()} $uri attempt=${attempt + 1} headers=$redactedHeaders',
+    );
+  }
+
+  Map<String, String> _redactHeaders(Map<String, String> headers) {
+    final redacted = <String, String>{...headers};
+    const sensitiveKeys = <String>{
+      'authorization',
+      'idempotency-key',
+      'x-idempotency-key',
+      'x-api-key',
+    };
+    for (final entry in headers.entries) {
+      if (sensitiveKeys.contains(entry.key.toLowerCase())) {
+        redacted[entry.key] = '<redacted>';
+      }
+    }
+    return redacted;
+  }
+
+  void _debugLog(String message) {
+    assert(() {
+      // ignore: avoid_print
+      print(message);
+      return true;
+    }());
   }
 
   bool _shouldUseMockByConfig(String path) {
@@ -721,19 +800,4 @@ class ApiClient {
     }
     return 0;
   }
-}
-
-const int _maxRetryAttempts = 1;
-const Duration _requestTimeout = Duration(seconds: 25);
-const List<Duration> _retryBackoff = <Duration>[Duration(milliseconds: 600)];
-
-Duration _retryDelayForAttempt(int attempt) {
-  if (attempt >= 0 && attempt < _retryBackoff.length) {
-    return _retryBackoff[attempt];
-  }
-  return _retryBackoff.last;
-}
-
-bool _isRetryableApiException(ApiException error) {
-  return error.statusCode >= 500;
 }

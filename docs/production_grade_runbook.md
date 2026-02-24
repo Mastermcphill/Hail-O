@@ -92,3 +92,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 ## Phase Notes
 - Phase 0 complete: Added production runbook/checklist/docs hygiene and contribution standards.
 - Phase 1 complete: Added Provider-based `AuthSession`, sync GoRouter redirect gating, `/boot` startup route, and `next` post-login return handling.
+- Phase 2 complete: Added API policy-driven retry/timeouts, unified API error envelope mapping, redacted request logging, and non-blocking server warmup banner.

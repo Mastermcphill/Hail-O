@@ -1,4 +1,5 @@
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_error.dart';
 import '../../../core/api/api_errors.dart';
 import '../../../core/api/api_paths.dart';
 import '../../../core/routing/role_routes.dart';
@@ -49,23 +50,25 @@ class AuthLoginResult {
 }
 
 String mapLoginErrorMessage(Object error) {
-  if (_isTimeoutError(error)) {
+  final envelope = ApiErrorEnvelope.fromException(error);
+  if (envelope.kind == ApiErrorKind.timeout) {
     return 'Server is taking too long to respond. Please try again.';
   }
-  if (_isNetworkError(error)) {
+  if (envelope.kind == ApiErrorKind.network) {
     return 'No internet connection or server unreachable.';
   }
-  if (_isUnauthorized(error)) {
+  if (envelope.kind == ApiErrorKind.unauthorized) {
     return 'Wrong email or password.';
   }
   return 'Login failed. Please try again.';
 }
 
 String mapRegisterErrorMessage(Object error) {
-  if (_isTimeoutError(error)) {
+  final envelope = ApiErrorEnvelope.fromException(error);
+  if (envelope.kind == ApiErrorKind.timeout) {
     return 'Server is taking too long to respond. Please try again.';
   }
-  if (_isNetworkError(error)) {
+  if (envelope.kind == ApiErrorKind.network) {
     return 'No internet connection or server unreachable.';
   }
   if (error is ApiException && error.statusCode == 409) {
@@ -94,33 +97,4 @@ String _readString(Object? value) {
     return value.trim();
   }
   return '';
-}
-
-bool _isTimeoutError(Object error) {
-  if (error is ApiException) {
-    final code = (error.code ?? '').toLowerCase();
-    if (code == 'request_timeout') {
-      return true;
-    }
-    return error.message.toLowerCase().contains('timed out');
-  }
-  final message = error.toString().toLowerCase();
-  return message.contains('timeout') || message.contains('timed out');
-}
-
-bool _isNetworkError(Object error) {
-  if (error is ApiException) {
-    final code = (error.code ?? '').toLowerCase();
-    if (code == 'network_error' || code == 'client_error') {
-      return true;
-    }
-  }
-  final message = error.toString().toLowerCase();
-  return message.contains('socketexception') ||
-      message.contains('failed host lookup') ||
-      message.contains('network');
-}
-
-bool _isUnauthorized(Object error) {
-  return error is ApiException && error.statusCode == 401;
 }
