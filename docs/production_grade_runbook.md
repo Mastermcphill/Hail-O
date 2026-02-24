@@ -148,3 +148,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 3 refresh complete: Added app-wide offline connectivity banner and Flutter localization scaffolding (`en`) to harden production UX behavior.
 - Phase 5 refresh complete: Stabilized widget bootstrap tests by allowing startup warmup tasks to be disabled in test mode.
 - Audit hardening complete: Commission settlement now enforces escrow-distribution bounds and ride booking normalizes fare fields from pricing output to resist client-side fare tampering.
+- Audit extension complete: Added authenticated `/me` and `/routes` API coverage, persisted `/rides` offers/paywall/seats flows, rider cross-border document gating UI, and backend+widget tests for the new production paths.

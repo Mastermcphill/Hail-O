@@ -52,6 +52,7 @@ class AuthController {
       role = _parseRole(requestedRole ?? UserRole.rider.dbValue);
     }
     final displayName = (body['display_name'] as String?)?.trim();
+    final referralCode = (body['referral_code'] as String?)?.trim();
     final idempotencyKey = request.requestContext.idempotencyKey ?? '';
 
     RegisterNextOfKinInput? nextOfKin;
@@ -78,6 +79,7 @@ class AuthController {
         idempotencyKey: idempotencyKey,
         displayName: displayName,
         nextOfKin: nextOfKin,
+        referralCode: referralCode,
       );
       _auditLogger.authAttempt(
         traceId: request.requestContext.traceId,

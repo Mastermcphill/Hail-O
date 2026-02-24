@@ -34,6 +34,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
   List<String> _availableSeatIds = <String>[];
   Set<String> _selectedSeatIds = <String>{};
   int _basePriceMinor = 0;
+  int _dailyRateMinor = 0;
   bool _charterMode = false;
 
   @override
@@ -97,6 +98,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
             (_selectedSeatIds.isEmpty ? 1 : _selectedSeatIds.length).toString();
         _basePriceMinor =
             (response['base_price_minor'] as num?)?.toInt() ?? 7000;
+        _dailyRateMinor = (response['daily_rate_minor'] as num?)?.toInt() ?? 0;
         _charterMode = response['charter_mode'] == true || widget.charterMode;
       });
     } catch (error) {
@@ -111,6 +113,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
           'BACK_RIGHT',
         ];
         _basePriceMinor = 7000;
+        _dailyRateMinor = 0;
         _errorMessage = formatApiError(error);
         _seatCountController.text = '1';
       });
@@ -205,7 +208,10 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
 
   int _computePricingMinor() {
     if (_charterMode) {
-      return (_basePriceMinor * 3).round();
+      if (_dailyRateMinor > 0) {
+        return _dailyRateMinor;
+      }
+      return (_basePriceMinor * 4).round();
     }
     var total = 0.0;
     for (final seatId in _selectedSeatIds) {
@@ -279,10 +285,11 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text('base_price_minor: $_basePriceMinor'),
+                        Text('daily_rate_minor: $_dailyRateMinor'),
                         const SizedBox(height: 4),
                         Text(
                           _charterMode
-                              ? 'Charter multiplier applied: +200%'
+                              ? 'Charter price uses daily_rate_minor'
                               : 'Seat multipliers: front +10%, window +5%',
                         ),
                         const SizedBox(height: 4),

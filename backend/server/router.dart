@@ -30,9 +30,11 @@ import '../modules/marketplace/marketplace_repository_memory.dart';
 import '../modules/marketplace/marketplace_revenue_service.dart';
 import '../modules/marketplace/marketplace_router.dart';
 import '../modules/marketplace/marketplace_handlers.dart';
+import '../modules/me/me_controller.dart';
 import '../modules/marketplace/org_controller.dart';
 import '../modules/marketplace/org_repository.dart';
 import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
+import '../modules/routes/routes_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
@@ -63,6 +65,7 @@ Handler buildApiRouter({
     tokenService: tokenService,
   );
   final ridesController = RidesController(
+    db: db,
     rideApiFlowService: RideApiFlowService(
       db,
       externalMetadataStore: rideRequestMetadataStore,
@@ -70,6 +73,8 @@ Handler buildApiRouter({
     ),
     rideSnapshotService: RideSnapshotService(db),
   );
+  final routesController = RoutesController(db);
+  final meController = MeController(db);
   final settlementController = SettlementController(
     rideSettlementService: RideSettlementService(db),
     escrowService: EscrowService(db),
@@ -193,6 +198,8 @@ Handler buildApiRouter({
       (request) => _metricsHandler(request, requestMetrics, metricsPublic),
     )
     ..mount('/auth/', authController.router.call)
+    ..mount('/me/', meController.router.call)
+    ..mount('/routes/', routesController.router.call)
     ..mount('/rides/', ridesController.router.call)
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)

@@ -126,6 +126,21 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _isSubmitting = true;
     });
     try {
+      final tripScope = _tripScopeToBackendValue(_tripScope);
+      if (tripScope == 'international' || tripScope == 'cross_country') {
+        final hasCrossBorderDoc = await _hasCrossBorderDocument();
+        if (hasCrossBorderDoc == false) {
+          if (!mounted) {
+            return;
+          }
+          context.go('/rider/documents?return_to=/rider/request');
+          return;
+        }
+        if (hasCrossBorderDoc == null) {
+          return;
+        }
+      }
+
       final pickup = _pickupController.text.trim();
       final dropoff = _dropoffController.text.trim();
       if (pickup.isNotEmpty && dropoff.isNotEmpty) {
@@ -144,7 +159,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
 
       final payload = <String, dynamic>{
         'scheduled_departure_at': scheduledAt.toIso8601String(),
-        'trip_scope': _tripScopeToBackendValue(_tripScope),
+        'trip_scope': tripScope,
         'pickup': pickup,
         'dropoff': dropoff,
         'passengers': _parseInt(_passengersController.text),
@@ -188,6 +203,21 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
           _isSubmitting = false;
         });
       }
+    }
+  }
+
+  Future<bool?> _hasCrossBorderDocument() async {
+    try {
+      final response = await widget.apiClient.get(
+        '${ApiPaths.meDocuments}?valid_for=international',
+      );
+      return response['has_valid_cross_border_document'] == true;
+    } catch (error) {
+      if (!mounted) {
+        return null;
+      }
+      _showErrorSnackBar(error);
+      return null;
     }
   }
 

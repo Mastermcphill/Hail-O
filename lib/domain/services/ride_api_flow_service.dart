@@ -16,7 +16,9 @@ import 'cancel_ride_service.dart';
 import 'escrow_service.dart';
 import 'penalty_engine_service.dart';
 import 'ride_orchestrator_service.dart';
+import 'referral_reward_service.dart';
 import 'ride_settlement_service.dart';
+import 'ride_booking_guard_service.dart';
 
 enum ApiTripScope {
   intraCity('intra_city'),
@@ -54,6 +56,8 @@ class RideApiFlowService {
     AcceptRideService? acceptRideService,
     CancelRideService? cancelRideService,
     RideSettlementService? rideSettlementService,
+    ReferralRewardService? referralRewardService,
+    RideBookingGuardService? rideBookingGuardService,
     RideRequestMetadataExternalStore? externalMetadataStore,
     OperationalRecordExternalStore? externalOperationalStore,
     Uuid? uuid,
@@ -64,6 +68,10 @@ class RideApiFlowService {
        _cancelRideService = cancelRideService ?? CancelRideService(db),
        _rideSettlementService =
            rideSettlementService ?? RideSettlementService(db),
+       _referralRewardService =
+           referralRewardService ?? ReferralRewardService(db),
+       _rideBookingGuardService =
+           rideBookingGuardService ?? RideBookingGuardService(db),
        _externalMetadataStore = externalMetadataStore,
        _externalOperationalStore = externalOperationalStore,
        _uuid = uuid ?? const Uuid(),
@@ -74,6 +82,8 @@ class RideApiFlowService {
   final AcceptRideService _acceptRideService;
   final CancelRideService _cancelRideService;
   final RideSettlementService _rideSettlementService;
+  final ReferralRewardService _referralRewardService;
+  final RideBookingGuardService _rideBookingGuardService;
   final RideRequestMetadataExternalStore? _externalMetadataStore;
   final OperationalRecordExternalStore? _externalOperationalStore;
   final Uuid _uuid;
@@ -90,6 +100,8 @@ class RideApiFlowService {
     required int baseFareMinor,
     required int premiumMarkupMinor,
     int connectionFeeMinor = 0,
+    bool charterMode = false,
+    int dailyRateMinor = 0,
     String? rideId,
     String? idempotencyKey,
   }) async {
@@ -105,6 +117,13 @@ class RideApiFlowService {
     if (user.role != UserRole.rider && user.role != UserRole.admin) {
       throw const UnauthorizedActionError(code: 'ride_request_forbidden');
     }
+    await _rideBookingGuardService.assertCanBookRide(
+      riderUserId: riderUserId,
+      isCrossBorder:
+          tripScope == ApiTripScope.crossCountry ||
+          tripScope == ApiTripScope.international,
+      tripScope: tripScope.toTripScope(),
+    );
 
     final eventResult = await _rideOrchestratorService.applyEvent(
       eventType: RideEventType.rideBooked,
@@ -121,6 +140,8 @@ class RideApiFlowService {
         'base_fare_minor': baseFareMinor,
         'premium_markup_minor': premiumMarkupMinor,
         'connection_fee_minor': connectionFeeMinor,
+        'charter_mode': charterMode ? 1 : 0,
+        'daily_rate_minor': dailyRateMinor,
       },
     );
 
@@ -391,6 +412,33 @@ class RideApiFlowService {
       idempotencyKey: 'settlement:${hold.id}',
       trigger: trigger,
     );
+
+    Map<String, Object?> referralReward = const <String, Object?>{
+      'ok': true,
+      'credited': false,
+      'reason': 'not_applicable',
+    };
+    if (settlement.ok) {
+      final ride = await RidesDao(db).findById(rideId);
+      final riderId = (ride?['rider_id'] as String?)?.trim() ?? '';
+      if (riderId.isNotEmpty) {
+        try {
+          referralReward = await _referralRewardService
+              .creditReferrerForFirstCompletedRide(
+                riderUserId: riderId,
+                rideId: rideId,
+                idempotencyKey: 'referral_reward:$rideId',
+              );
+        } catch (error) {
+          referralReward = <String, Object?>{
+            'ok': false,
+            'credited': false,
+            'error': error.toString(),
+          };
+        }
+      }
+    }
+
     await _logOperation(
       operationType: 'ride_complete_and_settle',
       entityId: rideId,
@@ -406,6 +454,7 @@ class RideApiFlowService {
       'ride_id': rideId,
       'completed': completed,
       'settlement': settlement.toMap(),
+      'referral_reward': referralReward,
     };
   }
 
@@ -440,4 +489,3 @@ class RideApiFlowService {
     );
   }
 }
-

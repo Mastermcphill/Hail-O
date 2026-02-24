@@ -53,6 +53,13 @@ class RiderHome extends StatelessWidget {
               const SizedBox(height: 10),
               FilledButton.tonal(
                 onPressed: () {
+                  context.go('/rider/documents');
+                },
+                child: const Text('Documents'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
                   context.go('/marketplace/offers');
                 },
                 child: const Text('Marketplace'),

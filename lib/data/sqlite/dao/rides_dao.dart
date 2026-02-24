@@ -157,6 +157,7 @@ class RidesDao {
       'rides',
       <String, Object?>{
         'status': 'connection_fee_paid',
+        'connection_fee_paid': 1,
         'connection_fee_paid_at': nowIso,
         'updated_at': nowIso,
       },
@@ -289,4 +290,3 @@ class RidesDao {
     );
   }
 }
-

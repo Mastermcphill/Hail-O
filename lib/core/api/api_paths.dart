@@ -3,6 +3,7 @@ class ApiPaths {
   static const authLogin = '/auth/login';
   static const authRegister = '/auth/register';
   static const meNextOfKin = '/me/next-of-kin';
+  static const meDocuments = '/me/documents';
   static const nextOfKin = meNextOfKin;
 
   static const routesCreate = '/routes';

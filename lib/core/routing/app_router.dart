@@ -32,6 +32,8 @@ import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
+import '../../features/rider/timeline_screen.dart';
+import '../../features/rider/documents_screen.dart';
 import '../../features/settings/about_screen.dart';
 import '../api/api_client.dart';
 import 'role_routes.dart';
@@ -144,6 +146,21 @@ class AppRouter {
               builder: (context, state) => NextOfKinScreen(
                 apiClient: _apiClient,
                 returnTo: state.uri.queryParameters['return_to'],
+              ),
+            ),
+            GoRoute(
+              path: '/rider/documents',
+              builder: (context, state) => RiderDocumentsScreen(
+                apiClient: _apiClient,
+                returnTo: state.uri.queryParameters['return_to'],
+              ),
+            ),
+            GoRoute(
+              path: '/rider/timeline/:purchaseId',
+              builder: (context, state) => TimelineScreen(
+                apiClient: _apiClient,
+                purchaseId: state.pathParameters['purchaseId'] ?? '',
+                rideId: state.uri.queryParameters['rideId'],
               ),
             ),
             GoRoute(
@@ -489,6 +506,12 @@ String _titleForPath(String path) {
   }
   if (isSelectedPath(path, '/rider/next-of-kin')) {
     return 'Next-of-kin';
+  }
+  if (isSelectedPath(path, '/rider/documents')) {
+    return 'Documents';
+  }
+  if (isSelectedPath(path, '/rider/timeline')) {
+    return 'Timeline';
   }
   if (isSelectedPath(path, '/driver/ride-ops')) {
     return 'Driver Ride Ops';

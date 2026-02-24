@@ -69,14 +69,14 @@ class _OffersScreenState extends State<OffersScreen> {
               )
               .toList(growable: false);
       setState(() {
-        _offers = rawOffers.isEmpty ? _buildFallbackOffers() : rawOffers;
+        _offers = rawOffers;
       });
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _offers = _buildFallbackOffers();
+        _offers = const <Map<String, dynamic>>[];
         _errorMessage = formatApiError(error);
       });
     } finally {
@@ -143,10 +143,6 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
       _showSnackBar(formatApiError(error));
-      context.push(
-        '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
-        '?charter_mode=${widget.charterMode}',
-      );
     } finally {
       if (mounted) {
         setState(() {
@@ -272,37 +268,6 @@ class _OffersScreenState extends State<OffersScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  List<Map<String, dynamic>> _buildFallbackOffers() {
-    return <Map<String, dynamic>>[
-      <String, dynamic>{
-        'offer_id': 'fallback-${widget.rideId}-1',
-        'star_rating': 4.8,
-        'gender': 'male',
-        'tribe': 'Yoruba',
-        'vehicle_class': 'suv',
-        'luggage_supported': true,
-        'price_minor': 9200,
-      },
-      <String, dynamic>{
-        'offer_id': 'fallback-${widget.rideId}-2',
-        'star_rating': 4.6,
-        'gender': 'female',
-        'tribe': 'Igbo',
-        'vehicle_class': 'sedan',
-        'luggage_supported': true,
-        'price_minor': 8000,
-      },
-      <String, dynamic>{
-        'offer_id': 'fallback-${widget.rideId}-3',
-        'star_rating': 4.3,
-        'gender': 'male',
-        'vehicle_class': 'hatchback',
-        'luggage_supported': false,
-        'price_minor': 7200,
-      },
-    ];
   }
 }
 

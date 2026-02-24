@@ -8,6 +8,26 @@ class DocumentsDao {
 
   final DatabaseExecutor db;
 
+  Future<void> upsert(DocumentRecord record) async {
+    await db.insert(
+      TableNames.documents,
+      record.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<DocumentRecord>> listByUser(String userId) async {
+    final rows = await db.query(
+      TableNames.documents,
+      where: 'user_id = ?',
+      whereArgs: <Object>[userId],
+      orderBy: 'created_at DESC',
+    );
+    return rows
+        .map((row) => DocumentRecord.fromMap(Map<String, Object?>.from(row)))
+        .toList(growable: false);
+  }
+
   Future<bool> hasCrossBorderDocument(String userId) async {
     final rows = await db.query(
       TableNames.documents,
@@ -85,4 +105,3 @@ class DocumentsDao {
     return rows.isNotEmpty;
   }
 }
-

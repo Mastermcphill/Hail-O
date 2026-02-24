@@ -559,6 +559,9 @@ class ApiClient {
   }
 
   bool _shouldFallbackToMock(ApiException error, String path) {
+    if (!ApiConfig.mockMode) {
+      return false;
+    }
     return error.statusCode == 404 && _isNewEndpointPath(path);
   }
 

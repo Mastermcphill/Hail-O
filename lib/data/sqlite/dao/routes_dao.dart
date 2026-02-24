@@ -7,7 +7,7 @@ import '../table_names.dart';
 class RoutesDao {
   const RoutesDao(this.db);
 
-  final Database db;
+  final DatabaseExecutor db;
 
   Future<void> upsertRoute(RouteChain route) async {
     await db.insert(
@@ -39,6 +39,36 @@ class RoutesDao {
     return RouteChain.fromMap(routes.first, nodes: nodes);
   }
 
+  Future<List<RouteChain>> listRoutes() async {
+    final rows = await db.query(TableNames.routes, orderBy: 'created_at DESC');
+    return rows
+        .map((row) => RouteChain.fromMap(Map<String, Object?>.from(row)))
+        .toList(growable: false);
+  }
+
+  Future<List<RouteChain>> listRoutesWithNodes() async {
+    final routes = await listRoutes();
+    final resolved = <RouteChain>[];
+    for (final route in routes) {
+      final nodes = await listNodes(route.id);
+      resolved.add(
+        RouteChain(
+          id: route.id,
+          driverId: route.driverId,
+          origin: route.origin,
+          destination: route.destination,
+          polyline: route.polyline,
+          totalDistanceKm: route.totalDistanceKm,
+          status: route.status,
+          createdAt: route.createdAt,
+          updatedAt: route.updatedAt,
+          nodes: nodes,
+        ),
+      );
+    }
+    return resolved;
+  }
+
   Future<List<RouteNode>> listNodes(String routeId) async {
     final rows = await db.query(
       TableNames.routeNodes,
@@ -49,4 +79,3 @@ class RoutesDao {
     return rows.map(RouteNode.fromMap).toList(growable: false);
   }
 }
-

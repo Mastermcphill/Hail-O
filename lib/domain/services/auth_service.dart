@@ -79,6 +79,7 @@ class AuthService {
     required String idempotencyKey,
     String? displayName,
     RegisterNextOfKinInput? nextOfKin,
+    String? referralCode,
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty || !normalizedEmail.contains('@')) {
@@ -169,6 +170,36 @@ class AuthService {
             ),
           );
         }
+        final normalizedReferral = (referralCode ?? '').trim().toUpperCase();
+        if (normalizedReferral.isNotEmpty) {
+          final codeRows = await txn.query(
+            'referral_codes',
+            columns: <String>['referrer_user_id', 'is_active'],
+            where: 'code = ?',
+            whereArgs: <Object>[normalizedReferral],
+            limit: 1,
+          );
+          if (codeRows.isEmpty ||
+              ((codeRows.first['is_active'] as num?)?.toInt() ?? 0) != 1) {
+            throw const DomainInvariantError(code: 'referral_code_invalid');
+          }
+          final referrerUserId =
+              (codeRows.first['referrer_user_id'] as String?)?.trim() ?? '';
+          if (referrerUserId.isEmpty || referrerUserId == userId) {
+            throw const DomainInvariantError(code: 'referral_code_invalid');
+          }
+          await txn.insert('promo_events', <String, Object?>{
+            'id': 'promo_referral_signup:$userId',
+            'event_type': 'referral_signup_pending',
+            'user_id': userId,
+            'related_user_id': referrerUserId,
+            'amount_minor': 500,
+            'status': 'pending',
+            'created_at': now.toUtc().toIso8601String(),
+            'idempotency_scope': _scopeRegister,
+            'idempotency_key': '$idempotencyKey:referral_signup',
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
         return <String, Object?>{
           'ok': true,
           'replayed': false,
@@ -256,4 +287,3 @@ class AuthService {
     };
   }
 }
-
