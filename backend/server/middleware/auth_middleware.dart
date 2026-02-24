@@ -12,11 +12,8 @@ Middleware authMiddleware(
     'auth/login',
     'health',
     'healthz',
-    'api/healthz',
   },
-  Set<String> publicPrefixes = const <String>{
-    'marketplace/offers/',
-  },
+  Set<String> publicPrefixes = const <String>{'marketplace/offers/'},
   Set<String> protectedPrefixes = const <String>{
     'rides/',
     'drivers/',
@@ -26,13 +23,12 @@ Middleware authMiddleware(
     'orgs',
     'orgs/',
     'admin/',
-    'api/admin/',
     'metrics',
   },
 }) {
   return (Handler innerHandler) {
     return (Request request) {
-      final path = request.url.path;
+      final path = _canonicalPath(request.url.path);
       if (publicPaths.contains(path) || _isPublicPath(path, publicPrefixes)) {
         return innerHandler(request);
       }
@@ -89,6 +85,17 @@ Middleware authMiddleware(
       }
     };
   };
+}
+
+String _canonicalPath(String path) {
+  final trimmed = path.trim();
+  if (trimmed == 'api') {
+    return '';
+  }
+  if (trimmed.startsWith('api/')) {
+    return trimmed.substring(4);
+  }
+  return trimmed;
 }
 
 bool _isPublicPath(String path, Set<String> publicPrefixes) {

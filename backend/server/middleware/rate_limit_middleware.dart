@@ -27,7 +27,7 @@ Middleware rateLimitMiddleware({
   int maxWebhookRequestsPerIp = 300,
   int? maxWebhookRequestsPerUser,
   bool trustProxyHeaders = true,
-  Set<String> exemptPaths = const <String>{'health', 'healthz', 'api/healthz'},
+  Set<String> exemptPaths = const <String>{'health', 'healthz'},
   NowProvider? nowProvider,
 }) {
   final ipBuckets = <String, _CounterBucket>{};
@@ -59,7 +59,7 @@ Middleware rateLimitMiddleware({
 
   return (Handler innerHandler) {
     return (Request request) {
-      final path = request.url.path;
+      final path = _canonicalPath(request.url.path);
       if (exemptPaths.contains(path)) {
         return innerHandler(request);
       }
@@ -135,6 +135,17 @@ Middleware rateLimitMiddleware({
       return innerHandler(request);
     };
   };
+}
+
+String _canonicalPath(String path) {
+  final trimmed = path.trim();
+  if (trimmed == 'api') {
+    return '';
+  }
+  if (trimmed.startsWith('api/')) {
+    return trimmed.substring(4);
+  }
+  return trimmed;
 }
 
 String _extractClientIp(Request request, {required bool trustProxyHeaders}) {

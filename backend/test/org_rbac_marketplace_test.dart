@@ -46,7 +46,7 @@ void main() {
     final createOrg = await _request(
       handler,
       method: 'POST',
-      path: '/orgs',
+      path: '/api/orgs',
       token: owner.token,
       idempotencyKey: 'create-org-1',
       body: <String, Object?>{'name': 'Alpha Team'},
@@ -61,7 +61,7 @@ void main() {
     final memberInvite = await _request(
       handler,
       method: 'POST',
-      path: '/orgs/$orgId/invites',
+      path: '/api/orgs/$orgId/invites',
       token: owner.token,
       idempotencyKey: 'invite-member-1',
       body: <String, Object?>{
@@ -80,7 +80,7 @@ void main() {
     final memberAccept = await _request(
       handler,
       method: 'POST',
-      path: '/orgs/invites/accept',
+      path: '/api/orgs/invites/accept',
       token: member.token,
       idempotencyKey: 'accept-member-1',
       body: <String, Object?>{'token': memberInviteToken},
@@ -90,7 +90,7 @@ void main() {
     final billingInvite = await _request(
       handler,
       method: 'POST',
-      path: '/orgs/$orgId/invites',
+      path: '/api/orgs/$orgId/invites',
       token: owner.token,
       idempotencyKey: 'invite-billing-1',
       body: <String, Object?>{
@@ -109,7 +109,7 @@ void main() {
     final billingAccept = await _request(
       handler,
       method: 'POST',
-      path: '/orgs/invites/accept',
+      path: '/api/orgs/invites/accept',
       token: billing.token,
       idempotencyKey: 'accept-billing-1',
       body: <String, Object?>{'token': billingInviteToken},
@@ -183,146 +183,147 @@ void main() {
     expect((billingData['offerId'] as String?) ?? '', nextOfferId);
   });
 
-  test('cannot assign seat to non-member, invite accept activates membership, and restore works via org access', () async {
-    final db = await HailODatabase().openInMemory();
-    addTearDown(() async => db.close());
-    final handler = _buildHandler(db);
+  test(
+    'cannot assign seat to non-member, invite accept activates membership, and restore works via org access',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      final handler = _buildHandler(db);
 
-    final owner = await _registerAndLogin(
-      handler,
-      email: 'rbac-owner@example.com',
-      role: 'rider',
-      idSuffix: 'rbac-owner',
-    );
-    final member = await _registerAndLogin(
-      handler,
-      email: 'rbac-member@example.com',
-      role: 'rider',
-      idSuffix: 'rbac-member',
-    );
+      final owner = await _registerAndLogin(
+        handler,
+        email: 'rbac-owner@example.com',
+        role: 'rider',
+        idSuffix: 'rbac-owner',
+      );
+      final member = await _registerAndLogin(
+        handler,
+        email: 'rbac-member@example.com',
+        role: 'rider',
+        idSuffix: 'rbac-member',
+      );
 
-    final createOrg = await _request(
-      handler,
-      method: 'POST',
-      path: '/orgs',
-      token: owner.token,
-      idempotencyKey: 'create-org-2',
-      body: <String, Object?>{'name': 'Beta Team'},
-    );
-    expect(createOrg.statusCode, 201);
-    final createOrgBody = await _decodeBody(createOrg);
-    final orgData = Map<String, Object?>.from(createOrgBody['data'] as Map);
-    final org = Map<String, Object?>.from(orgData['org'] as Map);
-    final orgId = (org['id'] as String?) ?? '';
-    expect(orgId.isNotEmpty, isTrue);
+      final createOrg = await _request(
+        handler,
+        method: 'POST',
+        path: '/api/orgs',
+        token: owner.token,
+        idempotencyKey: 'create-org-2',
+        body: <String, Object?>{'name': 'Beta Team'},
+      );
+      expect(createOrg.statusCode, 201);
+      final createOrgBody = await _decodeBody(createOrg);
+      final orgData = Map<String, Object?>.from(createOrgBody['data'] as Map);
+      final org = Map<String, Object?>.from(orgData['org'] as Map);
+      final orgId = (org['id'] as String?) ?? '';
+      expect(orgId.isNotEmpty, isTrue);
 
-    final invite = await _request(
-      handler,
-      method: 'POST',
-      path: '/orgs/$orgId/invites',
-      token: owner.token,
-      idempotencyKey: 'invite-rbac-member-1',
-      body: <String, Object?>{
-        'email': 'rbac-member@example.com',
-        'role': 'member',
-      },
-    );
-    expect(invite.statusCode, 201);
-    final inviteBody = await _decodeBody(invite);
-    final inviteData = Map<String, Object?>.from(inviteBody['data'] as Map);
-    final inviteToken = (inviteData['token'] as String?) ?? '';
-    expect(inviteToken.isNotEmpty, isTrue);
+      final invite = await _request(
+        handler,
+        method: 'POST',
+        path: '/api/orgs/$orgId/invites',
+        token: owner.token,
+        idempotencyKey: 'invite-rbac-member-1',
+        body: <String, Object?>{
+          'email': 'rbac-member@example.com',
+          'role': 'member',
+        },
+      );
+      expect(invite.statusCode, 201);
+      final inviteBody = await _decodeBody(invite);
+      final inviteData = Map<String, Object?>.from(inviteBody['data'] as Map);
+      final inviteToken = (inviteData['token'] as String?) ?? '';
+      expect(inviteToken.isNotEmpty, isTrue);
 
-    final acceptInvite = await _request(
-      handler,
-      method: 'POST',
-      path: '/orgs/invites/accept',
-      token: member.token,
-      idempotencyKey: 'accept-rbac-member-1',
-      body: <String, Object?>{'token': inviteToken},
-    );
-    expect(acceptInvite.statusCode, 200);
+      final acceptInvite = await _request(
+        handler,
+        method: 'POST',
+        path: '/api/orgs/invites/accept',
+        token: member.token,
+        idempotencyKey: 'accept-rbac-member-1',
+        body: <String, Object?>{'token': inviteToken},
+      );
+      expect(acceptInvite.statusCode, 200);
 
-    final membersResponse = await _request(
-      handler,
-      method: 'GET',
-      path: '/orgs/$orgId/members',
-      token: owner.token,
-    );
-    expect(membersResponse.statusCode, 200);
-    final membersBody = await _decodeBody(membersResponse);
-    final membersData = Map<String, Object?>.from(membersBody['data'] as Map);
-    final members = (membersData['members'] as List?) ?? const <Object?>[];
-    final memberRow = members
-        .whereType<Map>()
-        .map((entry) => Map<String, Object?>.from(entry))
-        .firstWhere((entry) => entry['user_id'] == member.userId);
-    expect(memberRow['status'], 'active');
+      final membersResponse = await _request(
+        handler,
+        method: 'GET',
+        path: '/api/orgs/$orgId/members',
+        token: owner.token,
+      );
+      expect(membersResponse.statusCode, 200);
+      final membersBody = await _decodeBody(membersResponse);
+      final membersData = Map<String, Object?>.from(membersBody['data'] as Map);
+      final members = (membersData['members'] as List?) ?? const <Object?>[];
+      final memberRow = members
+          .whereType<Map>()
+          .map((entry) => Map<String, Object?>.from(entry))
+          .firstWhere((entry) => entry['user_id'] == member.userId);
+      expect(memberRow['status'], 'active');
 
-    final offers = await _request(
-      handler,
-      method: 'GET',
-      path: '/marketplace/offers',
-      token: owner.token,
-    );
-    expect(offers.statusCode, 200);
-    final offersBody = await _decodeBody(offers);
-    final offerId = (((offersBody['data'] as List).first as Map)['id'] as String?) ?? '';
-    expect(offerId.isNotEmpty, isTrue);
+      final offers = await _request(
+        handler,
+        method: 'GET',
+        path: '/marketplace/offers',
+        token: owner.token,
+      );
+      expect(offers.statusCode, 200);
+      final offersBody = await _decodeBody(offers);
+      final offerId =
+          (((offersBody['data'] as List).first as Map)['id'] as String?) ?? '';
+      expect(offerId.isNotEmpty, isTrue);
 
-    final createPurchase = await _request(
-      handler,
-      method: 'POST',
-      path: '/marketplace/purchases',
-      token: owner.token,
-      idempotencyKey: 'org-purchase-idem-2',
-      body: <String, Object?>{
-        'offerId': offerId,
-        'seatCount': 2,
-        'orgId': orgId,
-      },
-    );
-    expect(createPurchase.statusCode, anyOf(200, 201));
-    final createPurchaseBody = await _decodeBody(createPurchase);
-    final purchaseData = Map<String, Object?>.from(
-      createPurchaseBody['data'] as Map,
-    );
-    final purchaseId = (purchaseData['purchaseId'] as String?) ?? '';
-    final purchaseVersion = (purchaseData['version'] as num?)?.toInt() ?? 1;
-    expect(purchaseId.isNotEmpty, isTrue);
+      final createPurchase = await _request(
+        handler,
+        method: 'POST',
+        path: '/marketplace/purchases',
+        token: owner.token,
+        idempotencyKey: 'org-purchase-idem-2',
+        body: <String, Object?>{
+          'offerId': offerId,
+          'seatCount': 2,
+          'orgId': orgId,
+        },
+      );
+      expect(createPurchase.statusCode, anyOf(200, 201));
+      final createPurchaseBody = await _decodeBody(createPurchase);
+      final purchaseData = Map<String, Object?>.from(
+        createPurchaseBody['data'] as Map,
+      );
+      final purchaseId = (purchaseData['purchaseId'] as String?) ?? '';
+      final purchaseVersion = (purchaseData['version'] as num?)?.toInt() ?? 1;
+      expect(purchaseId.isNotEmpty, isTrue);
 
-    final badAssignments = await _request(
-      handler,
-      method: 'PATCH',
-      path: '/marketplace/purchases/$purchaseId/assignments',
-      token: owner.token,
-      extraHeaders: <String, String>{'if-match-version': '$purchaseVersion'},
-      body: <String, Object?>{
-        'assignments': <Map<String, Object?>>[
-          <String, Object?>{
-            'seat_index': 1,
-            'user_id': 'not-a-member-user',
-          },
-        ],
-      },
-    );
-    expect(badAssignments.statusCode, 400);
-    final badAssignmentsBody = await _decodeBody(badAssignments);
-    expect(badAssignmentsBody['error_code'], 'INVALID_ASSIGNEE');
+      final badAssignments = await _request(
+        handler,
+        method: 'PATCH',
+        path: '/marketplace/purchases/$purchaseId/assignments',
+        token: owner.token,
+        extraHeaders: <String, String>{'if-match-version': '$purchaseVersion'},
+        body: <String, Object?>{
+          'assignments': <Map<String, Object?>>[
+            <String, Object?>{'seat_index': 1, 'user_id': 'not-a-member-user'},
+          ],
+        },
+      );
+      expect(badAssignments.statusCode, 400);
+      final badAssignmentsBody = await _decodeBody(badAssignments);
+      expect(badAssignmentsBody['error_code'], 'INVALID_ASSIGNEE');
 
-    final restoreByMember = await _request(
-      handler,
-      method: 'GET',
-      path:
-          '/marketplace/purchases/restore?idempotencyKey=${Uri.encodeQueryComponent('org-purchase-idem-2')}',
-      token: member.token,
-    );
-    expect(restoreByMember.statusCode, 200);
-    final restoreBody = await _decodeBody(restoreByMember);
-    final restoreData = Map<String, Object?>.from(restoreBody['data'] as Map);
-    expect((restoreData['purchaseId'] as String?) ?? '', purchaseId);
-    expect((restoreData['org_id'] as String?) ?? '', orgId);
-  });
+      final restoreByMember = await _request(
+        handler,
+        method: 'GET',
+        path:
+            '/marketplace/purchases/restore?idempotencyKey=${Uri.encodeQueryComponent('org-purchase-idem-2')}',
+        token: member.token,
+      );
+      expect(restoreByMember.statusCode, 200);
+      final restoreBody = await _decodeBody(restoreByMember);
+      final restoreData = Map<String, Object?>.from(restoreBody['data'] as Map);
+      expect((restoreData['purchaseId'] as String?) ?? '', purchaseId);
+      expect((restoreData['org_id'] as String?) ?? '', orgId);
+    },
+  );
 }
 
 class _AuthUser {

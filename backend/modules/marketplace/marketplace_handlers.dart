@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:shelf/shelf.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,6 +10,8 @@ import 'marketplace_entitlement_service.dart';
 import 'marketplace_revenue_service.dart';
 import '../payments/payment_service.dart';
 import 'marketplace_offer_repository.dart';
+import 'org_rbac.dart';
+import 'org_repository.dart';
 
 class MarketplaceHandlers {
   MarketplaceHandlers({
@@ -14,18 +19,25 @@ class MarketplaceHandlers {
     PaymentService? paymentService,
     MarketplaceEntitlementService? entitlementService,
     MarketplaceRevenueService? revenueService,
+    OrgRepository? orgRepository,
     Uuid? uuid,
   }) : _offerRepository = offerRepository,
        _paymentService = paymentService,
        _entitlementService = entitlementService,
        _revenueService = revenueService ?? MarketplaceRevenueService(),
+       _orgRepository = orgRepository,
        _uuid = uuid ?? const Uuid();
 
   final MarketplaceOfferRepository _offerRepository;
   final PaymentService? _paymentService;
   final MarketplaceEntitlementService? _entitlementService;
   final MarketplaceRevenueService _revenueService;
+  final OrgRepository? _orgRepository;
   final Uuid _uuid;
+  final Map<String, String> _orgIdByPurchaseId = <String, String>{};
+  final Map<String, String> _ownerUserIdByPurchaseId = <String, String>{};
+  final Map<String, String> _purchaseIdByOrgAndIdempotency = <String, String>{};
+  final Map<String, int> _versionByPurchaseId = <String, int>{};
 
   Future<Response> listOffers(Request request) async {
     final offers = await _offerRepository.listActiveOffers();
@@ -42,7 +54,13 @@ class MarketplaceHandlers {
           },
         )
         .toList(growable: false);
-    return _ok(request, data: data);
+    final etag = _etagForPayload(data);
+    final ifNoneMatch = request.headers['if-none-match'];
+    if (ifNoneMatch != null &&
+        _matchesAnyEtag(ifNoneMatch: ifNoneMatch, etag: etag)) {
+      return Response.notModified(headers: <String, String>{'etag': etag});
+    }
+    return _ok(request, data: data, headers: <String, String>{'etag': etag});
   }
 
   Future<Response> getOfferPaywall(Request request, String offerId) async {
@@ -157,13 +175,22 @@ class MarketplaceHandlers {
         offerId: offerId,
         seats: seatCount,
       );
+      _recordPurchaseAccess(
+        purchaseId: purchase.id,
+        ownerUserId: purchase.userId,
+        orgId: orgId,
+        idempotencyKey: idempotencyKey,
+      );
+      final version = _currentVersion(purchase.id);
+      final purchasePayload = await _buildPurchasePayload(
+        purchase: purchase,
+        ownerUserId: purchase.userId,
+        orgId: orgId,
+        version: version,
+      );
       return _ok(
         request,
-        data: <String, Object?>{
-          ..._purchasePayload(purchase),
-          'org_id': orgId,
-          'invoice': invoice,
-        },
+        data: <String, Object?>{...purchasePayload, 'invoice': invoice},
         headers: <String, String>{
           'x-idempotency-key': idempotencyKey,
           'x-marketplace-purchase-id': purchase.id,
@@ -218,10 +245,42 @@ class MarketplaceHandlers {
       );
     }
 
-    final purchase = await _offerRepository.findPurchaseByIdempotencyKey(
+    var purchase = await _offerRepository.findPurchaseByIdempotencyKey(
       userId: userId,
       idempotencyKey: idempotencyKey,
     );
+    var resolvedOrgId = purchase == null
+        ? null
+        : _orgIdByPurchaseId[purchase.id];
+    if (purchase == null) {
+      final orgRepository = _orgRepository;
+      if (orgRepository != null) {
+        final activeOrgIds = await orgRepository.listActiveOrgIdsForUser(
+          userId,
+        );
+        for (final orgId in activeOrgIds) {
+          final candidatePurchaseId =
+              _purchaseIdByOrgAndIdempotency['$orgId::$idempotencyKey'];
+          if (candidatePurchaseId == null) {
+            continue;
+          }
+          final ownerUserId = _ownerUserIdByPurchaseId[candidatePurchaseId];
+          if (ownerUserId == null) {
+            continue;
+          }
+          final candidate = await _offerRepository.findPurchaseById(
+            userId: ownerUserId,
+            purchaseId: candidatePurchaseId,
+          );
+          if (candidate == null) {
+            continue;
+          }
+          purchase = candidate;
+          resolvedOrgId = orgId;
+          break;
+        }
+      }
+    }
     if (purchase == null) {
       return _error(
         request,
@@ -230,10 +289,22 @@ class MarketplaceHandlers {
         message: 'Purchase not found for idempotency key',
       );
     }
+    _recordPurchaseAccess(
+      purchaseId: purchase.id,
+      ownerUserId: purchase.userId,
+      orgId: resolvedOrgId ?? purchase.userId,
+      idempotencyKey: idempotencyKey,
+    );
+    final payload = await _buildPurchasePayload(
+      purchase: purchase,
+      ownerUserId: purchase.userId,
+      orgId: resolvedOrgId ?? purchase.userId,
+      version: _currentVersion(purchase.id),
+    );
 
     return _ok(
       request,
-      data: _purchasePayload(purchase),
+      data: payload,
       headers: <String, String>{
         'x-idempotency-key': idempotencyKey,
         'x-marketplace-purchase-id': purchase.id,
@@ -252,8 +323,27 @@ class MarketplaceHandlers {
       );
     }
 
+    final purchaseAccess = _resolvePurchaseAccess(
+      purchaseId: purchaseId,
+      actingUserId: userId,
+    );
+    if (purchaseAccess == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    if (purchaseAccess.ownerUserId != userId &&
+        !await _hasActiveOrgMembership(
+          orgId: purchaseAccess.orgId,
+          userId: userId,
+        )) {
+      return forbiddenOrgRole(request);
+    }
     final purchase = await _offerRepository.findPurchaseById(
-      userId: userId,
+      userId: purchaseAccess.ownerUserId,
       purchaseId: purchaseId,
     );
     if (purchase == null) {
@@ -264,26 +354,31 @@ class MarketplaceHandlers {
         message: 'Purchase not found',
       );
     }
-    final assignments = await _offerRepository.listAssignments(
-      userId: userId,
-      purchaseId: purchaseId,
+    final payload = await _buildPurchasePayload(
+      purchase: purchase,
+      ownerUserId: purchaseAccess.ownerUserId,
+      orgId: purchaseAccess.orgId,
+      version: _currentVersion(purchaseId),
     );
+    final etag = _etagForPayload(payload);
+    final ifNoneMatch = request.headers['if-none-match'];
+    if (ifNoneMatch != null &&
+        _matchesAnyEtag(ifNoneMatch: ifNoneMatch, etag: etag)) {
+      return Response.notModified(
+        headers: <String, String>{
+          'etag': etag,
+          'x-marketplace-purchase-id': purchase.id,
+        },
+      );
+    }
 
     return _ok(
       request,
-      data: <String, Object?>{
-        ..._purchasePayload(purchase),
-        'assignments': assignments
-            .map(
-              (assignment) => <String, Object?>{
-                'seatIndex': assignment.seatIndex,
-                'name': assignment.name,
-                'email': assignment.email,
-              },
-            )
-            .toList(growable: false),
+      data: payload,
+      headers: <String, String>{
+        'etag': etag,
+        'x-marketplace-purchase-id': purchase.id,
       },
-      headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
     );
   }
 
@@ -305,7 +400,6 @@ class MarketplaceHandlers {
     final payload = body.payload!;
     final seatCount =
         _toInt(payload['seat_count']) ?? _toInt(payload['seatCount']);
-    final orgId = _resolveOrgId(payload: payload, userId: userId);
     if (seatCount == null || seatCount < 1 || seatCount > 50) {
       return _error(
         request,
@@ -314,15 +408,44 @@ class MarketplaceHandlers {
         message: 'seat_count must be between 1 and 50',
       );
     }
+    final purchaseAccess = _resolvePurchaseAccess(
+      purchaseId: purchaseId,
+      actingUserId: userId,
+    );
+    if (purchaseAccess == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    final roleError = await _authorizePurchaseMutation(
+      request: request,
+      purchaseAccess: purchaseAccess,
+      actingUserId: userId,
+      allowedOrgRoles: kOrgAdminRoles,
+    );
+    if (roleError != null) {
+      return roleError;
+    }
+    final versionConflict = await _versionConflictResponse(
+      request: request,
+      purchaseId: purchaseId,
+      purchaseAccess: purchaseAccess,
+    );
+    if (versionConflict != null) {
+      return versionConflict;
+    }
 
     try {
       await _revenueService.assertMutationAllowed(
         userId: userId,
-        orgId: orgId,
+        orgId: purchaseAccess.orgId,
         action: 'update_seats',
       );
       final purchase = await _offerRepository.updateSeatCount(
-        userId: userId,
+        userId: purchaseAccess.ownerUserId,
         purchaseId: purchaseId,
         seatCount: seatCount,
       );
@@ -333,9 +456,16 @@ class MarketplaceHandlers {
           reason: 'seat_count_changed',
         );
       }
+      final version = _bumpVersion(purchase.id);
+      final payload = await _buildPurchasePayload(
+        purchase: purchase,
+        ownerUserId: purchaseAccess.ownerUserId,
+        orgId: purchaseAccess.orgId,
+        version: version,
+      );
       return _ok(
         request,
-        data: _purchasePayload(purchase),
+        data: payload,
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
       );
     } on MarketplaceRevenueException catch (error) {
@@ -384,7 +514,7 @@ class MarketplaceHandlers {
       );
     }
     final assignments = <MarketplaceSeatAssignmentInput>[];
-    final orgId = _resolveOrgId(payload: payload, userId: userId);
+    final parsedAssignments = <Map<String, Object?>>[];
     for (final item in rawAssignments) {
       if (item is! Map) {
         continue;
@@ -392,8 +522,12 @@ class MarketplaceHandlers {
       final map = Map<String, Object?>.from(
         item.map((key, value) => MapEntry(key.toString(), value)),
       );
+      parsedAssignments.add(map);
       final seatIndex =
-          _toInt(map['seatIndex']) ?? _toInt(map['seat_number']) ?? 0;
+          _toInt(map['seatIndex']) ??
+          _toInt(map['seat_index']) ??
+          _toInt(map['seat_number']) ??
+          0;
       assignments.add(
         MarketplaceSeatAssignmentInput(
           seatIndex: seatIndex,
@@ -402,21 +536,65 @@ class MarketplaceHandlers {
         ),
       );
     }
+    final purchaseAccess = _resolvePurchaseAccess(
+      purchaseId: purchaseId,
+      actingUserId: userId,
+    );
+    if (purchaseAccess == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    final roleError = await _authorizePurchaseMutation(
+      request: request,
+      purchaseAccess: purchaseAccess,
+      actingUserId: userId,
+      allowedOrgRoles: kOrgBillingRoles,
+    );
+    if (roleError != null) {
+      return roleError;
+    }
+    final assigneeError = await _validateAssignmentAssignees(
+      request: request,
+      purchaseAccess: purchaseAccess,
+      assignments: parsedAssignments,
+    );
+    if (assigneeError != null) {
+      return assigneeError;
+    }
+    final versionConflict = await _versionConflictResponse(
+      request: request,
+      purchaseId: purchaseId,
+      purchaseAccess: purchaseAccess,
+    );
+    if (versionConflict != null) {
+      return versionConflict;
+    }
 
     try {
       await _revenueService.assertMutationAllowed(
         userId: userId,
-        orgId: orgId,
+        orgId: purchaseAccess.orgId,
         action: 'update_assignments',
       );
       final purchase = await _offerRepository.replaceAssignments(
-        userId: userId,
+        userId: purchaseAccess.ownerUserId,
         purchaseId: purchaseId,
         assignments: assignments,
       );
+      final version = _bumpVersion(purchase.id);
+      final payload = await _buildPurchasePayload(
+        purchase: purchase,
+        ownerUserId: purchaseAccess.ownerUserId,
+        orgId: purchaseAccess.orgId,
+        version: version,
+      );
       return _ok(
         request,
-        data: _purchasePayload(purchase),
+        data: payload,
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
       );
     } on MarketplaceRevenueException catch (error) {
@@ -454,10 +632,11 @@ class MarketplaceHandlers {
       );
     }
     final payload = body.payload!;
-    final orgId = _resolveOrgId(payload: payload, userId: userId);
     final newOfferId =
         (payload['new_offer_id'] as String?)?.trim() ??
         (payload['newOfferId'] as String?)?.trim() ??
+        (payload['offer_id'] as String?)?.trim() ??
+        (payload['offerId'] as String?)?.trim() ??
         '';
     if (newOfferId.isEmpty) {
       return _error(
@@ -467,15 +646,44 @@ class MarketplaceHandlers {
         message: 'new_offer_id is required',
       );
     }
+    final purchaseAccess = _resolvePurchaseAccess(
+      purchaseId: purchaseId,
+      actingUserId: userId,
+    );
+    if (purchaseAccess == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    final roleError = await _authorizePurchaseMutation(
+      request: request,
+      purchaseAccess: purchaseAccess,
+      actingUserId: userId,
+      allowedOrgRoles: kOrgBillingRoles,
+    );
+    if (roleError != null) {
+      return roleError;
+    }
+    final versionConflict = await _versionConflictResponse(
+      request: request,
+      purchaseId: purchaseId,
+      purchaseAccess: purchaseAccess,
+    );
+    if (versionConflict != null) {
+      return versionConflict;
+    }
 
     try {
       await _revenueService.assertMutationAllowed(
         userId: userId,
-        orgId: orgId,
+        orgId: purchaseAccess.orgId,
         action: 'change_plan',
       );
       final purchase = await _offerRepository.changePlan(
-        userId: userId,
+        userId: purchaseAccess.ownerUserId,
         purchaseId: purchaseId,
         newOfferId: newOfferId,
       );
@@ -486,9 +694,16 @@ class MarketplaceHandlers {
           reason: 'plan_changed',
         );
       }
+      final version = _bumpVersion(purchase.id);
+      final payload = await _buildPurchasePayload(
+        purchase: purchase,
+        ownerUserId: purchaseAccess.ownerUserId,
+        orgId: purchaseAccess.orgId,
+        version: version,
+      );
       return _ok(
         request,
-        data: _purchasePayload(purchase),
+        data: payload,
         headers: <String, String>{'x-marketplace-purchase-id': purchase.id},
       );
     } on MarketplaceRevenueException catch (error) {
@@ -525,15 +740,34 @@ class MarketplaceHandlers {
       );
     }
 
+    final purchaseAccess = _resolvePurchaseAccess(
+      purchaseId: purchaseId,
+      actingUserId: userId,
+    );
+    if (purchaseAccess == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    if (purchaseAccess.ownerUserId != userId &&
+        !await _hasActiveOrgMembership(
+          orgId: purchaseAccess.orgId,
+          userId: userId,
+        )) {
+      return forbiddenOrgRole(request);
+    }
     final limit = _toInt(request.url.queryParameters['limit']) ?? 100;
-    final events = await _offerRepository.listTimelineEvents(
-      userId: userId,
+    var events = await _offerRepository.listTimelineEvents(
+      userId: purchaseAccess.ownerUserId,
       purchaseId: purchaseId,
       limit: limit,
     );
     if (events.isEmpty) {
       final purchase = await _offerRepository.findPurchaseById(
-        userId: userId,
+        userId: purchaseAccess.ownerUserId,
         purchaseId: purchaseId,
       );
       if (purchase == null) {
@@ -545,8 +779,18 @@ class MarketplaceHandlers {
         );
       }
     }
+    final sinceRaw = (request.url.queryParameters['since'] ?? '').trim();
+    DateTime? sinceUtc;
+    if (sinceRaw.isNotEmpty) {
+      sinceUtc = DateTime.tryParse(sinceRaw)?.toUtc();
+    }
+    if (sinceUtc != null) {
+      events = events
+          .where((event) => event.createdAt.toUtc().isAfter(sinceUtc!))
+          .toList(growable: false);
+    }
 
-    final timeline = events
+    final timelineEvents = events
         .map(
           (event) => <String, Object?>{
             'type': _timelineEventTypeLabel(event.eventType),
@@ -561,11 +805,41 @@ class MarketplaceHandlers {
           },
         )
         .toList(growable: false);
+    final latestEventAt = events.isEmpty
+        ? ''
+        : events
+              .map((event) => event.createdAt.toUtc())
+              .reduce((left, right) => left.isAfter(right) ? left : right)
+              .toIso8601String();
+    final payload = <String, Object?>{
+      'purchase_id': purchaseId,
+      'latest_event_at': latestEventAt,
+      'events': timelineEvents,
+    };
+    final etag = _etagForPayload(<Object?>[
+      purchaseId,
+      latestEventAt,
+      timelineEvents.length,
+      sinceRaw,
+    ]);
+    final ifNoneMatch = request.headers['if-none-match'];
+    if (ifNoneMatch != null &&
+        _matchesAnyEtag(ifNoneMatch: ifNoneMatch, etag: etag)) {
+      return Response.notModified(
+        headers: <String, String>{
+          'etag': etag,
+          'x-marketplace-purchase-id': purchaseId,
+        },
+      );
+    }
 
     return _ok(
       request,
-      data: timeline,
-      headers: <String, String>{'x-marketplace-purchase-id': purchaseId},
+      data: payload,
+      headers: <String, String>{
+        'etag': etag,
+        'x-marketplace-purchase-id': purchaseId,
+      },
     );
   }
 
@@ -710,12 +984,11 @@ class MarketplaceHandlers {
       );
     }
     final query = request.url.queryParameters;
-    final orgId =
-        (query['org_id'] ?? query['orgId'] ?? '').trim().isEmpty
+    final orgId = (query['org_id'] ?? query['orgId'] ?? '').trim().isEmpty
         ? userId
         : (query['org_id'] ?? query['orgId'] ?? '').trim();
-    final offerId =
-        (query['offer_id'] ?? query['offerId'] ?? 'offer_sedan_01').trim();
+    final offerId = (query['offer_id'] ?? query['offerId'] ?? 'offer_sedan_01')
+        .trim();
     final seats = _toInt(query['seats']) ?? 1;
     try {
       final preview = await _revenueService.pricingPreview(
@@ -922,21 +1195,233 @@ class MarketplaceHandlers {
     }
   }
 
+  void _recordPurchaseAccess({
+    required String purchaseId,
+    required String ownerUserId,
+    required String orgId,
+    required String idempotencyKey,
+  }) {
+    _ownerUserIdByPurchaseId[purchaseId] = ownerUserId;
+    _orgIdByPurchaseId[purchaseId] = orgId;
+    _purchaseIdByOrgAndIdempotency['$orgId::$idempotencyKey'] = purchaseId;
+    _versionByPurchaseId.putIfAbsent(purchaseId, () => 1);
+  }
+
+  _PurchaseAccess? _resolvePurchaseAccess({
+    required String purchaseId,
+    required String actingUserId,
+  }) {
+    final ownerUserId = _ownerUserIdByPurchaseId[purchaseId];
+    final orgId = _orgIdByPurchaseId[purchaseId];
+    if (ownerUserId == null || orgId == null) {
+      return _PurchaseAccess(ownerUserId: actingUserId, orgId: actingUserId);
+    }
+    return _PurchaseAccess(ownerUserId: ownerUserId, orgId: orgId);
+  }
+
+  Future<Response?> _authorizePurchaseMutation({
+    required Request request,
+    required _PurchaseAccess purchaseAccess,
+    required String actingUserId,
+    required Set<String> allowedOrgRoles,
+  }) async {
+    if (purchaseAccess.ownerUserId == actingUserId) {
+      return null;
+    }
+    final orgRepository = _orgRepository;
+    if (orgRepository == null) {
+      return _error(
+        request,
+        403,
+        errorCode: 'FORBIDDEN',
+        message: 'You do not have permission for this organization',
+      );
+    }
+    final membership = await requireOrgRole(
+      request: request,
+      orgRepository: orgRepository,
+      orgId: purchaseAccess.orgId,
+      userId: actingUserId,
+      allowedRoles: allowedOrgRoles,
+    );
+    if (membership == null) {
+      return forbiddenOrgRole(request);
+    }
+    return null;
+  }
+
+  Future<Response?> _validateAssignmentAssignees({
+    required Request request,
+    required _PurchaseAccess purchaseAccess,
+    required List<Map<String, Object?>> assignments,
+  }) async {
+    if (purchaseAccess.orgId == purchaseAccess.ownerUserId) {
+      return null;
+    }
+    final orgRepository = _orgRepository;
+    if (orgRepository == null) {
+      return null;
+    }
+    for (final assignment in assignments) {
+      final assigneeUserId =
+          (assignment['user_id'] as String?)?.trim() ??
+          (assignment['userId'] as String?)?.trim() ??
+          '';
+      if (assigneeUserId.isEmpty) {
+        continue;
+      }
+      final membership = await orgRepository.findMembership(
+        orgId: purchaseAccess.orgId,
+        userId: assigneeUserId,
+      );
+      final status = (membership?['status'] as String?)?.toLowerCase() ?? '';
+      if (membership == null || status != 'active') {
+        return _error(
+          request,
+          400,
+          errorCode: 'INVALID_ASSIGNEE',
+          message: 'Assignment assignee must be an active organization member',
+        );
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _hasActiveOrgMembership({
+    required String orgId,
+    required String userId,
+  }) async {
+    final orgRepository = _orgRepository;
+    if (orgRepository == null) {
+      return false;
+    }
+    final membership = await orgRepository.findMembership(
+      orgId: orgId,
+      userId: userId,
+    );
+    final status = (membership?['status'] as String?)?.toLowerCase() ?? '';
+    return status == 'active';
+  }
+
+  int _currentVersion(String purchaseId) {
+    return _versionByPurchaseId[purchaseId] ?? 1;
+  }
+
+  int _bumpVersion(String purchaseId) {
+    final next = _currentVersion(purchaseId) + 1;
+    _versionByPurchaseId[purchaseId] = next;
+    return next;
+  }
+
+  Future<Map<String, Object?>> _buildPurchasePayload({
+    required MarketplacePurchaseRecord purchase,
+    required String ownerUserId,
+    required String orgId,
+    required int version,
+  }) async {
+    final assignments = await _offerRepository.listAssignments(
+      userId: ownerUserId,
+      purchaseId: purchase.id,
+    );
+    final assignmentPayload = assignments
+        .map(
+          (assignment) => <String, Object?>{
+            'seatIndex': assignment.seatIndex,
+            'name': assignment.name.trim().isEmpty
+                ? assignment.assigneeUserId
+                : assignment.name,
+            'email': assignment.email.trim().isEmpty
+                ? assignment.assigneeUserId
+                : assignment.email,
+          },
+        )
+        .toList(growable: false);
+    final normalizedAssignments = assignmentPayload.isEmpty
+        ? <Map<String, Object?>>[
+            <String, Object?>{
+              'seatIndex': 1,
+              'name': ownerUserId,
+              'email': ownerUserId,
+            },
+          ]
+        : assignmentPayload;
+    return <String, Object?>{
+      ..._purchasePayload(purchase),
+      'org_id': orgId,
+      'assignments': normalizedAssignments,
+      'version': version,
+    };
+  }
+
+  Future<Response?> _versionConflictResponse({
+    required Request request,
+    required String purchaseId,
+    required _PurchaseAccess purchaseAccess,
+  }) async {
+    final ifMatchVersion = (request.headers['if-match-version'] ?? '').trim();
+    if (ifMatchVersion.isEmpty) {
+      return null;
+    }
+    final expectedVersion = int.tryParse(ifMatchVersion);
+    if (expectedVersion == null) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'if-match-version must be a valid integer',
+      );
+    }
+    final currentVersion = _currentVersion(purchaseId);
+    if (expectedVersion == currentVersion) {
+      return null;
+    }
+    final latestPurchase = await _offerRepository.findPurchaseById(
+      userId: purchaseAccess.ownerUserId,
+      purchaseId: purchaseId,
+    );
+    if (latestPurchase == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    }
+    final latestPayload = await _buildPurchasePayload(
+      purchase: latestPurchase,
+      ownerUserId: purchaseAccess.ownerUserId,
+      orgId: purchaseAccess.orgId,
+      version: currentVersion,
+    );
+    return _error(
+      request,
+      409,
+      errorCode: 'VERSION_CONFLICT',
+      message: 'if-match-version does not match current version',
+      data: <String, Object?>{'latest': latestPayload},
+    );
+  }
+
   Response _error(
     Request request,
     int statusCode, {
     required String errorCode,
     required String message,
+    Object? data,
     Map<String, String>? headers,
   }) {
+    final payload = <String, Object?>{
+      'ok': false,
+      'trace_id': _resolveTraceId(request),
+      'error_code': errorCode,
+      'message': message,
+    };
+    if (data != null) {
+      payload['data'] = data;
+    }
     return jsonResponse(
       statusCode,
-      <String, Object?>{
-        'ok': false,
-        'trace_id': _resolveTraceId(request),
-        'error_code': errorCode,
-        'message': message,
-      },
+      payload,
       headers: <String, String>{...?headers, 'x-error-code': errorCode},
     );
   }
@@ -952,6 +1437,35 @@ class MarketplaceHandlers {
       'trace_id': _resolveTraceId(request),
       'data': data,
     }, headers: headers);
+  }
+
+  String _etagForPayload(Object? payload) {
+    final body = jsonEncode(payload);
+    final hash = sha256.convert(utf8.encode(body)).toString();
+    return '"$hash"';
+  }
+
+  bool _matchesAnyEtag({required String ifNoneMatch, required String etag}) {
+    final normalizedTarget = _normalizeEtag(etag);
+    final tokens = ifNoneMatch.split(',');
+    for (final token in tokens) {
+      final normalized = _normalizeEtag(token);
+      if (normalized == '*' || normalized == normalizedTarget) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String _normalizeEtag(String value) {
+    var normalized = value.trim();
+    if (normalized.startsWith('W/')) {
+      normalized = normalized.substring(2).trim();
+    }
+    if (normalized.startsWith('"') && normalized.endsWith('"')) {
+      normalized = normalized.substring(1, normalized.length - 1);
+    }
+    return normalized;
   }
 
   String _resolveTraceId(Request request) {
@@ -1093,4 +1607,11 @@ class _BodyParseResult {
 
   final Map<String, Object?>? payload;
   final Response? response;
+}
+
+class _PurchaseAccess {
+  const _PurchaseAccess({required this.ownerUserId, required this.orgId});
+
+  final String ownerUserId;
+  final String orgId;
 }

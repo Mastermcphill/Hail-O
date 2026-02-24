@@ -24,9 +24,13 @@ import '../modules/marketplace/billing_ledger_repository.dart';
 import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_entitlement_service.dart';
 import '../modules/marketplace/marketplace_reconciliation_service.dart';
+import '../modules/marketplace/marketplace_repository.dart';
+import '../modules/marketplace/marketplace_repository_memory.dart';
 import '../modules/marketplace/marketplace_revenue_service.dart';
 import '../modules/marketplace/marketplace_router.dart';
 import '../modules/marketplace/marketplace_handlers.dart';
+import '../modules/marketplace/org_controller.dart';
+import '../modules/marketplace/org_repository.dart';
 import '../modules/marketplace/postgres_marketplace_offer_repository.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
@@ -74,6 +78,12 @@ Handler buildApiRouter({
   final offerRepository = postgresProvider != null
       ? PostgresMarketplaceOfferRepository(postgresProvider)
       : InMemoryMarketplaceOfferRepository();
+  final marketplaceRepository = postgresProvider != null
+      ? PostgresMarketplaceRepository(postgresProvider)
+      : InMemoryMarketplaceRepository();
+  final orgRepository = postgresProvider != null
+      ? PostgresOrgRepository(postgresProvider)
+      : InMemoryOrgRepository();
   final entitlementRepository = postgresProvider != null
       ? PostgresMarketplaceEntitlementRepository(postgresProvider)
       : InMemoryMarketplaceEntitlementRepository();
@@ -103,8 +113,19 @@ Handler buildApiRouter({
     paymentService: paymentService,
     entitlementService: entitlementService,
     revenueService: revenueService,
+    orgRepository: orgRepository,
   );
   final marketplaceRouter = MarketplaceRouter(handlers: marketplaceHandlers);
+  final orgController = OrgController(
+    orgRepository: orgRepository,
+    marketplaceRepository: marketplaceRepository,
+    billingLedgerRepository: billingLedgerRepository,
+    entitlementService: entitlementService,
+  );
+  final orgApiHandler = Cascade()
+      .add(orgController.router.call)
+      .add(marketplaceRouter.orgRouter.call)
+      .handler;
   final reconciliationService = postgresProvider == null
       ? null
       : MarketplaceReconciliationService(
@@ -152,7 +173,7 @@ Handler buildApiRouter({
     ..mount('/settlement/', settlementController.router.call)
     ..mount('/disputes', disputesController.router.call)
     ..mount('/marketplace/', marketplaceRouter.router.call)
-    ..mount('/orgs/', marketplaceRouter.orgRouter.call)
+    ..mount('/api/orgs', orgApiHandler)
     ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/admin/', adminController.router.call)
     ..all(

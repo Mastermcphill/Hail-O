@@ -279,10 +279,18 @@ void main() {
         expect(timelineResponse.statusCode, 200);
         final timelinePayload = await _decodeJsonMap(timelineResponse);
         expect(timelinePayload['ok'], isTrue);
-        final timelineEvents = (timelinePayload['data'] as List<dynamic>)
-            .whereType<Map>()
-            .toList();
+        final timelineData = Map<String, Object?>.from(
+          timelinePayload['data'] as Map,
+        );
+        final timelineEvents =
+            (timelineData['events'] as List<dynamic>? ?? const <dynamic>[])
+                .whereType<Map>()
+                .toList();
         expect(timelineEvents, isNotEmpty);
+        expect(
+          ((timelineData['latest_event_at'] as String?) ?? '').isNotEmpty,
+          isTrue,
+        );
         final eventTypes = timelineEvents
             .map((event) => (event['type'] ?? '').toString())
             .toSet();
@@ -439,7 +447,7 @@ void main() {
       final credits = await _send(
         handler,
         method: 'GET',
-        path: '/orgs/org-credits-9/credits',
+        path: '/api/orgs/org-credits-9/credits',
         userId: 'user-rider-9',
       );
       expect(credits.statusCode, 200);
@@ -453,7 +461,7 @@ void main() {
       final invoices = await _send(
         handler,
         method: 'GET',
-        path: '/orgs/org-credits-9/billing/invoices',
+        path: '/api/orgs/org-credits-9/billing/invoices',
         userId: 'user-rider-9',
       );
       expect(invoices.statusCode, 200);

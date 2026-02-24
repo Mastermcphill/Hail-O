@@ -17,7 +17,7 @@ Middleware idempotencyMiddleware({
         return innerHandler(request);
       }
 
-      final path = request.url.path;
+      final path = _canonicalPath(request.url.path);
       if (exemptWritePaths.contains(path)) {
         return innerHandler(request);
       }
@@ -43,4 +43,15 @@ Middleware idempotencyMiddleware({
       return innerHandler(withIdempotency);
     };
   };
+}
+
+String _canonicalPath(String path) {
+  final trimmed = path.trim();
+  if (trimmed == 'api') {
+    return '';
+  }
+  if (trimmed.startsWith('api/')) {
+    return trimmed.substring(4);
+  }
+  return trimmed;
 }
