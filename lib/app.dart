@@ -11,7 +11,9 @@ import 'features/auth/session/auth_session.dart';
 import 'theme/brand_theme.dart';
 
 class HailoCoreApp extends StatefulWidget {
-  const HailoCoreApp({super.key});
+  const HailoCoreApp({super.key, this.enableStartupWarmup = true});
+
+  final bool enableStartupWarmup;
 
   @override
   State<HailoCoreApp> createState() => _HailoCoreAppState();
@@ -36,9 +38,11 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
     );
     _authSession.init();
     _serverWarmupNotifier = ServerWarmupNotifier();
-    _serverWarmupNotifier.start(_apiClient);
     _connectivityNotifier = ConnectivityNotifier();
-    _connectivityNotifier.start();
+    if (widget.enableStartupWarmup) {
+      _serverWarmupNotifier.start(_apiClient);
+      _connectivityNotifier.start();
+    }
     _appRouter = AppRouter(apiClient: _apiClient, authSession: _authSession);
   }
 
