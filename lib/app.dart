@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api/api_client.dart';
 import 'core/api/server_warmup_notifier.dart';
+import 'core/connectivity/connectivity_notifier.dart';
 import 'core/routing/app_router.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/session/auth_session.dart';
@@ -20,6 +22,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
   late final ApiClient _apiClient;
   late final AuthSession _authSession;
   late final ServerWarmupNotifier _serverWarmupNotifier;
+  late final ConnectivityNotifier _connectivityNotifier;
   late final AppRouter _appRouter;
 
   @override
@@ -34,6 +37,8 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
     _authSession.init();
     _serverWarmupNotifier = ServerWarmupNotifier();
     _serverWarmupNotifier.start(_apiClient);
+    _connectivityNotifier = ConnectivityNotifier();
+    _connectivityNotifier.start();
     _appRouter = AppRouter(apiClient: _apiClient, authSession: _authSession);
   }
 
@@ -41,6 +46,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
   void dispose() {
     _appRouter.dispose();
     _serverWarmupNotifier.dispose();
+    _connectivityNotifier.dispose();
     _authSession.dispose();
     _apiClient.close();
     super.dispose();
@@ -54,16 +60,27 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
         ChangeNotifierProvider<ServerWarmupNotifier>.value(
           value: _serverWarmupNotifier,
         ),
+        ChangeNotifierProvider<ConnectivityNotifier>.value(
+          value: _connectivityNotifier,
+        ),
       ],
       child: MaterialApp.router(
         title: 'Hail-O Core',
         theme: BrandTheme.light(),
+        localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const <Locale>[Locale('en')],
         routerConfig: _appRouter.router,
         builder: (context, child) {
           final warming = context.watch<ServerWarmupNotifier>().isWarming;
+          final offline = context.watch<ConnectivityNotifier>().isOffline;
           return Stack(
             children: <Widget>[
               child ?? const SizedBox.shrink(),
+              if (offline) const _OfflineBanner(message: 'Offline mode'),
               if (warming) const _WarmupBanner(message: 'Waking server...'),
             ],
           );
@@ -107,6 +124,47 @@ class _WarmupBanner extends StatelessWidget {
                 Text(
                   message,
                   style: TextStyle(color: colorScheme.onInverseSurface),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: colorScheme.errorContainer.withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.wifi_off_rounded,
+                  size: 16,
+                  color: colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  message,
+                  style: TextStyle(color: colorScheme.onErrorContainer),
                 ),
               ],
             ),
