@@ -7,6 +7,7 @@ import 'package:shelf/shelf_io.dart' as io;
 import 'infra/db_provider.dart';
 import 'infra/migrator.dart';
 import 'infra/postgres_provider.dart';
+import 'infra/production_config_validator.dart';
 import 'infra/request_metrics.dart';
 import 'infra/runtime_config.dart';
 import 'infra/sentry_observability.dart';
@@ -35,12 +36,17 @@ Future<void> main() async {
     () async {
       final env = Platform.environment;
       final config = BackendRuntimeConfig.fromEnvironment();
+      final environment = (env['ENV'] ?? 'development').trim();
+      validateProductionConfig(
+        environment: environment,
+        usePostgres: config.usePostgres,
+        envMap: env,
+      );
       final db = await DbProvider.instance.open(
         databasePath: config.sqlitePath,
         dbMode: config.dbMode,
       );
       final requestMetrics = RequestMetrics();
-      final environment = (env['ENV'] ?? 'development').trim();
       final dbQueryTimeoutMs =
           int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
       final dbPoolSize = int.tryParse((env['DB_POOL_SIZE'] ?? '4').trim()) ?? 4;
@@ -71,14 +77,14 @@ Future<void> main() async {
       final rateLimitAuthMaxRequestsPerIp =
           int.tryParse((env['RATE_LIMIT_BURST'] ?? '').trim()) ??
           int.tryParse(
-            (env['RATE_LIMIT_AUTH_PER_IP_PER_MIN'] ?? '20').trim(),
+            (env['RATE_LIMIT_AUTH_PER_IP_PER_MIN'] ?? '12').trim(),
           ) ??
-          20;
+          12;
       final rateLimitAuthMaxRequestsPerUser =
           int.tryParse(
-            (env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '40').trim(),
+            (env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '24').trim(),
           ) ??
-          40;
+          24;
       final rateLimitMarketplaceReadPerIp =
           int.tryParse(
             (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '120').trim(),
@@ -168,6 +174,7 @@ Future<void> main() async {
       final tokenService = TokenService.fromEnvironment();
       final allowedOrigins = parseAllowedOrigins(env['ALLOWED_ORIGINS']);
       final buildInfo = <String, Object?>{
+        'version': env['RENDER_GIT_TAG'] ?? env['BUILD_VERSION'] ?? 'local',
         'commit': env['RENDER_GIT_COMMIT'] ?? 'local',
         'runtime': 'dart_vm',
         'runtime_marker': env['STARTUP_RUNTIME_MARKER'] ?? 'unknown',

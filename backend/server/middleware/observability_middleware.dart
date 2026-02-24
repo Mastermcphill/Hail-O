@@ -58,7 +58,7 @@ Middleware observabilityMiddleware({
 }
 
 bool _shouldSuppressRequestLog(String path) {
-  return path == 'healthz' || path == 'api/healthz';
+  return path == 'health' || path == 'healthz' || path == 'api/healthz';
 }
 
 String? _hashIdempotencyKey(String? key) {

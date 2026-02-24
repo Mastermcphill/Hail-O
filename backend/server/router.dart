@@ -158,16 +158,36 @@ Handler buildApiRouter({
     })
     ..get(
       '/health',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+      (request) => _healthHandler(
+        request,
+        dbMode,
+        dbHealthCheck,
+        buildInfo,
+        timeout: const Duration(milliseconds: 250),
+      ),
     )
     ..get(
       '/api/healthz',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+      (request) => _healthHandler(
+        request,
+        dbMode,
+        dbHealthCheck,
+        buildInfo,
+        timeout: const Duration(seconds: 2),
+      ),
     )
     ..get(
       '/healthz',
-      (request) => _healthHandler(request, dbMode, dbHealthCheck, buildInfo),
+      (request) => _healthHandler(
+        request,
+        dbMode,
+        dbHealthCheck,
+        buildInfo,
+        timeout: const Duration(seconds: 2),
+      ),
     )
+    ..get('/version', (request) => _versionHandler(buildInfo))
+    ..get('/api/version', (request) => _versionHandler(buildInfo))
     ..get(
       '/metrics',
       (request) => _metricsHandler(request, requestMetrics, metricsPublic),
@@ -218,14 +238,32 @@ Future<Response> _healthHandler(
   Request request,
   String dbMode,
   Future<bool> Function() dbHealthCheck,
-  Map<String, Object?> buildInfo,
-) async {
-  final dbOk = await dbHealthCheck();
+  Map<String, Object?> buildInfo, {
+  required Duration timeout,
+}) async {
+  bool dbOk;
+  try {
+    dbOk = await dbHealthCheck().timeout(timeout, onTimeout: () => false);
+  } catch (_) {
+    dbOk = false;
+  }
   return jsonResponse(dbOk ? 200 : 503, <String, Object?>{
     'ok': dbOk,
     'service': 'hail-o-backend',
     'db_mode': dbMode,
     'db_ok': dbOk,
+    'build': buildInfo,
+  });
+}
+
+Response _versionHandler(Map<String, Object?> buildInfo) {
+  final version = (buildInfo['version'] ?? 'unknown').toString();
+  final commit = (buildInfo['commit'] ?? 'unknown').toString();
+  return jsonResponse(200, <String, Object?>{
+    'ok': true,
+    'service': 'hail-o-backend',
+    'version': version,
+    'commit': commit,
     'build': buildInfo,
   });
 }

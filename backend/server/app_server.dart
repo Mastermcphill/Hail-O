@@ -102,6 +102,8 @@ class AppServer {
       'health',
       'healthz',
       'api/healthz',
+      'version',
+      'api/version',
       'webhooks/payments',
       if (metricsPublic) 'metrics',
     };
