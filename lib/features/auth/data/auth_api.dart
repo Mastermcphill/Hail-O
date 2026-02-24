@@ -1,13 +1,14 @@
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_errors.dart';
 import '../../../core/api/api_paths.dart';
+import '../../../core/routing/role_routes.dart';
 
 class AuthApi {
   AuthApi({required ApiClient apiClient}) : _apiClient = apiClient;
 
   final ApiClient _apiClient;
 
-  Future<AuthSession> login({
+  Future<AuthLoginResult> login({
     required String email,
     required String password,
   }) async {
@@ -20,7 +21,7 @@ class AuthApi {
       throw Exception('Login response missing token');
     }
     final role = _resolveRole(response);
-    return AuthSession(token: token, role: role);
+    return AuthLoginResult(token: token, role: role);
   }
 
   Future<void> register({
@@ -38,24 +39,13 @@ class AuthApi {
   }
 }
 
-class AuthSession {
-  const AuthSession({required this.token, required this.role});
+class AuthLoginResult {
+  const AuthLoginResult({required this.token, required this.role});
 
   final String token;
   final String role;
 
   bool get isAdmin => role == 'admin';
-}
-
-String normalizeAuthRole(String? role) {
-  final normalized = (role ?? '').trim().toLowerCase();
-  if (normalized == 'fleet') {
-    return 'fleet_owner';
-  }
-  if (normalized.isEmpty) {
-    return 'rider';
-  }
-  return normalized;
 }
 
 String mapLoginErrorMessage(Object error) {
@@ -87,14 +77,14 @@ String mapRegisterErrorMessage(Object error) {
 String _resolveRole(Map<String, dynamic> payload) {
   final directRole = _readString(payload['role']);
   if (directRole.isNotEmpty) {
-    return normalizeAuthRole(directRole);
+    return normalizeRole(directRole);
   }
   final claims = payload['claims'];
   if (claims is Map<String, dynamic>) {
-    return normalizeAuthRole(_readString(claims['role']));
+    return normalizeRole(_readString(claims['role']));
   }
   if (claims is Map<Object?, Object?>) {
-    return normalizeAuthRole(_readString(claims['role']));
+    return normalizeRole(_readString(claims['role']));
   }
   return 'rider';
 }

@@ -14,6 +14,10 @@ class TokenStorage {
     return _storage.write(key: _tokenKey, value: token);
   }
 
+  Future<void> saveAuth({required String token, required String role}) async {
+    await Future.wait<void>(<Future<void>>[saveToken(token), saveRole(role)]);
+  }
+
   Future<String?> readToken() {
     return _storage.read(key: _tokenKey);
   }

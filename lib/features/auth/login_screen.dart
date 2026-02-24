@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
-import '../../core/api/api_client.dart';
-import '../../core/storage/token_storage.dart';
+import '../../core/routing/role_routes.dart';
 import 'data/auth_api.dart';
+import 'session/auth_session.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({
-    super.key,
-    required this.apiClient,
-    required this.tokenStorage,
-  });
+  const LoginScreen({super.key, this.nextPath});
 
-  final ApiClient apiClient;
-  final TokenStorage tokenStorage;
+  final String? nextPath;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -23,15 +19,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  late final AuthApi _authApi;
   bool _isLoading = false;
   String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _authApi = AuthApi(apiClient: widget.apiClient);
-  }
 
   @override
   void dispose() {
@@ -53,17 +42,19 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final session = await _authApi.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+      final authSession = context.read<AuthSession>();
+      final session = await authSession.login(
+        _emailController.text.trim(),
+        _passwordController.text,
       );
-      await widget.tokenStorage.saveToken(session.token);
-      await widget.tokenStorage.saveRole(session.role);
 
       if (!mounted) {
         return;
       }
-      context.go(_homeRouteForRole(session.role));
+
+      context.go(
+        resolvePostLoginRoute(role: session.role, nextPath: widget.nextPath),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -198,18 +189,4 @@ class _LoginScreenState extends State<LoginScreen> {
 bool _looksLikeEmail(String value) {
   final regex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
   return regex.hasMatch(value.trim());
-}
-
-String _homeRouteForRole(String role) {
-  switch (normalizeAuthRole(role)) {
-    case 'driver':
-      return '/driver';
-    case 'fleet_owner':
-      return '/fleet';
-    case 'admin':
-      return '/admin';
-    case 'rider':
-    default:
-      return '/rider';
-  }
 }

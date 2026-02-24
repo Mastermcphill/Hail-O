@@ -3,12 +3,14 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../features/admin/admin_home.dart';
+import '../../features/auth/login_screen.dart';
 import '../../features/auth/presentation/admin_login_screen.dart';
+import '../../features/auth/presentation/boot_screen.dart';
 import '../../features/auth/presentation/landing_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
-import '../../features/auth/login_screen.dart';
-import '../../features/driver/driver_offer_screen.dart';
+import '../../features/auth/session/auth_session.dart';
 import '../../features/driver/driver_home.dart';
+import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
 import '../../features/fleet/fleet_home.dart';
@@ -28,50 +30,47 @@ import '../../features/rider/offers_screen.dart';
 import '../../features/rider/paywall_screen.dart';
 import '../../features/rider/rider_home.dart';
 import '../../features/rider/ride_request_screen.dart';
-import '../../features/rider/seat_selection_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
+import '../../features/rider/seat_selection_screen.dart';
 import '../api/api_client.dart';
-import '../storage/token_storage.dart';
+import 'role_routes.dart';
 
 class AppRouter {
-  AppRouter({required ApiClient apiClient, required TokenStorage tokenStorage})
+  AppRouter({required ApiClient apiClient, required AuthSession authSession})
     : _apiClient = apiClient,
-      _tokenStorage = tokenStorage {
+      _authSession = authSession {
     _marketplaceModule = MarketplaceModule(apiClient: _apiClient);
     router = GoRouter(
-      initialLocation: '/',
+      initialLocation: bootPath,
+      refreshListenable: _authSession,
       routes: <RouteBase>[
+        GoRoute(
+          path: bootPath,
+          builder: (context, state) => const BootScreen(),
+        ),
         GoRoute(path: '/', builder: (context, state) => const LandingScreen()),
         GoRoute(
           path: '/login',
           builder: (context, state) =>
-              LoginScreen(apiClient: _apiClient, tokenStorage: _tokenStorage),
+              LoginScreen(nextPath: state.uri.queryParameters['next']),
         ),
         GoRoute(
           path: '/signup',
           builder: (context, state) =>
-              SignupScreen(apiClient: _apiClient, tokenStorage: _tokenStorage),
+              SignupScreen(nextPath: state.uri.queryParameters['next']),
         ),
         GoRoute(
           path: '/admin-login',
-          builder: (context, state) => AdminLoginScreen(
-            apiClient: _apiClient,
-            tokenStorage: _tokenStorage,
-          ),
+          builder: (context, state) =>
+              AdminLoginScreen(nextPath: state.uri.queryParameters['next']),
         ),
         ShellRoute(
           builder: (context, state, child) {
-            return FutureBuilder<String?>(
-              future: _tokenStorage.readRole(),
-              builder: (context, snapshot) {
-                final role = _normalizeRole(snapshot.data);
-                return RoleNavigationScaffold(
-                  currentPath: state.uri.path,
-                  role: role,
-                  tokenStorage: _tokenStorage,
-                  child: child,
-                );
-              },
+            return RoleNavigationScaffold(
+              currentPath: state.uri.path,
+              role: _authSession.roleNormalized,
+              authSession: _authSession,
+              child: child,
             );
           },
           routes: <RouteBase>[
@@ -285,7 +284,7 @@ class AppRouter {
   }
 
   final ApiClient _apiClient;
-  final TokenStorage _tokenStorage;
+  final AuthSession _authSession;
   late final MarketplaceModule _marketplaceModule;
   late final GoRouter router;
 
@@ -293,34 +292,40 @@ class AppRouter {
     _marketplaceModule.dispose();
   }
 
-  Future<String?> _handleRedirect(
-    BuildContext context,
-    GoRouterState state,
-  ) async {
-    final token = await _tokenStorage.readToken();
-    final isAuthenticated = token != null && token.isNotEmpty;
+  String? _handleRedirect(BuildContext context, GoRouterState state) {
     final path = state.uri.path;
-    final isPublicPath = _publicPaths.contains(path);
 
-    if (!isAuthenticated) {
-      if (!isPublicPath) {
+    if (!_authSession.isReady) {
+      if (path == bootPath) {
+        return null;
+      }
+      return bootPath;
+    }
+
+    if (!_authSession.isAuthenticated) {
+      if (path == bootPath) {
         return '/';
       }
-      return null;
+      if (isPublicPath(path)) {
+        return null;
+      }
+      return buildAuthRedirectPath(
+        requestedPath: path,
+        requestedUri: state.uri,
+      );
     }
 
-    final role = _normalizeRole(await _tokenStorage.readRole());
-
-    if (path == '/home') {
-      return _homeRouteForRole(role);
+    final role = _authSession.roleNormalized;
+    if (path == bootPath || path == '/home') {
+      return homeRouteForRole(role);
     }
 
-    if (isPublicPath) {
-      return _homeRouteForRole(role);
+    if (isPublicPath(path)) {
+      return homeRouteForRole(role);
     }
 
-    if (_isRoleRoute(path) && !_isRoleAllowed(path, role)) {
-      return _homeRouteForRole(role);
+    if (isRoleRoute(path) && !isRoleAllowed(path, role)) {
+      return homeRouteForRole(role);
     }
     return null;
   }
@@ -331,13 +336,13 @@ class RoleNavigationScaffold extends StatelessWidget {
     super.key,
     required this.currentPath,
     required this.role,
-    required this.tokenStorage,
+    required this.authSession,
     required this.child,
   });
 
   final String currentPath;
   final String role;
-  final TokenStorage tokenStorage;
+  final AuthSession authSession;
   final Widget child;
 
   @override
@@ -353,7 +358,7 @@ class RoleNavigationScaffold extends StatelessWidget {
             tooltip: 'Logout',
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              await tokenStorage.clearAuth();
+              await authSession.logout();
               if (!context.mounted) {
                 return;
               }
@@ -367,7 +372,7 @@ class RoleNavigationScaffold extends StatelessWidget {
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
           final target = items[index].path;
-          if (_isSelectedPath(currentPath, target)) {
+          if (isSelectedPath(currentPath, target)) {
             return;
           }
           context.go(target);
@@ -393,24 +398,6 @@ class _NavItem {
   final IconData icon;
 }
 
-const Set<String> _publicPaths = <String>{
-  '/',
-  '/login',
-  '/signup',
-  '/admin-login',
-};
-
-String _normalizeRole(String? role) {
-  final normalized = (role ?? '').trim().toLowerCase();
-  if (normalized == 'fleet') {
-    return 'fleet_owner';
-  }
-  if (normalized.isEmpty) {
-    return 'rider';
-  }
-  return normalized;
-}
-
 List<_NavItem> _navigationItemsForRole(String role) {
   final items = <_NavItem>[
     const _NavItem(
@@ -420,7 +407,7 @@ List<_NavItem> _navigationItemsForRole(String role) {
     ),
   ];
 
-  switch (_normalizeRole(role)) {
+  switch (normalizeRole(role)) {
     case 'driver':
       items.add(
         const _NavItem(
@@ -464,128 +451,76 @@ List<_NavItem> _navigationItemsForRole(String role) {
 
 int _selectedIndexForPath(List<_NavItem> items, String currentPath) {
   for (var i = 0; i < items.length; i++) {
-    if (_isSelectedPath(currentPath, items[i].path)) {
+    if (isSelectedPath(currentPath, items[i].path)) {
       return i;
     }
   }
   return 0;
 }
 
-bool _isSelectedPath(String currentPath, String itemPath) {
-  return currentPath == itemPath || currentPath.startsWith('$itemPath/');
-}
-
-bool _isRoleRoute(String path) {
-  return _roleFromPath(path) != null;
-}
-
-bool _isRoleAllowed(String path, String role) {
-  final routeRole = _roleFromPath(path);
-  if (routeRole == null) {
-    return true;
-  }
-  return _normalizeRole(role) == routeRole;
-}
-
-String _homeRouteForRole(String role) {
-  switch (_normalizeRole(role)) {
-    case 'driver':
-      return '/driver';
-    case 'fleet_owner':
-      return '/fleet';
-    case 'admin':
-      return '/admin';
-    case 'rider':
-    default:
-      return '/rider';
-  }
-}
-
 String _titleForPath(String path) {
-  if (_isSelectedPath(path, '/health')) {
+  if (isSelectedPath(path, '/health')) {
     return 'Health Check';
   }
-  if (_isSelectedPath(path, '/rider/request')) {
+  if (isSelectedPath(path, '/rider/request')) {
     return 'Request Ride';
   }
-  if (_isSelectedPath(path, '/rider/offers')) {
+  if (isSelectedPath(path, '/rider/offers')) {
     return 'Ride Offers';
   }
-  if (_isSelectedPath(path, '/rider/paywall')) {
+  if (isSelectedPath(path, '/rider/paywall')) {
     return 'Paywall';
   }
-  if (_isSelectedPath(path, '/rider/seats')) {
+  if (isSelectedPath(path, '/rider/seats')) {
     return 'Seat Selection';
   }
-  if (_isSelectedPath(path, '/rider/status')) {
+  if (isSelectedPath(path, '/rider/status')) {
     return 'Ride Status';
   }
-  if (_isSelectedPath(path, '/rider/next-of-kin')) {
+  if (isSelectedPath(path, '/rider/next-of-kin')) {
     return 'Next-of-kin';
   }
-  if (_isSelectedPath(path, '/driver/ride-ops')) {
+  if (isSelectedPath(path, '/driver/ride-ops')) {
     return 'Driver Ride Ops';
   }
-  if (_isSelectedPath(path, '/driver/route-chain')) {
+  if (isSelectedPath(path, '/driver/route-chain')) {
     return 'Route Chain';
   }
-  if (_isSelectedPath(path, '/driver/offer')) {
+  if (isSelectedPath(path, '/driver/offer')) {
     return 'Driver Offer';
   }
-  if (_isSelectedPath(path, '/home')) {
+  if (isSelectedPath(path, '/home')) {
     return 'Rider';
   }
-  if (_isSelectedPath(path, '/rider')) {
+  if (isSelectedPath(path, '/rider')) {
     return 'Rider';
   }
-  if (_isSelectedPath(path, '/marketplace/offers')) {
+  if (isSelectedPath(path, '/marketplace/offers')) {
     return 'Marketplace Offers';
   }
-  if (_isSelectedPath(path, '/marketplace/paywall')) {
+  if (isSelectedPath(path, '/marketplace/paywall')) {
     return 'Marketplace Paywall';
   }
-  if (_isSelectedPath(path, '/marketplace/seats')) {
+  if (isSelectedPath(path, '/marketplace/seats')) {
     return 'Marketplace Seats';
   }
-  if (_isSelectedPath(path, '/marketplace/billing')) {
+  if (isSelectedPath(path, '/marketplace/billing')) {
     return 'Marketplace Billing';
   }
-  if (_isSelectedPath(path, '/marketplace/invites')) {
+  if (isSelectedPath(path, '/marketplace/invites')) {
     return 'Marketplace Invites';
   }
-  if (_isSelectedPath(path, '/marketplace/timeline')) {
+  if (isSelectedPath(path, '/marketplace/timeline')) {
     return 'Marketplace Timeline';
   }
-  if (_isSelectedPath(path, '/driver')) {
+  if (isSelectedPath(path, '/driver')) {
     return 'Driver';
   }
-  if (_isSelectedPath(path, '/fleet')) {
+  if (isSelectedPath(path, '/fleet')) {
     return 'Fleet';
   }
-  if (_isSelectedPath(path, '/admin')) {
+  if (isSelectedPath(path, '/admin')) {
     return 'Admin';
   }
   return 'Hail-O Core';
-}
-
-String? _roleFromPath(String path) {
-  if (_isSelectedPath(path, '/home')) {
-    return 'rider';
-  }
-  if (_isSelectedPath(path, '/rider')) {
-    return 'rider';
-  }
-  if (_isSelectedPath(path, '/marketplace')) {
-    return 'rider';
-  }
-  if (_isSelectedPath(path, '/driver')) {
-    return 'driver';
-  }
-  if (_isSelectedPath(path, '/fleet')) {
-    return 'fleet_owner';
-  }
-  if (_isSelectedPath(path, '/admin')) {
-    return 'admin';
-  }
-  return null;
 }

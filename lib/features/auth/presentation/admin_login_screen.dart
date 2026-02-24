@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
-import '../../../core/api/api_client.dart';
-import '../../../core/storage/token_storage.dart';
+import '../../../core/routing/role_routes.dart';
 import '../data/auth_api.dart';
+import '../session/auth_session.dart';
 
 class AdminLoginScreen extends StatefulWidget {
-  const AdminLoginScreen({
-    super.key,
-    required this.apiClient,
-    required this.tokenStorage,
-  });
+  const AdminLoginScreen({super.key, this.nextPath});
 
-  final ApiClient apiClient;
-  final TokenStorage tokenStorage;
+  final String? nextPath;
 
   @override
   State<AdminLoginScreen> createState() => _AdminLoginScreenState();
@@ -23,15 +19,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  late final AuthApi _authApi;
   bool _isLoading = false;
   String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _authApi = AuthApi(apiClient: widget.apiClient);
-  }
 
   @override
   void dispose() {
@@ -53,30 +42,28 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     });
 
     try {
-      final session = await _authApi.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+      final authSession = context.read<AuthSession>();
+      final session = await authSession.login(
+        _emailController.text.trim(),
+        _passwordController.text,
+        requireAdmin: true,
       );
-
-      if (!session.isAdmin) {
-        setState(() {
-          _errorMessage = 'Not authorized.';
-        });
-        return;
-      }
-
-      await widget.tokenStorage.saveToken(session.token);
-      await widget.tokenStorage.saveRole(session.role);
 
       if (!mounted) {
         return;
       }
-      context.go('/admin');
+      context.go(
+        resolvePostLoginRoute(role: session.role, nextPath: widget.nextPath),
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
+        if (error is AuthSessionException) {
+          _errorMessage = error.message;
+          return;
+        }
         _errorMessage = mapLoginErrorMessage(error);
       });
     } finally {
