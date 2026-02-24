@@ -4,7 +4,8 @@
 1. Push to `main`.
 2. Wait for `hail-o-api-staging` deploy success on Render.
 3. Verify `GET /health`, `GET /healthz`, and `GET /api/healthz` return `200`.
-4. Run smoke:
+4. API path policy: clients should use `/api/*`; root `/marketplace/*` remains backward-compatible and may be deprecated.
+5. Run smoke:
    - `powershell -ExecutionPolicy Bypass -File tool/smoke_backend.ps1` with `HAILO_API_BASE_URL=https://hail-o-api-staging.onrender.com`
 
 ## Promote to production

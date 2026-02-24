@@ -8,6 +8,7 @@
 - Default target is staging.
 - Production smoke requires `HAILO_ALLOW_PROD_SMOKE=1`.
 - Admin flow is optional and enabled only when `HAILO_ADMIN_EMAIL` and `HAILO_ADMIN_PASSWORD` are set.
+- Route policy: `/api/*` is canonical; root `/marketplace/*` remains compatibility-only and may be deprecated.
 
 ## Typical commands
 - Staging (PowerShell):
