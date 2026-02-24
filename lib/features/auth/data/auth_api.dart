@@ -60,6 +60,9 @@ String mapLoginErrorMessage(Object error) {
   if (envelope.kind == ApiErrorKind.unauthorized) {
     return 'Wrong email or password.';
   }
+  if (envelope.kind == ApiErrorKind.server) {
+    return 'Service is temporarily unavailable. Please try again in a moment.';
+  }
   return 'Login failed. Please try again.';
 }
 
@@ -70,6 +73,9 @@ String mapRegisterErrorMessage(Object error) {
   }
   if (envelope.kind == ApiErrorKind.network) {
     return 'No internet connection or server unreachable.';
+  }
+  if (envelope.kind == ApiErrorKind.server) {
+    return 'Service is temporarily unavailable. Please try again in a moment.';
   }
   if (error is ApiException && error.statusCode == 409) {
     return 'An account with this email already exists.';

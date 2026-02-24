@@ -22,6 +22,7 @@ class ApiClient {
 
   final TokenStorage _tokenStorage;
   final http.Client _httpClient;
+  final _ApiCircuitBreaker _circuitBreaker = _ApiCircuitBreaker();
 
   Future<Map<String, dynamic>> get(String path) async {
     final normalizedPath = _normalizePath(path);
@@ -31,6 +32,7 @@ class ApiClient {
 
     final policy = ApiPolicy.forRequest(method: 'GET');
     final requestId = newRequestId();
+    _ensureCircuitClosed(requestId: requestId);
     final headers = await _buildHeaders(requestId: requestId);
     final uri = _buildUri(normalizedPath);
     for (var attempt = 0; ; attempt++) {
@@ -45,49 +47,63 @@ class ApiClient {
         final response = await _httpClient
             .get(uri, headers: headers)
             .timeout(policy.requestTimeout);
-        return _decodeResponse(response);
+        final decoded = _decodeResponse(response);
+        _recordRequestSuccess();
+        return decoded;
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
-          return _mockResponse(method: 'GET', path: normalizedPath);
+          final fallback = await _mockResponse(
+            method: 'GET',
+            path: normalizedPath,
+          );
+          _recordRequestSuccess();
+          return fallback;
         }
         if (policy.shouldRetryApiException(error, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
+        _recordRequestFailure(error);
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'request_timeout',
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'network_error',
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'client_error',
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       }
     }
   }
@@ -114,6 +130,7 @@ class ApiClient {
       hasIdempotencyKey: callerProvidedIdempotencyKey,
     );
     final requestId = newRequestId();
+    _ensureCircuitClosed(requestId: requestId);
     final resolvedIdempotencyKey = callerProvidedIdempotencyKey
         ? idempotencyKey.trim()
         : newIdempotencyKey();
@@ -135,53 +152,64 @@ class ApiClient {
         final response = await _httpClient
             .post(uri, headers: headers, body: jsonEncode(requestBody))
             .timeout(policy.requestTimeout);
-        return _decodeResponse(response);
+        final decoded = _decodeResponse(response);
+        _recordRequestSuccess();
+        return decoded;
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
-          return _mockResponse(
+          final fallback = await _mockResponse(
             method: 'POST',
             path: normalizedPath,
             body: requestBody,
           );
+          _recordRequestSuccess();
+          return fallback;
         }
         if (policy.shouldRetryApiException(error, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
+        _recordRequestFailure(error);
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'request_timeout',
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'network_error',
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'client_error',
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       }
     }
   }
@@ -207,6 +235,7 @@ class ApiClient {
           idempotencyKey != null && idempotencyKey.trim().isNotEmpty,
     );
     final requestId = newRequestId();
+    _ensureCircuitClosed(requestId: requestId);
     final headers = await _buildHeaders(
       requestId: requestId,
       idempotencyKey: idempotencyKey,
@@ -225,53 +254,64 @@ class ApiClient {
         final response = await _httpClient
             .patch(uri, headers: headers, body: jsonEncode(requestBody))
             .timeout(policy.requestTimeout);
-        return _decodeResponse(response);
+        final decoded = _decodeResponse(response);
+        _recordRequestSuccess();
+        return decoded;
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
-          return _mockResponse(
+          final fallback = await _mockResponse(
             method: 'PATCH',
             path: normalizedPath,
             body: requestBody,
           );
+          _recordRequestSuccess();
+          return fallback;
         }
         if (policy.shouldRetryApiException(error, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
+        _recordRequestFailure(error);
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'request_timeout',
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'network_error',
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'client_error',
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       }
     }
   }
@@ -297,6 +337,7 @@ class ApiClient {
           idempotencyKey != null && idempotencyKey.trim().isNotEmpty,
     );
     final requestId = newRequestId();
+    _ensureCircuitClosed(requestId: requestId);
     final includeJsonContentType = requestBody.isNotEmpty;
     final headers = await _buildHeaders(
       requestId: requestId,
@@ -327,53 +368,64 @@ class ApiClient {
               .timeout(policy.requestTimeout);
           response = await http.Response.fromStream(streamed);
         }
-        return _decodeResponse(response);
+        final decoded = _decodeResponse(response);
+        _recordRequestSuccess();
+        return decoded;
       } on ApiException catch (error) {
         if (_shouldFallbackToMock(error, normalizedPath)) {
-          return _mockResponse(
+          final fallback = await _mockResponse(
             method: 'DELETE',
             path: normalizedPath,
             body: requestBody,
           );
+          _recordRequestSuccess();
+          return fallback;
         }
         if (policy.shouldRetryApiException(error, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
+        _recordRequestFailure(error);
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'request_timeout',
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'network_error',
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        throw ApiException(
+        final wrapped = ApiException(
           statusCode: 0,
           code: 'client_error',
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
+        _recordRequestFailure(wrapped);
+        throw wrapped;
       }
     }
   }
@@ -462,6 +514,48 @@ class ApiClient {
 
   bool _shouldUseMockByConfig(String path) {
     return ApiConfig.mockMode && _isNewEndpointPath(path);
+  }
+
+  void _ensureCircuitClosed({required String requestId}) {
+    if (_circuitBreaker.shouldAllowRequest()) {
+      return;
+    }
+    throw ApiException(
+      statusCode: 503,
+      code: 'service_temporarily_unavailable',
+      message: 'Service temporarily unavailable. Please try again shortly.',
+      traceId: requestId,
+    );
+  }
+
+  void _recordRequestSuccess() {
+    _circuitBreaker.recordSuccess();
+  }
+
+  void _recordRequestFailure(ApiException error) {
+    if (!_isFailureForCircuit(error)) {
+      return;
+    }
+    _circuitBreaker.recordFailure();
+  }
+
+  bool _isFailureForCircuit(ApiException error) {
+    final code = (error.code ?? '').trim().toLowerCase();
+    if (code == 'request_timeout' ||
+        code == 'network_error' ||
+        code == 'client_error' ||
+        code == 'service_temporarily_unavailable') {
+      return true;
+    }
+    if (error.statusCode == 0) {
+      return true;
+    }
+    if (error.statusCode == 502 ||
+        error.statusCode == 503 ||
+        error.statusCode == 504) {
+      return true;
+    }
+    return error.statusCode >= 500;
   }
 
   bool _shouldFallbackToMock(ApiException error, String path) {
@@ -808,5 +902,48 @@ class ApiClient {
       return int.tryParse(value.trim()) ?? 0;
     }
     return 0;
+  }
+}
+
+class _ApiCircuitBreaker {
+  static const int _failureThreshold = 4;
+  static const Duration _window = Duration(seconds: 30);
+  static const Duration _openDuration = Duration(seconds: 20);
+  final List<DateTime> _failureTimestampsUtc = <DateTime>[];
+  DateTime? _openUntilUtc;
+
+  bool shouldAllowRequest() {
+    final now = DateTime.now().toUtc();
+    _pruneOldFailures(now);
+    final openUntil = _openUntilUtc;
+    if (openUntil == null) {
+      return true;
+    }
+    if (openUntil.isAfter(now)) {
+      return false;
+    }
+    _openUntilUtc = null;
+    return true;
+  }
+
+  void recordSuccess() {
+    _failureTimestampsUtc.clear();
+    _openUntilUtc = null;
+  }
+
+  void recordFailure() {
+    final now = DateTime.now().toUtc();
+    _pruneOldFailures(now);
+    _failureTimestampsUtc.add(now);
+    if (_failureTimestampsUtc.length >= _failureThreshold) {
+      _openUntilUtc = now.add(_openDuration);
+      _failureTimestampsUtc.clear();
+    }
+  }
+
+  void _pruneOldFailures(DateTime nowUtc) {
+    _failureTimestampsUtc.removeWhere((timestamp) {
+      return nowUtc.difference(timestamp) > _window;
+    });
   }
 }

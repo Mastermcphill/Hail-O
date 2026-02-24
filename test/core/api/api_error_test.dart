@@ -41,5 +41,21 @@ void main() {
         'Something went wrong. Please try again.',
       );
     });
+
+    test('maps circuit breaker temporary unavailability', () {
+      final envelope = ApiErrorEnvelope.fromException(
+        ApiException(
+          statusCode: 503,
+          code: 'service_temporarily_unavailable',
+          message: 'Service temporarily unavailable.',
+        ),
+      );
+
+      expect(envelope.kind, ApiErrorKind.server);
+      expect(
+        envelope.friendlyMessage,
+        'Service is temporarily unavailable. Please try again in a moment.',
+      );
+    });
   });
 }

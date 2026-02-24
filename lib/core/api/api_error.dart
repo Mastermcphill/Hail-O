@@ -33,6 +33,17 @@ class ApiErrorEnvelope {
   factory ApiErrorEnvelope.fromException(Object error, {String? requestId}) {
     if (error is ApiException) {
       final code = (error.code ?? '').toLowerCase();
+      if (code == 'service_temporarily_unavailable') {
+        return ApiErrorEnvelope(
+          kind: ApiErrorKind.server,
+          statusCode: error.statusCode,
+          code: error.code,
+          requestId: requestId ?? error.traceId,
+          friendlyMessage:
+              'Service is temporarily unavailable. Please try again in a moment.',
+          technicalMessage: error.toDisplayMessage(),
+        );
+      }
       if (code == 'request_timeout' ||
           error.message.toLowerCase().contains('timed out')) {
         return ApiErrorEnvelope(

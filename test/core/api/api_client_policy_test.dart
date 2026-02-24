@@ -70,6 +70,56 @@ void main() {
 
       expect(calls, 1);
     });
+
+    test('circuit breaker opens after repeated server failures', () async {
+      var calls = 0;
+      final storage = _InMemoryTokenStorage();
+      final apiClient = ApiClient(
+        tokenStorage: storage,
+        httpClient: MockClient((request) async {
+          calls += 1;
+          if (request.url.path == '/unstable') {
+            return http.Response(
+              jsonEncode(<String, Object?>{
+                'ok': false,
+                'error_code': 'SERVER_BUSY',
+                'message': 'busy',
+              }),
+              503,
+              headers: <String, String>{'content-type': 'application/json'},
+            );
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+
+      for (var i = 0; i < 4; i++) {
+        await expectLater(
+          () => apiClient.get('/unstable'),
+          throwsA(
+            isA<ApiException>().having(
+              (error) => error.statusCode,
+              'statusCode',
+              503,
+            ),
+          ),
+        );
+      }
+
+      final callsBeforeShortCircuit = calls;
+      await expectLater(
+        () => apiClient.get('/unstable'),
+        throwsA(
+          isA<ApiException>().having(
+            (error) => error.code,
+            'code',
+            'service_temporarily_unavailable',
+          ),
+        ),
+      );
+
+      expect(calls, callsBeforeShortCircuit);
+    });
   });
 }
 
