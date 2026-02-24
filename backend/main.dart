@@ -119,6 +119,11 @@ Future<void> main() async {
           'false';
       final metricsPublic =
           (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
+      final enableSentrySmokeEndpoint =
+          (env['ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT'] ?? 'false')
+              .trim()
+              .toLowerCase() ==
+          'true';
       final migrationHeadVersion =
           BackendPostgresMigrator.migrationHeadVersion();
       PostgresProvider? postgresProvider;
@@ -206,6 +211,7 @@ Future<void> main() async {
         'trust_proxy_headers': trustProxyHeaders,
         'metrics_public': metricsPublic,
         'metrics_protected': !metricsPublic,
+        'admin_enable_sentry_smoke_endpoint': enableSentrySmokeEndpoint,
         'db_pool_size': dbPoolSize,
         'db_query_timeout_ms': dbQueryTimeoutMs,
         'request_idle_timeout_seconds': requestIdleTimeoutSeconds,
@@ -235,6 +241,7 @@ Future<void> main() async {
         maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
         trustProxyHeaders: trustProxyHeaders,
         maxRequestBodyBytes: requestMaxBodyBytes,
+        enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
         runtimeConfigSnapshot: runtimeConfigSnapshot,
         postgresProvider: postgresProvider,
         authCredentialsStore: authCredentialsStore,
@@ -246,7 +253,7 @@ Future<void> main() async {
       final port = int.parse(Platform.environment['PORT'] ?? '8080');
       const listenHost = '0.0.0.0';
       stdout.writeln(
-        'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
+        'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
       );
       stdout.writeln(
         'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',

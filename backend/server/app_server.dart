@@ -42,6 +42,7 @@ class AppServer {
     this.maxWebhookRequestsPerUser = 120,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
+    this.enableSentrySmokeEndpoint = false,
     this.runtimeConfigSnapshot = const <String, Object?>{},
     this.postgresProvider,
     this.authCredentialsStore,
@@ -73,6 +74,7 @@ class AppServer {
   final int maxWebhookRequestsPerUser;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
+  final bool enableSentrySmokeEndpoint;
   final Map<String, Object?> runtimeConfigSnapshot;
   final PostgresProvider? postgresProvider;
   final AuthCredentialsStore? authCredentialsStore;
@@ -93,6 +95,7 @@ class AppServer {
       requestMetrics: requestMetrics,
       metricsPublic: metricsPublic,
       runtimeConfigSnapshot: runtimeConfigSnapshot,
+      enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
       postgresProvider: postgresProvider,
       environmentMap: environmentMap,
     );

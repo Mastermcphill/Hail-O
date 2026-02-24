@@ -50,6 +50,9 @@ flutter run --dart-define=HAILO_BASE_URL=http://192.168.x.x:8080
 - `HAILO_RELEASE=<semantic_or_ci_release>`
 - `HAILO_COMMIT_SHA=<git_sha>`
 - `SENTRY_DSN=<dsn>`
+- `HAILO_ENABLE_SENTRY_SMOKE=true|false` (show Sentry smoke controls in About for non-prod)
+- `HAILO_ALLOW_RELEASE_DEV=true|false` (release guard override; keep `false` for real launch)
+- `HAILO_ALLOW_INSECURE_RELEASE_BASE_URL=true|false` (release guard override; keep `false` for real launch)
 
 ### Flavor defaults
 - `flutter run --flavor dev` -> development base URL strategy.
@@ -64,6 +67,7 @@ flutter run --dart-define=HAILO_BASE_URL=http://192.168.x.x:8080
 - `JWT_SECRET=<secret>`
 - `ALLOWED_ORIGINS=<comma-separated-origins>`
 - `SENTRY_DSN=<dsn>`
+- `ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT=true|false` (staging-only admin Sentry smoke endpoint)
 
 ## Admin Seeding
 Enable admin bootstrap for local/staging and register an admin user once:
@@ -134,6 +138,39 @@ flutter test
 Set-Location backend; dart analyze; dart test; Set-Location ..
 ```
 
+## Go-Live Gate (Windows)
+Run a single readiness gate against staging:
+```powershell
+$env:ENV='staging'
+$env:HAILO_ENV='staging'
+$env:HAILO_API_BASE_URL='https://hail-o-api-staging.onrender.com'
+$env:HAILO_STAGING_DATABASE_URL='<staging-postgres-url>'
+$env:JWT_SECRET='<staging-jwt-secret>'
+$env:ALLOWED_ORIGINS='https://app.hailo.dev,https://admin.hailo.dev'
+$env:SENTRY_DSN='<staging-sentry-dsn>'
+powershell -ExecutionPolicy Bypass -File tool/go_live_check.ps1 -Environment staging
+```
+
+Run production smoke gate (explicit opt-in):
+```powershell
+$env:ENV='production'
+$env:HAILO_ENV='prod'
+$env:HAILO_API_BASE_URL='https://hail-o-api.onrender.com'
+$env:JWT_SECRET='<prod-jwt-secret>'
+$env:ALLOWED_ORIGINS='https://app.hailo.dev,https://admin.hailo.dev'
+$env:SENTRY_DSN='<prod-sentry-dsn>'
+$env:HAILO_ALLOW_PROD_SMOKE='1'
+powershell -ExecutionPolicy Bypass -File tool/go_live_check.ps1 -Environment production -SkipReleaseGate
+```
+
+To enforce backend Sentry drill during smoke:
+```powershell
+$env:ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT='true'
+$env:HAILO_ADMIN_EMAIL='<admin-email>'
+$env:HAILO_ADMIN_PASSWORD='<admin-password>'
+$env:HAILO_RUN_SENTRY_SMOKE='1'
+```
+
 ## Phase Notes
 - Phase 0 complete: Added production runbook/checklist/docs hygiene and contribution standards.
 - Phase 1 complete: Added Provider-based `AuthSession`, sync GoRouter redirect gating, `/boot` startup route, and `next` post-login return handling.
@@ -149,3 +186,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 5 refresh complete: Stabilized widget bootstrap tests by allowing startup warmup tasks to be disabled in test mode.
 - Audit hardening complete: Commission settlement now enforces escrow-distribution bounds and ride booking normalizes fare fields from pricing output to resist client-side fare tampering.
 - Audit extension complete: Added authenticated `/me` and `/routes` API coverage, persisted `/rides` offers/paywall/seats flows, rider cross-border document gating UI, and backend+widget tests for the new production paths.
+- Go-live hardening complete: Added release startup guardrails (env/base-url/release/sentry checks), optional admin Sentry smoke endpoint + smoke-script drill support, and a consolidated `tool/go_live_check.ps1` release-readiness gate.

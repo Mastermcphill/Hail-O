@@ -33,6 +33,22 @@ void main() {
         envMap: const <String, String>{
           'JWT_SECRET': 'super-secret',
           'ALLOWED_ORIGINS': '*',
+          'SENTRY_DSN': 'https://public@sentry.io/1',
+        },
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('requires sentry dsn in strict env', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'staging',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_DSN': '',
         },
       ),
       throwsStateError,
@@ -48,6 +64,7 @@ void main() {
           'JWT_SECRET': 'super-secret',
           'ALLOWED_ORIGINS': 'https://app.hailo.dev,https://admin.hailo.dev',
           'DATABASE_URL': 'postgres://hailo:secret@localhost:5432/hailo',
+          'SENTRY_DSN': 'https://public@sentry.io/1',
         },
       ),
       returnsNormally,

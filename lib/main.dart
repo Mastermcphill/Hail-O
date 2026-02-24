@@ -3,10 +3,12 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'app.dart';
 import 'config/api_config.dart';
+import 'config/release_guard.dart';
 import 'core/observability/app_observability.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ReleaseGuard.enforceInRelease();
   await SentryFlutter.init((options) {
     options.dsn = const String.fromEnvironment('SENTRY_DSN', defaultValue: '');
     options.environment = ApiConfig.environmentName;

@@ -6,6 +6,7 @@ import '../../../lib/domain/services/wallet_reversal_service.dart';
 import '../../infra/api_contract.dart';
 import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
+import '../../infra/sentry_observability.dart';
 import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
@@ -18,6 +19,7 @@ class AdminController {
     required WalletReversalService walletReversalService,
     required Map<String, Object?> runtimeConfigSnapshot,
     required Map<String, Object?> buildInfo,
+    bool enableSentrySmokeEndpoint = false,
     MarketplaceReconciliationService? reconciliationService,
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
@@ -26,6 +28,7 @@ class AdminController {
          runtimeConfigSnapshot,
        ),
        _buildInfo = Map<String, Object?>.unmodifiable(buildInfo),
+       _enableSentrySmokeEndpoint = enableSentrySmokeEndpoint,
        _reconciliationService = reconciliationService,
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger();
@@ -33,6 +36,7 @@ class AdminController {
   final WalletReversalService _walletReversalService;
   final Map<String, Object?> _runtimeConfigSnapshot;
   final Map<String, Object?> _buildInfo;
+  final bool _enableSentrySmokeEndpoint;
   final MarketplaceReconciliationService? _reconciliationService;
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
@@ -58,6 +62,9 @@ class AdminController {
     router.post('/dunning/<caseId>/resume', _resumeDunning);
     router.post('/dunning/<caseId>/writeoff', _writeoffDunning);
     router.get('/audit', _auditSummary);
+    if (_enableSentrySmokeEndpoint) {
+      router.post('/ops/sentry-smoke', _sentrySmoke);
+    }
     return router;
   }
 
@@ -480,6 +487,31 @@ class AdminController {
       'ok': true,
       'trace_id': request.requestContext.traceId,
       'data': data,
+    });
+  }
+
+  Future<Response> _sentrySmoke(Request request) async {
+    _requireAdmin(request);
+    if (!BackendSentryObservability.isEnabled) {
+      return jsonResponse(409, <String, Object?>{
+        'ok': false,
+        'trace_id': request.requestContext.traceId,
+        'error_code': 'SENTRY_NOT_ENABLED',
+        'message':
+            'Sentry is not enabled. Set SENTRY_DSN and restart the backend.',
+      });
+    }
+    final eventId = await BackendSentryObservability.captureMessage(
+      'hailo_backend_sentry_smoke',
+      request: request,
+      source: 'admin_sentry_smoke',
+    );
+    _logAdminAction(request: request, action: 'sentry_smoke', success: true);
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'event_id': eventId?.toString() ?? '',
+      'message': 'Sentry smoke event captured',
     });
   }
 

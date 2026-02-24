@@ -24,6 +24,7 @@ $driverEmail = "smoke.driver.$runId@hailo.dev"
 $adminEmail = $env:HAILO_ADMIN_EMAIL
 $adminPassword = $env:HAILO_ADMIN_PASSWORD
 $reversalLedgerId = $env:HAILO_REVERSAL_LEDGER_ID
+$runSentrySmoke = ($env:HAILO_RUN_SENTRY_SMOKE -eq '1')
 $nowUtc = [DateTime]::UtcNow.AddHours(2).ToString('o')
 $script:smokeArtifactDir = [string]$env:HAILO_SMOKE_ARTIFACT_DIR
 $script:smokeResponseSequence = 0
@@ -540,6 +541,22 @@ if ($adminEmail -and $adminPassword) {
   Assert-True -Condition ([string]::IsNullOrWhiteSpace($adminToken) -eq $false) -Message 'Missing admin token in login response'
   Write-Output "admin_login_status=$($adminLogin.Status)"
 
+  if ($runSentrySmoke) {
+    Write-Output "`n=== SENTRY SMOKE EVENT ==="
+    $sentrySmoke = Invoke-CurlJsonRequest `
+      -Method 'POST' `
+      -Url "$baseUrl/admin/ops/sentry-smoke" `
+      -Token $adminToken `
+      -IdempotencyKey (New-IdempotencyKey -Step 'sentry-smoke') `
+      -JsonBody (@{} | ConvertTo-Json -Compress) `
+      -AllowedStatus @(200)
+    Assert-True -Condition ([bool]$sentrySmoke.Json.ok) -Message "Sentry smoke endpoint did not return ok=true. body=$($sentrySmoke.Body)"
+    Write-Output "sentry_smoke_status=$($sentrySmoke.Status) event_id=$([string]$sentrySmoke.Json.event_id)"
+  } else {
+    Write-Output "`n=== SENTRY SMOKE SKIPPED ==="
+    Write-Output 'Set HAILO_RUN_SENTRY_SMOKE=1 to require backend Sentry drill during smoke.'
+  }
+
   Write-Output "`n=== DISPUTE OPEN + RESOLVE ==="
   $openDispute = Invoke-CurlJsonRequest `
     -Method 'POST' `
@@ -595,6 +612,9 @@ if ($adminEmail -and $adminPassword) {
 } else {
   Write-Output "`n=== ADMIN FLOW SKIPPED ==="
   Write-Output 'Set HAILO_ADMIN_EMAIL and HAILO_ADMIN_PASSWORD to run admin smoke flow.'
+  if ($runSentrySmoke) {
+    throw 'HAILO_RUN_SENTRY_SMOKE=1 requires HAILO_ADMIN_EMAIL and HAILO_ADMIN_PASSWORD.'
+  }
 }
 
 Write-Output "`nSmoke suite completed successfully."

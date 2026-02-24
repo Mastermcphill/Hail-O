@@ -98,9 +98,74 @@ void main() {
       expect(contract['db_schema'], 'test_schema');
     },
   );
+
+  test('admin sentry smoke endpoint is disabled by default', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(db);
+    final adminToken = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'cfg-admin', role: 'admin');
+
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/admin/ops/sentry-smoke',
+      token: adminToken,
+      idempotencyKey: 'cfg-sentry-disabled',
+      body: const <String, Object?>{},
+    );
+    expect(response.statusCode, 404);
+    final responseBody = await _decodeBody(response);
+    expect(responseBody['error_code'], 'ROUTE_NOT_FOUND');
+  });
+
+  test(
+    'admin sentry smoke endpoint requires admin and sentry runtime',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+
+      final handler = _buildHandler(db, enableSentrySmokeEndpoint: true);
+      final riderToken = await _registerAndLogin(
+        handler,
+        email: 'cfg.sentry.rider@example.com',
+        role: 'rider',
+        idSuffix: 'cfg-sentry-rider',
+      );
+      final adminToken = TokenService(
+        secret: _kTestTokenSecret,
+      ).issueToken(userId: 'cfg-admin', role: 'admin');
+
+      final forbidden = await _request(
+        handler,
+        method: 'POST',
+        path: '/admin/ops/sentry-smoke',
+        token: riderToken,
+        idempotencyKey: 'cfg-sentry-rider',
+        body: const <String, Object?>{},
+      );
+      expect(forbidden.statusCode, 403);
+      final forbiddenBody = await _decodeBody(forbidden);
+      expect(forbiddenBody['error_code'], 'ADMIN_ONLY');
+
+      final adminResponse = await _request(
+        handler,
+        method: 'POST',
+        path: '/admin/ops/sentry-smoke',
+        token: adminToken,
+        idempotencyKey: 'cfg-sentry-admin',
+        body: const <String, Object?>{},
+      );
+      expect(adminResponse.statusCode, 409);
+      final adminBody = await _decodeBody(adminResponse);
+      expect(adminBody['error_code'], 'SENTRY_NOT_ENABLED');
+    },
+  );
 }
 
-Handler _buildHandler(Database db) {
+Handler _buildHandler(Database db, {bool enableSentrySmokeEndpoint = false}) {
   return AppServer(
     db: db,
     tokenService: TokenService(secret: _kTestTokenSecret),
@@ -129,6 +194,7 @@ Handler _buildHandler(Database db) {
     authCredentialsStore: SqliteAuthCredentialsStore(db),
     rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
     operationalRecordStore: const SqliteOperationalRecordStore(),
+    enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
   ).buildHandler();
 }
 

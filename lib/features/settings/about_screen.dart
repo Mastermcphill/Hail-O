@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../config/api_config.dart';
 import '../../core/observability/app_observability.dart';
@@ -17,6 +18,7 @@ class AboutScreen extends StatefulWidget {
 class _AboutScreenState extends State<AboutScreen> {
   late Future<PackageInfo> _packageInfoFuture;
   bool _copying = false;
+  bool _sendingSentrySmoke = false;
 
   static const String _release = String.fromEnvironment(
     'HAILO_RELEASE',
@@ -25,6 +27,10 @@ class _AboutScreenState extends State<AboutScreen> {
   static const String _commitSha = String.fromEnvironment(
     'HAILO_COMMIT_SHA',
     defaultValue: 'unknown',
+  );
+  static const bool _enableSentrySmokeControls = bool.fromEnvironment(
+    'HAILO_ENABLE_SENTRY_SMOKE',
+    defaultValue: false,
   );
 
   @override
@@ -77,12 +83,38 @@ class _AboutScreenState extends State<AboutScreen> {
                     label: const Text('Copy diagnostics'),
                   ),
                 ),
+                if (_showSentrySmokeControls) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Observability smoke (non-production)',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: _sendingSentrySmoke
+                        ? null
+                        : _sendSentryTestEvent,
+                    icon: const Icon(Icons.radar),
+                    label: const Text('Send Sentry test event'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _sendingSentrySmoke ? null : _confirmCrashDrill,
+                    icon: const Icon(Icons.warning_amber_rounded),
+                    label: const Text('Trigger crash drill'),
+                  ),
+                ],
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  bool get _showSentrySmokeControls {
+    return _enableSentrySmokeControls &&
+        ApiConfig.environment != HailoEnvironment.prod;
   }
 
   Future<void> _copyDiagnostics({
@@ -115,6 +147,72 @@ class _AboutScreenState extends State<AboutScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Diagnostics copied to clipboard')),
     );
+  }
+
+  Future<void> _sendSentryTestEvent() async {
+    setState(() {
+      _sendingSentrySmoke = true;
+    });
+    try {
+      final requestId = AppObservability.lastRequestId ?? newRequestId();
+      await Sentry.configureScope((scope) {
+        scope.setTag('sentry_smoke', 'true');
+        scope.setTag('request_id', requestId);
+      });
+      await Sentry.captureMessage(
+        'hailo_mobile_sentry_smoke',
+        level: SentryLevel.warning,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Sentry test event sent')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sendingSentrySmoke = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmCrashDrill() async {
+    final shouldCrash = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Run Crash Drill'),
+          content: const Text(
+            'This will crash the app intentionally to verify crash reporting.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Crash now'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldCrash != true) {
+      return;
+    }
+    await Sentry.addBreadcrumb(
+      Breadcrumb(
+        category: 'smoke',
+        message: 'manual_crash_drill_triggered',
+        level: SentryLevel.warning,
+      ),
+    );
+    Future<void>.microtask(() {
+      throw StateError('hailo_manual_sentry_crash_drill');
+    });
   }
 }
 

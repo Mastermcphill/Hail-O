@@ -50,6 +50,7 @@ Handler buildApiRouter({
   required Map<String, Object?> buildInfo,
   required RequestMetrics requestMetrics,
   required Map<String, Object?> runtimeConfigSnapshot,
+  bool enableSentrySmokeEndpoint = false,
   PostgresProvider? postgresProvider,
   Map<String, String> environmentMap = const <String, String>{},
   bool metricsPublic = false,
@@ -144,6 +145,7 @@ Handler buildApiRouter({
     walletReversalService: WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
+    enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
     reconciliationService: reconciliationService,
     revenueService: revenueService,
   );

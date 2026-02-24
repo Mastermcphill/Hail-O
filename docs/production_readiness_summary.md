@@ -9,6 +9,7 @@ HAIL-O is production-leaning with hardened auth/session routing, resilient API c
 - **UX/accessibility baseline**: Landing/login/signup/admin flows polished, semantic labels, shared loading/empty/error states, About/Diagnostics screen.
 - **Release engineering**: `dev/staging/prod` flavor-aware API config, Android flavor setup, iOS shared schemes, branded launcher icon and native splash config.
 - **Observability**: Sentry in Flutter and backend, request-id breadcrumbs/tags, backend JSON logs include request-id, PII scrubbing for emails/phones.
+- **Go-live guardrails**: Release startup guard blocks unsafe config in release builds, strict backend config now requires `SENTRY_DSN` in staging/prod, and a one-command readiness gate (`tool/go_live_check.ps1`) validates env + health/smoke.
 - **Backend hardening**: Fast timeout-bounded `/health`, `/version` + `/api/version`, graceful signal shutdown, strict staging/prod config validation.
 - **Quality gates**: CI workflow blocks merges on failed `flutter analyze`, Flutter tests with coverage threshold, backend analyze/tests.
 
@@ -18,7 +19,7 @@ HAIL-O is production-leaning with hardened auth/session routing, resilient API c
 
 ## Remaining High-Value Gaps
 1. Verify iOS flavor behavior end-to-end on a macOS/Xcode runner (schemes are scaffolded).
-2. Execute staged crash drills to validate Sentry alerting and on-call workflow.
+2. Run staging Sentry smoke + crash drill with `HAILO_ENABLE_SENTRY_SMOKE=1` and `HAILO_RUN_SENTRY_SMOKE=1` and verify dashboard/on-call alerts.
 3. Add explicit automated security scans (secrets + dependency CVE checks).
 4. Confirm release-signing artifacts and store submission metadata in CI/CD.
 

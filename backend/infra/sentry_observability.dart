@@ -60,4 +60,35 @@ class BackendSentryObservability {
       },
     );
   }
+
+  static Future<SentryId?> captureMessage(
+    String message, {
+    Request? request,
+    String? source,
+  }) async {
+    if (!_enabled) {
+      return null;
+    }
+    return Sentry.captureMessage(
+      message,
+      withScope: (scope) {
+        if (source != null && source.trim().isNotEmpty) {
+          scope.setTag('message_source', source.trim());
+        }
+        if (request != null) {
+          final context = request.requestContext;
+          scope.setTag('request_id', context.traceId);
+          scope.setTag('method', request.method.toUpperCase());
+          scope.setTag('route', request.url.path);
+          scope.setContexts('request', <String, Object?>{
+            'trace_id': context.traceId,
+            'path': request.url.path,
+            'method': request.method.toUpperCase(),
+            'user_id': context.userId,
+            'role': context.role,
+          });
+        }
+      },
+    );
+  }
 }

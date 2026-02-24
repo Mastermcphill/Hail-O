@@ -27,6 +27,7 @@ DRIVER_EMAIL="smoke.driver.${RUN_ID}@hailo.dev"
 ADMIN_EMAIL="${HAILO_ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${HAILO_ADMIN_PASSWORD:-}"
 REVERSAL_LEDGER_ID="${HAILO_REVERSAL_LEDGER_ID:-}"
+RUN_SENTRY_SMOKE="${HAILO_RUN_SENTRY_SMOKE:-0}"
 NOW_UTC="$(python3 - <<'PY'
 from datetime import datetime, timedelta, timezone
 print((datetime.now(timezone.utc) + timedelta(hours=2)).isoformat().replace('+00:00', 'Z'))
@@ -457,6 +458,21 @@ if [[ -n "$ADMIN_EMAIL" && -n "$ADMIN_PASSWORD" ]]; then
   echo "admin_login_status=$RESPONSE_STATUS"
   cleanup_response_files
 
+  if [[ "$RUN_SENTRY_SMOKE" == "1" ]]; then
+    echo
+    echo "=== SENTRY SMOKE EVENT ==="
+    request_json "POST" "$BASE_URL/admin/ops/sentry-smoke" "{}" "$ADMIN_TOKEN" "$(idem sentry-smoke)" "" "200"
+    SENTRY_SMOKE_OK="$(json_field "$RESPONSE_BODY_FILE" "ok")"
+    SENTRY_EVENT_ID="$(json_field "$RESPONSE_BODY_FILE" "event_id")"
+    assert_true "$([[ "$SENTRY_SMOKE_OK" == "true" ]] && echo 1 || echo 0)" "Sentry smoke endpoint did not return ok=true"
+    echo "sentry_smoke_status=$RESPONSE_STATUS event_id=$SENTRY_EVENT_ID"
+    cleanup_response_files
+  else
+    echo
+    echo "=== SENTRY SMOKE SKIPPED ==="
+    echo "Set HAILO_RUN_SENTRY_SMOKE=1 to require backend Sentry drill during smoke."
+  fi
+
   echo
   echo "=== DISPUTE OPEN + RESOLVE ==="
   request_json "POST" "$BASE_URL/disputes" "{\"ride_id\":\"$RIDE_ID\",\"reason\":\"smoke_test\"}" "$ADMIN_TOKEN" "$(idem dispute-open)"
@@ -490,6 +506,10 @@ else
   echo
   echo "=== ADMIN FLOW SKIPPED ==="
   echo "Set HAILO_ADMIN_EMAIL and HAILO_ADMIN_PASSWORD to run admin smoke flow."
+  if [[ "$RUN_SENTRY_SMOKE" == "1" ]]; then
+    echo "HAILO_RUN_SENTRY_SMOKE=1 requires HAILO_ADMIN_EMAIL and HAILO_ADMIN_PASSWORD."
+    exit 1
+  fi
 fi
 
 echo

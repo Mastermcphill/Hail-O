@@ -5,6 +5,7 @@
 - [x] `flutter test` passes
 - [x] `backend` analyzer/tests pass
 - [ ] CI checks are green on PR
+- [ ] `tool/go_live_check.ps1 -Environment staging` passes
 - [x] No hardcoded secrets or tokens in app/backend
 
 ## Config and Environment
@@ -14,6 +15,7 @@
 - [ ] `DATABASE_URL` configured in staging/prod
 - [ ] `ALLOWED_ORIGINS` restricted to expected client origins
 - [ ] Sentry DSN configured for Flutter + backend
+- [ ] `ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT=true` set in staging only
 
 ## Auth and Routing
 - [x] Cold start does not flicker between public/private screens
@@ -44,3 +46,13 @@
 - [ ] Health and smoke checks pass
 - [ ] Observability dashboards show expected breadcrumbs/tags
 - [ ] Rollback instructions are verified and current
+
+## Quick Commands
+```powershell
+# Staging readiness
+powershell -ExecutionPolicy Bypass -File tool/go_live_check.ps1 -Environment staging
+
+# Production readiness (explicit production smoke opt-in)
+$env:HAILO_ALLOW_PROD_SMOKE='1'
+powershell -ExecutionPolicy Bypass -File tool/go_live_check.ps1 -Environment production -SkipReleaseGate
+```

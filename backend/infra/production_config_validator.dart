@@ -19,6 +19,10 @@ void validateProductionConfig({
   if (allowedOrigins.isEmpty || allowedOrigins.contains('*')) {
     missing.add('ALLOWED_ORIGINS');
   }
+  final sentryDsn = (envMap['SENTRY_DSN'] ?? '').trim();
+  if (sentryDsn.isEmpty) {
+    missing.add('SENTRY_DSN');
+  }
 
   if (usePostgres) {
     final databaseUrl = (envMap['DATABASE_URL'] ?? '').trim();
