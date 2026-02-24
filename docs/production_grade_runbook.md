@@ -7,7 +7,7 @@ This runbook is the operational source of truth for running, validating, and rel
 ### Flutter app
 ```powershell
 flutter pub get
-flutter run
+flutter run --flavor dev
 ```
 
 ### Backend API (local)
@@ -42,6 +42,11 @@ flutter run --dart-define=HAILO_BASE_URL=http://192.168.x.x:8080
 - `HAILO_COMMIT_SHA=<git_sha>`
 - `SENTRY_DSN=<dsn>`
 
+### Flavor defaults
+- `flutter run --flavor dev` -> development base URL strategy.
+- `flutter run --flavor staging` -> staging base URL strategy.
+- `flutter run --flavor prod` -> production base URL strategy.
+
 ### Backend runtime flags
 - `ENV=development|staging|production`
 - `BACKEND_DB_MODE=sqlite|postgres`
@@ -72,12 +77,16 @@ flutter run --dart-define=HAILO_BASE_URL=http://192.168.x.x:8080
 ## Release Build Commands
 ### Android
 ```powershell
+flutter run --flavor dev
+flutter run --flavor staging
 flutter build apk --flavor prod --dart-define=HAILO_ENV=prod --dart-define=HAILO_USE_PROD=true
 flutter build appbundle --flavor prod --dart-define=HAILO_ENV=prod --dart-define=HAILO_USE_PROD=true
 ```
 
 ### iOS
 ```powershell
+flutter run --flavor dev
+flutter run --flavor staging
 flutter build ios --flavor prod --dart-define=HAILO_ENV=prod --dart-define=HAILO_USE_PROD=true
 ```
 
@@ -94,3 +103,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 1 complete: Added Provider-based `AuthSession`, sync GoRouter redirect gating, `/boot` startup route, and `next` post-login return handling.
 - Phase 2 complete: Added API policy-driven retry/timeouts, unified API error envelope mapping, redacted request logging, and non-blocking server warmup banner.
 - Phase 3 complete: Added a shared brand theme, reusable loading/empty/error UI states, accessibility labels on auth entry points, and a new About/Diagnostics settings screen.
+- Phase 4 complete: Added flavor-aware API environment resolution, Android product flavors, iOS shared flavor schemes, and branded launcher/splash asset generation.

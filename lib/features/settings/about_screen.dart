@@ -25,14 +25,6 @@ class _AboutScreenState extends State<AboutScreen> {
     'HAILO_COMMIT_SHA',
     defaultValue: 'unknown',
   );
-  static const String _envFromDefine = String.fromEnvironment(
-    'HAILO_ENV',
-    defaultValue: '',
-  );
-  static const bool _useProd = bool.fromEnvironment(
-    'HAILO_USE_PROD',
-    defaultValue: false,
-  );
 
   @override
   void initState() {
@@ -62,7 +54,10 @@ class _AboutScreenState extends State<AboutScreen> {
                 const SizedBox(height: 8),
                 _InfoTile(label: 'Version', value: version),
                 _InfoTile(label: 'Build', value: buildNumber),
-                _InfoTile(label: 'Environment', value: _environmentLabel()),
+                _InfoTile(
+                  label: 'Environment',
+                  value: ApiConfig.environmentName,
+                ),
                 _InfoTile(label: 'Base URL', value: ApiConfig.baseUrl),
                 _InfoTile(label: 'Release', value: _release),
                 _InfoTile(label: 'Commit', value: _commitSha),
@@ -89,13 +84,6 @@ class _AboutScreenState extends State<AboutScreen> {
     );
   }
 
-  String _environmentLabel() {
-    if (_envFromDefine.trim().isNotEmpty) {
-      return _envFromDefine.trim();
-    }
-    return _useProd ? 'prod' : 'dev';
-  }
-
   Future<void> _copyDiagnostics({
     required String version,
     required String buildNumber,
@@ -106,7 +94,7 @@ class _AboutScreenState extends State<AboutScreen> {
     final payload = <String, String>{
       'app_version': version,
       'build': buildNumber,
-      'environment': _environmentLabel(),
+      'environment': ApiConfig.environmentName,
       'base_url': ApiConfig.baseUrl,
       'release': _release,
       'commit': _commitSha,

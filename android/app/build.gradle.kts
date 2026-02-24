@@ -5,10 +5,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val mapboxToken = (project.findProperty("MAPBOX_ACCESS_TOKEN") as String?)
+    ?.takeIf { it.isNotBlank() }
+    ?: System.getenv("MAPBOX_ACCESS_TOKEN")
+    ?.takeIf { it.isNotBlank() }
+    ?: "PLEASE_SET_TOKEN"
+
 android {
     namespace = "com.example.hail_o_finance_core"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    flavorDimensions += "env"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,8 +37,27 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // TODO: Replace with a real token or pass via --dart-define=MAPBOX_TOKEN.
-        manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = "PLEASE_SET_TOKEN"
+        manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = mapboxToken
+        manifestPlaceholders["appName"] = "Hail-O"
+    }
+
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            manifestPlaceholders["appName"] = "Hail-O Dev"
+        }
+        create("staging") {
+            dimension = "env"
+            applicationIdSuffix = ".staging"
+            versionNameSuffix = "-staging"
+            manifestPlaceholders["appName"] = "Hail-O Staging"
+        }
+        create("prod") {
+            dimension = "env"
+            manifestPlaceholders["appName"] = "Hail-O"
+        }
     }
 
     buildTypes {

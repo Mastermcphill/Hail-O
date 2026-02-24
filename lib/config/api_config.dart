@@ -1,9 +1,13 @@
 import 'package:flutter/foundation.dart';
 
+enum HailoEnvironment { dev, staging, prod }
+
 class ApiConfig {
   static const String _developmentAndroidEmulatorUrl = 'http://10.0.2.2:8080';
   static const String _developmentIosSimulatorUrl = 'http://localhost:8080';
   static const String _developmentFallbackUrl = 'http://localhost:8080';
+  static const String _stagingUrl =
+      'https://staging-tri-o-fliptrybe.onrender.com';
   static const String _productionUrl = 'https://tri-o-fliptrybe.onrender.com';
 
   static const bool useProduction = bool.fromEnvironment(
@@ -11,10 +15,32 @@ class ApiConfig {
     defaultValue: false,
   );
 
-  static const bool mockMode = bool.fromEnvironment(
-    'HAILO_MOCK_MODE',
-    defaultValue: true,
+  static const String _explicitEnvironment = String.fromEnvironment(
+    'HAILO_ENV',
+    defaultValue: '',
   );
+  static const String _flutterFlavor = String.fromEnvironment(
+    'FLUTTER_APP_FLAVOR',
+    defaultValue: '',
+  );
+  static const String _mockModeOverride = String.fromEnvironment(
+    'HAILO_MOCK_MODE',
+    defaultValue: '',
+  );
+
+  static HailoEnvironment get environment => _resolveEnvironment();
+  static String get environmentName => environment.name;
+
+  static bool get mockMode {
+    final override = _mockModeOverride.trim().toLowerCase();
+    if (override == 'true') {
+      return true;
+    }
+    if (override == 'false') {
+      return false;
+    }
+    return environment != HailoEnvironment.prod;
+  }
 
   static String get baseUrl {
     const override = String.fromEnvironment('HAILO_BASE_URL', defaultValue: '');
@@ -22,21 +48,82 @@ class ApiConfig {
       return _normalize(override);
     }
 
-    if (useProduction) {
-      return _productionUrl;
-    }
+    return resolveBaseUrlFor(
+      environment: environment,
+      isWeb: kIsWeb,
+      targetPlatform: defaultTargetPlatform,
+    );
+  }
 
-    if (kIsWeb) {
-      return _developmentFallbackUrl;
-    }
+  static HailoEnvironment _resolveEnvironment() {
+    return resolveEnvironmentFor(
+      explicitEnvironment: _explicitEnvironment,
+      flavor: _flutterFlavor,
+      useProductionFallback: useProduction,
+    );
+  }
 
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        return _developmentAndroidEmulatorUrl;
-      case TargetPlatform.iOS:
-        return _developmentIosSimulatorUrl;
+  static HailoEnvironment? _parseEnvironment(String value) {
+    switch (value.trim().toLowerCase()) {
+      case 'dev':
+      case 'development':
+        return HailoEnvironment.dev;
+      case 'staging':
+      case 'stage':
+        return HailoEnvironment.staging;
+      case 'prod':
+      case 'production':
+        return HailoEnvironment.prod;
       default:
-        return _developmentFallbackUrl;
+        return null;
+    }
+  }
+
+  @visibleForTesting
+  static HailoEnvironment resolveEnvironmentFor({
+    String explicitEnvironment = '',
+    String flavor = '',
+    bool useProductionFallback = false,
+  }) {
+    final fromExplicit = _parseEnvironment(explicitEnvironment);
+    if (fromExplicit != null) {
+      return fromExplicit;
+    }
+
+    final fromFlavor = _parseEnvironment(flavor);
+    if (fromFlavor != null) {
+      return fromFlavor;
+    }
+
+    if (useProductionFallback) {
+      return HailoEnvironment.prod;
+    }
+    return HailoEnvironment.dev;
+  }
+
+  @visibleForTesting
+  static String resolveBaseUrlFor({
+    required HailoEnvironment environment,
+    required bool isWeb,
+    required TargetPlatform targetPlatform,
+  }) {
+    switch (environment) {
+      case HailoEnvironment.prod:
+        return _productionUrl;
+      case HailoEnvironment.staging:
+        return _stagingUrl;
+      case HailoEnvironment.dev:
+        if (isWeb) {
+          return _developmentFallbackUrl;
+        }
+        switch (targetPlatform) {
+          case TargetPlatform.android:
+            return _developmentAndroidEmulatorUrl;
+          case TargetPlatform.iOS:
+            return _developmentIosSimulatorUrl;
+          default:
+            return _developmentFallbackUrl;
+        }
     }
   }
 
