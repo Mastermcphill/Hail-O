@@ -9,10 +9,15 @@ import '../../backend/infra/request_metrics.dart';
 import '../../backend/server/app_server.dart';
 
 class ApiTestHarness {
-  ApiTestHarness._({required this.db, required this.handler});
+  ApiTestHarness._({
+    required this.db,
+    required this.handler,
+    required this.tokenService,
+  });
 
   final Database db;
   final Handler handler;
+  final TokenService tokenService;
 
   static Future<ApiTestHarness> create() async {
     sqfliteFfiInit();
@@ -28,7 +33,11 @@ class ApiTestHarness {
       dbHealthCheck: () async => true,
       buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
     ).buildHandler();
-    return ApiTestHarness._(db: db, handler: handler);
+    return ApiTestHarness._(
+      db: db,
+      handler: handler,
+      tokenService: tokenService,
+    );
   }
 
   Future<void> close() async {
@@ -78,12 +87,16 @@ class ApiTestHarness {
     required String password,
     required String registerIdempotencyKey,
   }) async {
+    final normalizedRole = role.trim().toLowerCase();
+    final registerRole = normalizedRole == 'admin' ? null : normalizedRole;
     final registerBody = <String, Object?>{
       'email': email,
       'password': password,
-      'role': role,
     };
-    if (role == 'rider') {
+    if (registerRole != null && registerRole.isNotEmpty) {
+      registerBody['role'] = registerRole;
+    }
+    if (registerRole == 'rider') {
       registerBody['next_of_kin'] = <String, Object?>{
         'full_name': 'Rider NOK',
         'phone': '+2348000000000',
@@ -97,6 +110,10 @@ class ApiTestHarness {
     );
     final registerResponse = register.requireJsonMap();
     final userId = (registerResponse['user_id'] as String?) ?? '';
+    if (normalizedRole == 'admin') {
+      final token = tokenService.issueToken(userId: userId, role: 'admin');
+      return AuthResult(userId: userId, token: token, role: 'admin');
+    }
     final login = await postJson(
       '/auth/login',
       body: <String, Object?>{'email': email, 'password': password},

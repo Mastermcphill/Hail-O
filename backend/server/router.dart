@@ -17,6 +17,7 @@ import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/admin/admin_controller.dart';
+import '../modules/admin/admin_users_controller.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/auth_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
@@ -56,8 +57,9 @@ Handler buildApiRouter({
 }) {
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
 
+  final authService = AuthService(db, externalStore: authCredentialsStore);
   final authController = AuthController(
-    authService: AuthService(db, externalStore: authCredentialsStore),
+    authService: authService,
     tokenService: tokenService,
   );
   final ridesController = RidesController(
@@ -140,6 +142,7 @@ Handler buildApiRouter({
     reconciliationService: reconciliationService,
     revenueService: revenueService,
   );
+  final adminUsersController = AdminUsersController(authService: authService);
 
   final router = Router()
     ..get('/', (Request request) {
@@ -176,6 +179,7 @@ Handler buildApiRouter({
     ..mount('/api/marketplace/', marketplaceHandler)
     ..mount('/marketplace/', marketplaceHandler)
     ..mount('/api/orgs', orgApiHandler)
+    ..post('/api/admin/users', adminUsersController.createUser)
     ..mount('/webhooks/', paymentsController.router.call)
     ..mount('/admin/', adminController.router.call)
     ..all(

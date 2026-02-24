@@ -28,7 +28,25 @@ class AuthController {
     final body = await readJsonBody(request);
     final email = (body['email'] as String?)?.trim() ?? '';
     final password = (body['password'] as String?) ?? '';
-    final role = _parseRole((body['role'] as String?) ?? 'rider');
+    final requestedRole = (body['role'] as String?)?.trim().toLowerCase();
+    late final UserRole role;
+    if (requestedRole == UserRole.admin.dbValue) {
+      final allowBootstrap = const bool.fromEnvironment(
+        'HAILO_ALLOW_ADMIN_BOOTSTRAP',
+        defaultValue: false,
+      );
+      if (!allowBootstrap) {
+        return jsonErrorResponse(
+          request,
+          403,
+          code: 'admin_registration_disabled',
+          message: 'Admin self-registration is disabled.',
+        );
+      }
+      role = UserRole.admin;
+    } else {
+      role = _parseRole(requestedRole ?? UserRole.rider.dbValue);
+    }
     final displayName = (body['display_name'] as String?)?.trim();
     final idempotencyKey = request.requestContext.idempotencyKey ?? '';
 

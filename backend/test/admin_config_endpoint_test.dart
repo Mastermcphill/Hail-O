@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -13,6 +13,8 @@ import '../modules/auth/sqlite_auth_credentials_store.dart';
 import '../modules/rides/sqlite_operational_record_store.dart';
 import '../modules/rides/sqlite_ride_request_metadata_store.dart';
 import '../server/app_server.dart';
+
+const String _kTestTokenSecret = 'backend-test-secret';
 
 void main() {
   setUpAll(() {
@@ -33,12 +35,9 @@ void main() {
         role: 'rider',
         idSuffix: 'cfg-rider',
       );
-      final adminToken = await _registerAndLogin(
-        handler,
-        email: 'cfg.admin@example.com',
-        role: 'admin',
-        idSuffix: 'cfg-admin',
-      );
+      final adminToken = TokenService(
+        secret: _kTestTokenSecret,
+      ).issueToken(userId: 'cfg-admin', role: 'admin');
 
       final unauthorized = await _request(
         handler,
@@ -104,7 +103,7 @@ void main() {
 Handler _buildHandler(Database db) {
   return AppServer(
     db: db,
-    tokenService: TokenService(secret: 'backend-test-secret'),
+    tokenService: TokenService(secret: _kTestTokenSecret),
     dbMode: 'postgres',
     environment: 'staging',
     requestMetrics: RequestMetrics(),

@@ -76,6 +76,51 @@ void main() {
     final loginBody = await _decodeBody(login);
     expect((loginBody['token'] as String?)?.isNotEmpty, true);
   });
+
+  test('admin self-registration is disabled by default', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = AppServer(
+      db: db,
+      tokenService: TokenService(secret: 'backend-test-secret'),
+      dbMode: 'sqlite',
+      environment: 'test',
+      requestMetrics: RequestMetrics(),
+      dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
+      authCredentialsStore: SqliteAuthCredentialsStore(db),
+      rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
+      operationalRecordStore: const SqliteOperationalRecordStore(),
+    ).buildHandler();
+
+    final adminRegister = await _postJson(
+      handler,
+      '/auth/register',
+      idempotencyKey: 'backend-register-admin-1',
+      body: <String, Object?>{
+        'email': 'backend.admin.register@example.com',
+        'password': 'SuperSecret123',
+        'role': 'admin',
+      },
+    );
+    expect(adminRegister.statusCode, 403);
+    final adminBody = await _decodeBody(adminRegister);
+    expect(adminBody['error_code'], 'ADMIN_REGISTRATION_DISABLED');
+
+    final riderRegister = await _postJson(
+      handler,
+      '/auth/register',
+      idempotencyKey: 'backend-register-rider-2',
+      body: <String, Object?>{
+        'email': 'backend.rider.register@example.com',
+        'password': 'SuperSecret123',
+      },
+    );
+    expect(riderRegister.statusCode, 201);
+    final riderBody = await _decodeBody(riderRegister);
+    expect(riderBody['role'], 'rider');
+  });
 }
 
 Future<Response> _postJson(
