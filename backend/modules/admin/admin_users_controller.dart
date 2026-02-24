@@ -2,18 +2,30 @@ import 'package:shelf/shelf.dart';
 
 import '../../../lib/domain/models/user.dart';
 import '../../../lib/domain/services/auth_service.dart';
+import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 
 class AdminUsersController {
-  AdminUsersController({required AuthService authService})
-    : _authService = authService;
+  AdminUsersController({
+    required AuthService authService,
+    AuditLogger? auditLogger,
+  }) : _authService = authService,
+       _auditLogger = auditLogger ?? AuditLogger();
 
   final AuthService _authService;
+  final AuditLogger _auditLogger;
 
   Future<Response> createUser(Request request) async {
     final role = (request.requestContext.role ?? '').trim().toLowerCase();
     if (role != UserRole.admin.dbValue) {
+      _auditLogger.adminAction(
+        traceId: request.requestContext.traceId,
+        actorUserId: request.requestContext.userId ?? 'anonymous',
+        action: 'create_user',
+        success: false,
+        reasonCode: 'admin_required',
+      );
       return jsonErrorResponse(
         request,
         403,
@@ -24,6 +36,13 @@ class AdminUsersController {
 
     final idempotencyKey = (request.requestContext.idempotencyKey ?? '').trim();
     if (idempotencyKey.isEmpty) {
+      _auditLogger.adminAction(
+        traceId: request.requestContext.traceId,
+        actorUserId: request.requestContext.userId ?? 'anonymous',
+        action: 'create_user',
+        success: false,
+        reasonCode: 'missing_idempotency_key',
+      );
       return jsonErrorResponse(
         request,
         400,
@@ -40,6 +59,13 @@ class AdminUsersController {
     final parsedRole = _parseRole(requestedRole);
 
     if (parsedRole == null) {
+      _auditLogger.adminAction(
+        traceId: request.requestContext.traceId,
+        actorUserId: request.requestContext.userId ?? 'anonymous',
+        action: 'create_user',
+        success: false,
+        reasonCode: 'unsupported_role',
+      );
       return jsonErrorResponse(
         request,
         400,
@@ -54,6 +80,13 @@ class AdminUsersController {
       role: parsedRole,
       idempotencyKey: idempotencyKey,
       displayName: displayName,
+    );
+    _auditLogger.adminAction(
+      traceId: request.requestContext.traceId,
+      actorUserId: request.requestContext.userId ?? 'unknown',
+      action: 'create_user',
+      success: true,
+      targetId: email,
     );
     return jsonResponse(201, result);
   }

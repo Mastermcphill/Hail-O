@@ -4,6 +4,7 @@ import 'package:shelf_router/shelf_router.dart';
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/wallet_reversal_service.dart';
 import '../../infra/api_contract.dart';
+import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
@@ -19,19 +20,22 @@ class AdminController {
     required Map<String, Object?> buildInfo,
     MarketplaceReconciliationService? reconciliationService,
     MarketplaceRevenueService? revenueService,
+    AuditLogger? auditLogger,
   }) : _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
          runtimeConfigSnapshot,
        ),
        _buildInfo = Map<String, Object?>.unmodifiable(buildInfo),
        _reconciliationService = reconciliationService,
-       _revenueService = revenueService ?? MarketplaceRevenueService();
+       _revenueService = revenueService ?? MarketplaceRevenueService(),
+       _auditLogger = auditLogger ?? AuditLogger();
 
   final WalletReversalService _walletReversalService;
   final Map<String, Object?> _runtimeConfigSnapshot;
   final Map<String, Object?> _buildInfo;
   final MarketplaceReconciliationService? _reconciliationService;
   final MarketplaceRevenueService _revenueService;
+  final AuditLogger _auditLogger;
 
   Router get router {
     final router = Router();
@@ -79,17 +83,34 @@ class AdminController {
       throw const DomainInvariantError(code: 'original_ledger_id_required');
     }
 
-    final result = await _walletReversalService.reverseWalletLedgerEntry(
-      originalLedgerId: originalLedgerId,
-      requestedByUserId: request.requestContext.userId ?? '',
-      requesterIsAdmin: true,
-      reason: (body['reason'] as String?)?.trim().isNotEmpty == true
-          ? (body['reason'] as String).trim()
-          : 'admin_reversal',
-      idempotencyKey: request.requestContext.idempotencyKey ?? '',
-      reversalAmountMinor: (body['reversal_amount_minor'] as num?)?.toInt(),
-    );
-    return jsonResponse(200, result);
+    try {
+      final result = await _walletReversalService.reverseWalletLedgerEntry(
+        originalLedgerId: originalLedgerId,
+        requestedByUserId: request.requestContext.userId ?? '',
+        requesterIsAdmin: true,
+        reason: (body['reason'] as String?)?.trim().isNotEmpty == true
+            ? (body['reason'] as String).trim()
+            : 'admin_reversal',
+        idempotencyKey: request.requestContext.idempotencyKey ?? '',
+        reversalAmountMinor: (body['reversal_amount_minor'] as num?)?.toInt(),
+      );
+      _logAdminAction(
+        request: request,
+        action: 'wallet_reversal',
+        success: true,
+        targetId: originalLedgerId.toString(),
+      );
+      return jsonResponse(200, result);
+    } catch (error) {
+      _logAdminAction(
+        request: request,
+        action: 'wallet_reversal',
+        success: false,
+        targetId: originalLedgerId.toString(),
+        reasonCode: error.runtimeType.toString(),
+      );
+      rethrow;
+    }
   }
 
   Future<Response> _marketplacePurchaseDebug(
@@ -244,6 +265,12 @@ class AdminController {
         0;
     final reason = (body['reason'] as String?)?.trim() ?? 'admin_grant';
     if (orgId.isEmpty || amountMinor <= 0) {
+      _logAdminAction(
+        request: request,
+        action: 'grant_credits',
+        success: false,
+        reasonCode: 'validation_error',
+      );
       return jsonResponse(400, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -258,6 +285,13 @@ class AdminController {
         reason: reason,
       );
     } on MarketplaceRevenueException catch (error) {
+      _logAdminAction(
+        request: request,
+        action: 'grant_credits',
+        success: false,
+        targetId: orgId,
+        reasonCode: error.code,
+      );
       return jsonResponse(error.statusCode, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -266,6 +300,12 @@ class AdminController {
       });
     }
     final balance = await _revenueService.creditsBalance(orgId);
+    _logAdminAction(
+      request: request,
+      action: 'grant_credits',
+      success: true,
+      targetId: orgId,
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -290,6 +330,13 @@ class AdminController {
         0;
     final reason = (body['reason'] as String?)?.trim() ?? 'manual_adjust';
     if (delta == 0) {
+      _logAdminAction(
+        request: request,
+        action: 'adjust_risk',
+        success: false,
+        targetId: '$subjectType:$subjectId',
+        reasonCode: 'validation_error',
+      );
       return jsonResponse(400, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -307,6 +354,12 @@ class AdminController {
       subjectType: subjectType,
       subjectId: subjectId,
     );
+    _logAdminAction(
+      request: request,
+      action: 'adjust_risk',
+      success: true,
+      targetId: '$subjectType:$subjectId',
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -318,6 +371,13 @@ class AdminController {
     _requireAdmin(request);
     final updated = await _revenueService.pauseDunningCase(caseId);
     if (!updated) {
+      _logAdminAction(
+        request: request,
+        action: 'pause_dunning',
+        success: false,
+        targetId: caseId,
+        reasonCode: 'not_found',
+      );
       return jsonResponse(404, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -325,6 +385,12 @@ class AdminController {
         'message': 'Dunning case not found',
       });
     }
+    _logAdminAction(
+      request: request,
+      action: 'pause_dunning',
+      success: true,
+      targetId: caseId,
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -336,6 +402,13 @@ class AdminController {
     _requireAdmin(request);
     final updated = await _revenueService.resumeDunningCase(caseId);
     if (!updated) {
+      _logAdminAction(
+        request: request,
+        action: 'resume_dunning',
+        success: false,
+        targetId: caseId,
+        reasonCode: 'not_found',
+      );
       return jsonResponse(404, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -343,6 +416,12 @@ class AdminController {
         'message': 'Dunning case not found',
       });
     }
+    _logAdminAction(
+      request: request,
+      action: 'resume_dunning',
+      success: true,
+      targetId: caseId,
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -354,6 +433,13 @@ class AdminController {
     _requireAdmin(request);
     final updated = await _revenueService.writeoffDunningCase(caseId);
     if (!updated) {
+      _logAdminAction(
+        request: request,
+        action: 'writeoff_dunning',
+        success: false,
+        targetId: caseId,
+        reasonCode: 'not_found',
+      );
       return jsonResponse(404, <String, Object?>{
         'ok': false,
         'trace_id': request.requestContext.traceId,
@@ -361,6 +447,12 @@ class AdminController {
         'message': 'Dunning case not found',
       });
     }
+    _logAdminAction(
+      request: request,
+      action: 'writeoff_dunning',
+      success: true,
+      targetId: caseId,
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'trace_id': request.requestContext.traceId,
@@ -462,5 +554,22 @@ class AdminController {
     if (role != 'admin') {
       throw const UnauthorizedActionError(code: 'admin_only');
     }
+  }
+
+  void _logAdminAction({
+    required Request request,
+    required String action,
+    required bool success,
+    String? targetId,
+    String? reasonCode,
+  }) {
+    _auditLogger.adminAction(
+      traceId: request.requestContext.traceId,
+      actorUserId: request.requestContext.userId ?? 'unknown',
+      action: action,
+      success: success,
+      targetId: targetId,
+      reasonCode: reasonCode,
+    );
   }
 }
