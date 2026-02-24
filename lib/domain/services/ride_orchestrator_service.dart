@@ -8,6 +8,7 @@ import '../../data/sqlite/dao/ride_events_dao.dart';
 import '../../data/sqlite/dao/rides_dao.dart';
 import '../errors/domain_errors.dart';
 import '../models/idempotency_record.dart';
+import '../models/pricing_quote.dart';
 import '../models/ride_event.dart';
 import '../models/ride_event_type.dart';
 import '../models/ride_trip.dart';
@@ -323,6 +324,13 @@ class RideOrchestratorService {
       vehicleClass: vehicleClass,
       requestedAtUtc: now,
     );
+    final baseFareMinor = _baseFareFromQuoteOrPayload(quote, payload);
+    final premiumMarkupMinor = _nonNegativeMinor(
+      payload['premium_markup_minor'],
+    );
+    final connectionFeeMinor = _nonNegativeMinor(
+      payload['connection_fee_minor'],
+    );
 
     final ride = RideTrip(
       id: rideId,
@@ -330,14 +338,12 @@ class RideOrchestratorService {
       driverId: (payload['driver_id'] as String?)?.trim(),
       tripScope: tripScope,
       status: 'pending',
-      baseFareMinor: (payload['base_fare_minor'] as num?)?.toInt() ?? 0,
-      premiumMarkupMinor:
-          (payload['premium_markup_minor'] as num?)?.toInt() ?? 0,
+      baseFareMinor: baseFareMinor,
+      premiumMarkupMinor: premiumMarkupMinor,
       charterMode: ((payload['charter_mode'] as num?)?.toInt() ?? 0) == 1,
       dailyRateMinor: (payload['daily_rate_minor'] as num?)?.toInt() ?? 0,
       totalFareMinor: quote.fareMinor,
-      connectionFeeMinor:
-          (payload['connection_fee_minor'] as num?)?.toInt() ?? 0,
+      connectionFeeMinor: connectionFeeMinor,
       connectionFeePaid: false,
       biddingMode: true,
       pricingVersion: pricingEngine.ruleVersion,
@@ -561,5 +567,27 @@ class RideOrchestratorService {
     }
     return text;
   }
-}
 
+  int _baseFareFromQuoteOrPayload(
+    PricingQuote quote,
+    Map<String, Object?> payload,
+  ) {
+    try {
+      final decoded = jsonDecode(quote.breakdownJson);
+      if (decoded is Map<String, dynamic>) {
+        final quotedBaseFareMinor = decoded['base_fare_minor'];
+        if (quotedBaseFareMinor is num) {
+          return quotedBaseFareMinor.toInt().clamp(0, 1 << 31);
+        }
+      }
+    } catch (_) {
+      // Fall back to payload when pricing breakdown is unavailable/invalid.
+    }
+    return _nonNegativeMinor(payload['base_fare_minor']);
+  }
+
+  int _nonNegativeMinor(Object? value) {
+    final minor = (value as num?)?.toInt() ?? 0;
+    return minor < 0 ? 0 : minor;
+  }
+}

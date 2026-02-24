@@ -136,15 +136,19 @@ class RideSettlementService {
           );
         }
 
-        final baseFareMinor = (ride['base_fare_minor'] as int?) ?? 0;
-        final ridePremiumMarkupMinor =
-            (ride['premium_markup_minor'] as int?) ?? 0;
+        final baseFareMinor = _nonNegativeMinor(ride['base_fare_minor']);
+        final ridePremiumMarkupMinor = _nonNegativeMinor(
+          ride['premium_markup_minor'],
+        );
         final seatPremiumMarkupMinor = await SeatsDao(
           txn,
         ).sumMarkupMinorByRide(rideId);
         final premiumMarkupMinor = seatPremiumMarkupMinor > 0
             ? seatPremiumMarkupMinor
             : ridePremiumMarkupMinor;
+        final escrowAmountMinor = escrow.amountMinor < 0
+            ? 0
+            : escrow.amountMinor;
 
         var penaltyDueMinor = 0;
         final penaltyAuditRows = await PenaltyRecordsDao(
@@ -212,6 +216,16 @@ class RideSettlementService {
         final driverAllowanceMinor = hasFleetOwner && commissionGrossMinor > 0
             ? percentOf(commissionGrossMinor, allowancePercent)
             : 0;
+        final grossDistributionMinor =
+            commissionGrossMinor + premiumLockedMinor + driverAllowanceMinor;
+        if (grossDistributionMinor > escrowAmountMinor) {
+          return SettlementResult.error(
+            rideId: rideId,
+            escrowId: escrowId,
+            error: 'settlement_distribution_exceeds_escrow',
+          );
+        }
+
         if (driverAllowanceMinor > 0) {
           await _postWalletCreditTx(
             txn,
@@ -268,6 +282,8 @@ class RideSettlementService {
               'commission_remainder_minor': commissionRemainderMinor,
               'premium_locked_minor': premiumLockedMinor,
               'driver_allowance_minor': driverAllowanceMinor,
+              'gross_distribution_minor': grossDistributionMinor,
+              'escrow_amount_minor': escrowAmountMinor,
               'penalty_due_minor': penaltyDueMinor,
               'penalty_source': penaltyAuditRows.isNotEmpty
                   ? 'penalty_records'
@@ -493,5 +509,9 @@ class RideSettlementService {
       throw ArgumentError('idempotencyKey is required');
     }
   }
-}
 
+  int _nonNegativeMinor(Object? raw) {
+    final value = (raw as num?)?.toInt() ?? 0;
+    return value < 0 ? 0 : value;
+  }
+}

@@ -75,6 +75,53 @@ void main() {
       },
     );
 
+    test('ride booked normalizes client-provided fare fields', () async {
+      final now = DateTime.utc(2026, 2, 11, 12);
+      final db = await HailODatabase().open(databasePath: inMemoryDatabasePath);
+      addTearDown(db.close);
+
+      await _seedRiderWithNextOfKin(db, riderId: 'rider_orch_3', now: now);
+
+      final orchestrator = RideOrchestratorService(db, nowUtc: () => now);
+      await orchestrator.applyEvent(
+        eventType: RideEventType.rideBooked,
+        rideId: 'ride_orch_3',
+        idempotencyKey: 'ride_event_book_normalize_1',
+        actorId: 'rider_orch_3',
+        payload: <String, Object?>{
+          'rider_id': 'rider_orch_3',
+          'trip_scope': 'intra_city',
+          'distance_meters': 5000,
+          'duration_seconds': 900,
+          'luggage_count': 0,
+          'vehicle_class': 'sedan',
+          'base_fare_minor': 999999,
+          'premium_markup_minor': -2000,
+          'connection_fee_minor': -100,
+        },
+      );
+
+      final rideRows = await db.query(
+        'rides',
+        columns: <String>[
+          'base_fare_minor',
+          'premium_markup_minor',
+          'connection_fee_minor',
+          'quoted_fare_minor',
+        ],
+        where: 'id = ?',
+        whereArgs: const <Object>['ride_orch_3'],
+        limit: 1,
+      );
+
+      expect(rideRows, isNotEmpty);
+      final ride = rideRows.first;
+      expect(ride['base_fare_minor'], 15000);
+      expect(ride['premium_markup_minor'], 0);
+      expect(ride['connection_fee_minor'], 0);
+      expect((ride['quoted_fare_minor'] as int?) ?? 0, greaterThan(0));
+    });
+
     test('invalid transition rejects start before accept', () async {
       final now = DateTime.utc(2026, 2, 11, 12);
       final db = await HailODatabase().open(databasePath: inMemoryDatabasePath);

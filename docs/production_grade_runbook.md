@@ -147,3 +147,4 @@ Set-Location backend; dart analyze; dart test; Set-Location ..
 - Phase 0 refresh complete: Added environment matrix docs, single-command local boot script, and explicit admin seeding + symbolicated release instructions.
 - Phase 3 refresh complete: Added app-wide offline connectivity banner and Flutter localization scaffolding (`en`) to harden production UX behavior.
 - Phase 5 refresh complete: Stabilized widget bootstrap tests by allowing startup warmup tasks to be disabled in test mode.
+- Audit hardening complete: Commission settlement now enforces escrow-distribution bounds and ride booking normalizes fare fields from pricing output to resist client-side fare tampering.

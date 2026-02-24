@@ -140,6 +140,117 @@ void main() {
       expect(payoutCount, 1);
     },
   );
+
+  test(
+    '/rides/{id}/complete blocks settlement when commission distribution exceeds escrow',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+
+      final handler = AppServer(
+        db: db,
+        tokenService: TokenService(secret: 'backend-test-secret'),
+        dbMode: 'sqlite',
+        environment: 'test',
+        requestMetrics: RequestMetrics(),
+        dbHealthCheck: () async => true,
+        buildInfo: const <String, Object?>{'commit': 'test', 'runtime': 'test'},
+        authCredentialsStore: SqliteAuthCredentialsStore(db),
+        rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
+        operationalRecordStore: const SqliteOperationalRecordStore(),
+      ).buildHandler();
+
+      final rider = await _registerAndLogin(
+        handler,
+        email: 'guard.rider@example.com',
+        role: 'rider',
+        registerKey: 'register-guard-rider',
+        includeNextOfKin: true,
+      );
+      final driver = await _registerAndLogin(
+        handler,
+        email: 'guard.driver@example.com',
+        role: 'driver',
+        registerKey: 'register-guard-driver',
+      );
+
+      final requestRide = await _postJson(
+        handler,
+        '/rides/request',
+        token: rider.token,
+        idempotencyKey: 'request-guard-ride-1',
+        body: <String, Object?>{
+          'trip_scope': 'intra_city',
+          'scheduled_departure_at': DateTime.now()
+              .toUtc()
+              .add(const Duration(hours: 1))
+              .toIso8601String(),
+          'distance_meters': 8000,
+          'duration_seconds': 1200,
+          'luggage_count': 0,
+          'vehicle_class': 'sedan',
+          'base_fare_minor': 15000,
+          'premium_markup_minor': 0,
+        },
+      );
+      expect(requestRide.statusCode, 201);
+      final requestBody = await _decodeBody(requestRide);
+      final rideId = (requestBody['ride_id'] as String?) ?? '';
+      final escrowId = (requestBody['escrow_id'] as String?) ?? '';
+      expect(rideId, isNotEmpty);
+      expect(escrowId, isNotEmpty);
+
+      final accept = await _postJson(
+        handler,
+        '/rides/$rideId/accept',
+        token: driver.token,
+        idempotencyKey: 'accept-guard-ride-1',
+        body: const <String, Object?>{},
+      );
+      expect(accept.statusCode, 200);
+
+      final start = await _postJson(
+        handler,
+        '/rides/$rideId/start',
+        token: driver.token,
+        idempotencyKey: 'start-guard-ride-1',
+        body: const <String, Object?>{},
+      );
+      expect(start.statusCode, 200);
+
+      await db.update(
+        'rides',
+        <String, Object?>{'base_fare_minor': 500000},
+        where: 'id = ?',
+        whereArgs: <Object?>[rideId],
+      );
+
+      final complete = await _postJson(
+        handler,
+        '/rides/$rideId/complete',
+        token: driver.token,
+        idempotencyKey: 'complete-guard-ride-1',
+        body: <String, Object?>{
+          'escrow_id': escrowId,
+          'settlement_trigger': 'manual_override',
+        },
+      );
+      expect(complete.statusCode, 200);
+      final completeBody = await _decodeBody(complete);
+      final settlement = Map<String, Object?>.from(
+        (completeBody['settlement'] as Map?) ?? const <String, Object?>{},
+      );
+      expect(settlement['ok'], false);
+      expect(settlement['error'], 'settlement_distribution_exceeds_escrow');
+
+      final payoutCountRows = await db.rawQuery(
+        'SELECT COUNT(1) AS c FROM payout_records WHERE escrow_id = ?',
+        <Object?>[escrowId],
+      );
+      final payoutCount = (payoutCountRows.first['c'] as int?) ?? 0;
+      expect(payoutCount, 0);
+    },
+  );
 }
 
 Future<_AuthResult> _registerAndLogin(

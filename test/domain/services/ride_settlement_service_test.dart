@@ -117,6 +117,63 @@ void main() {
     );
 
     test(
+      'manual release blocks settlement when distribution exceeds escrow amount',
+      () async {
+        final now = DateTime.utc(2026, 2, 11, 12, 0);
+        final db = await HailODatabase().open(
+          databasePath: inMemoryDatabasePath,
+        );
+        addTearDown(db.close);
+
+        final walletService = WalletService(db, nowUtc: () => now);
+        final settlementService = RideSettlementService(db, nowUtc: () => now);
+        final escrowService = EscrowService(
+          db,
+          rideSettlementService: settlementService,
+          nowUtc: () => now,
+        );
+
+        await _seedUsersAndRide(
+          db,
+          now: now,
+          riderId: 'rider_guard',
+          driverId: 'driver_guard',
+          rideId: 'ride_guard',
+          escrowId: 'escrow_guard',
+          baseFareMinor: 200000,
+          premiumMarkupMinor: 0,
+          totalFareMinor: 10000,
+        );
+
+        final released = await escrowService.releaseOnManualOverride(
+          escrowId: 'escrow_guard',
+          riderId: 'rider_guard',
+          idempotencyKey: 'manual_release_guard_1',
+        );
+
+        expect(released['released'], true);
+        final settlement = Map<String, Object?>.from(
+          (released['settlement'] as Map?) ?? const <String, Object?>{},
+        );
+        expect(settlement['ok'], false);
+        expect(settlement['error'], 'settlement_distribution_exceeds_escrow');
+
+        final walletA = await walletService.getWalletBalanceMinor(
+          ownerId: 'driver_guard',
+          walletType: WalletType.driverA,
+        );
+        expect(walletA, 0);
+
+        final payoutRows = await db.query(
+          'payout_records',
+          where: 'escrow_id = ?',
+          whereArgs: const <Object>['escrow_guard'],
+        );
+        expect(payoutRows, isEmpty);
+      },
+    );
+
+    test(
       'release + settlement are idempotent and do not double-credit on replay',
       () async {
         final now = DateTime.utc(2026, 2, 11, 12, 0);
