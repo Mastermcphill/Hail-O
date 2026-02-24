@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hailo_core/core/api/api_client.dart';
 import 'package:hailo_core/core/storage/token_storage.dart';
@@ -11,7 +12,11 @@ void main() {
   group('AuthSession', () {
     test('init loads persisted token and role', () async {
       final storage = InMemoryTokenStorage();
-      await storage.saveAuth(token: 'persisted-token', role: 'admin');
+      final persistedToken = JWT(<String, Object?>{
+        'user_id': 'admin-1',
+        'role': 'admin',
+      }).sign(SecretKey('test-secret'), expiresIn: const Duration(hours: 1));
+      await storage.saveAuth(token: persistedToken, role: 'admin');
       final apiClient = ApiClient(
         tokenStorage: storage,
         httpClient: MockClient((_) async => http.Response('{}', 200)),
@@ -22,7 +27,7 @@ void main() {
 
       expect(session.isReady, isTrue);
       expect(session.isAuthenticated, isTrue);
-      expect(session.token, 'persisted-token');
+      expect(session.token, persistedToken);
       expect(session.roleNormalized, 'admin');
     });
 
@@ -105,6 +110,43 @@ void main() {
       expect(session.isAuthenticated, isFalse);
       expect(session.status, AuthStatus.anonymous);
       expect(session.token, isNull);
+      expect(await storage.readToken(), isNull);
+      expect(await storage.readRole(), isNull);
+    });
+
+    test('init clears expired token and role', () async {
+      final expired = JWT(
+        <String, Object?>{'user_id': 'user-1', 'role': 'rider'},
+      ).sign(SecretKey('test-secret'), expiresIn: const Duration(seconds: -30));
+      final storage = InMemoryTokenStorage();
+      await storage.saveAuth(token: expired, role: 'rider');
+      final apiClient = ApiClient(
+        tokenStorage: storage,
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+      );
+      final session = AuthSession(tokenStorage: storage, apiClient: apiClient);
+
+      await session.init();
+
+      expect(session.isAuthenticated, isFalse);
+      expect(session.status, AuthStatus.anonymous);
+      expect(await storage.readToken(), isNull);
+      expect(await storage.readRole(), isNull);
+    });
+
+    test('init clears malformed persisted token', () async {
+      final storage = InMemoryTokenStorage();
+      await storage.saveAuth(token: 'not-a-jwt', role: 'admin');
+      final apiClient = ApiClient(
+        tokenStorage: storage,
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+      );
+      final session = AuthSession(tokenStorage: storage, apiClient: apiClient);
+
+      await session.init();
+
+      expect(session.isAuthenticated, isFalse);
+      expect(session.status, AuthStatus.anonymous);
       expect(await storage.readToken(), isNull);
       expect(await storage.readRole(), isNull);
     });

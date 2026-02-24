@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../core/api/api_client.dart';
@@ -47,9 +49,17 @@ class AuthSession extends ChangeNotifier {
       final storedToken = await _tokenStorage.readToken();
       final storedRole = await _tokenStorage.readRole();
       if (storedToken != null && storedToken.trim().isNotEmpty) {
-        _token = storedToken.trim();
-        _role = normalizeRole(storedRole);
-        _status = AuthStatus.authenticated;
+        final normalizedToken = storedToken.trim();
+        if (_isTokenInvalidOrExpired(normalizedToken)) {
+          await _tokenStorage.clearAuth();
+          _token = null;
+          _role = null;
+          _status = AuthStatus.anonymous;
+        } else {
+          _token = normalizedToken;
+          _role = normalizeRole(storedRole);
+          _status = AuthStatus.authenticated;
+        }
       } else {
         _token = null;
         _role = null;
@@ -107,6 +117,63 @@ class AuthSession extends ChangeNotifier {
 
   Future<void> invalidateToken() async {
     await logout();
+  }
+
+  bool _isTokenInvalidOrExpired(String token) {
+    final parts = token.split('.');
+    if (parts.length != 3) {
+      return true;
+    }
+
+    final payloadMap = _decodeJwtPayload(parts[1]);
+    if (payloadMap == null) {
+      return true;
+    }
+
+    final expirationSeconds = _readExpirationSeconds(payloadMap['exp']);
+    if (expirationSeconds == null) {
+      // Backward compatibility for tokens without exp claim.
+      return false;
+    }
+
+    final expiration = DateTime.fromMillisecondsSinceEpoch(
+      expirationSeconds * 1000,
+      isUtc: true,
+    );
+    final now = DateTime.now().toUtc();
+    return !expiration.isAfter(now);
+  }
+
+  Map<String, dynamic>? _decodeJwtPayload(String segment) {
+    try {
+      final normalized = base64Url.normalize(segment);
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final dynamic parsed = jsonDecode(decoded);
+      if (parsed is Map<String, dynamic>) {
+        return parsed;
+      }
+      if (parsed is Map) {
+        return parsed.map(
+          (key, value) => MapEntry<String, dynamic>(key.toString(), value),
+        );
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int? _readExpirationSeconds(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value.trim());
+    }
+    return null;
   }
 }
 
