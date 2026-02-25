@@ -254,8 +254,8 @@ Future<void> main() async {
         environmentMap: env,
       ).buildHandler();
 
-      const listenHost = '0.0.0.0';
-      final port = int.parse((Platform.environment['PORT'] ?? '8080').trim());
+      const host = '0.0.0.0';
+      final port = int.parse(Platform.environment['PORT'] ?? '8080');
       stdout.writeln(
         'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
       );
@@ -264,21 +264,20 @@ Future<void> main() async {
       );
       final server = await bindServerOrExit(
         handler: handler,
-        host: listenHost,
+        host: host,
         port: port,
       );
+      final boundPort = server.port;
       server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
-      stdout.writeln(
-        'Hail-O backend listening on http://$listenHost:${server.port}',
-      );
+      stdout.writeln('Listening on $host:$boundPort');
 
       try {
-        await _verifyBindContract(port: server.port);
+        await _verifyBindContract(port: boundPort);
         stdout.writeln(
           jsonEncode(<String, Object?>{
             'event': 'bind_check_ok',
             'path': '/api/healthz',
-            'port': server.port,
+            'port': boundPort,
           }),
         );
       } catch (error) {
@@ -286,7 +285,7 @@ Future<void> main() async {
           jsonEncode(<String, Object?>{
             'event': 'bind_check_failed',
             'path': '/api/healthz',
-            'port': server.port,
+            'port': boundPort,
             'reason': error.toString(),
           }),
         );
@@ -331,7 +330,7 @@ Future<void> main() async {
       stdout.writeln(
         jsonEncode(<String, Object?>{
           'event': 'server_stopped',
-          'port': server.port,
+          'port': boundPort,
         }),
       );
     },
@@ -373,8 +372,8 @@ Future<HttpServer> bindServerOrExit({
     serveRequests(server, handler);
     logEvent(<String, Object?>{
       'event': 'server_listen',
-      'host': server.address.address,
-      'port': server.port,
+      'host': host,
+      'port': port,
     });
     return server;
   } catch (error, stackTrace) {

@@ -45,11 +45,11 @@ void main() {
       final server = await bindFuture;
       expect(identical(server, fakeServer), isTrue);
       expect(served, isTrue);
-      expect(fakeServer.addressReadCount, 1);
-      expect(fakeServer.portReadCount, 1);
+      expect(fakeServer.addressReadCount, 0);
+      expect(fakeServer.portReadCount, 0);
       expect(events, hasLength(1));
       expect(events.first['event'], 'server_listen');
-      expect(events.first['host'], '127.0.0.1');
+      expect(events.first['host'], '0.0.0.0');
       expect(events.first['port'], 8080);
     },
   );
