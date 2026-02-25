@@ -8,4 +8,5 @@ which dart
 echo "hail-o backend startup: db_mode=${BACKEND_DB_MODE:-unset} env=${ENV:-unset} commit=${RENDER_GIT_COMMIT:-local}"
 
 dart run bin/migrate.dart
+# Keep PID 1 attached to the backend process so the container stays alive.
 exec dart run bin/server.dart
