@@ -9,6 +9,7 @@ abstract class MarketplaceOfferRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? clientReference,
   });
 
   Future<MarketplacePurchaseRecord?> findPurchaseByIdempotencyKey({
@@ -86,6 +87,7 @@ class MarketplacePurchaseRecord {
     required this.idempotencyKey,
     required this.createdAt,
     required this.updatedAt,
+    this.clientReference,
   });
 
   final String id;
@@ -99,6 +101,7 @@ class MarketplacePurchaseRecord {
   final String idempotencyKey;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? clientReference;
 }
 
 class MarketplaceSeatAssignmentRecord {

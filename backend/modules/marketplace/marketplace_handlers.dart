@@ -37,6 +37,7 @@ class MarketplaceHandlers {
   final Map<String, String> _orgIdByPurchaseId = <String, String>{};
   final Map<String, String> _ownerUserIdByPurchaseId = <String, String>{};
   final Map<String, String> _purchaseIdByOrgAndIdempotency = <String, String>{};
+  final Map<String, String> _clientReferenceByPurchaseId = <String, String>{};
   final Map<String, int> _versionByPurchaseId = <String, int>{};
 
   Future<Response> listOffers(Request request) async {
@@ -245,8 +246,15 @@ class MarketplaceHandlers {
         (payload['offerId'] as String?)?.trim() ??
         (payload['offer_id'] as String?)?.trim() ??
         '';
-    final seatCount =
-        _toInt(payload['seatCount']) ?? _toInt(payload['seat_count']);
+    final quantity =
+        _toInt(payload['quantity']) ??
+        _toInt(payload['seatCount']) ??
+        _toInt(payload['seat_count']) ??
+        1;
+    final clientReference =
+        (payload['client_reference'] as String?)?.trim() ??
+        (payload['clientReference'] as String?)?.trim() ??
+        '';
     final orgId = _resolveOrgId(payload: payload, userId: userId);
     final idempotencyKey = (request.headers['idempotency-key'] ?? '').trim();
 
@@ -259,12 +267,20 @@ class MarketplaceHandlers {
       );
     }
 
-    if (offerId.isEmpty || seatCount == null || seatCount < 1) {
+    if (offerId.isEmpty) {
       return _error(
         request,
         400,
         errorCode: 'VALIDATION_ERROR',
-        message: 'offerId and seatCount>=1 are required',
+        message: 'offer_id is required',
+      );
+    }
+    if (quantity < 1) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'quantity must be >= 1',
       );
     }
 
@@ -277,9 +293,10 @@ class MarketplaceHandlers {
       var purchase = await _offerRepository.createOrGetPurchase(
         userId: userId,
         offerId: offerId,
-        seatCount: seatCount,
+        seatCount: quantity,
         idempotencyKey: idempotencyKey,
         provider: _paymentService?.providerName ?? 'manual',
+        clientReference: clientReference.isEmpty ? null : clientReference,
       );
       final paymentService = _paymentService;
       if (paymentService != null) {
@@ -304,13 +321,18 @@ class MarketplaceHandlers {
         userId: userId,
         purchaseId: purchase.id,
         offerId: offerId,
-        seats: seatCount,
+        seats: quantity,
       );
+      if (!_clientReferenceByPurchaseId.containsKey(purchase.id) &&
+          clientReference.isNotEmpty) {
+        _clientReferenceByPurchaseId[purchase.id] = clientReference;
+      }
       _recordPurchaseAccess(
         purchaseId: purchase.id,
         ownerUserId: purchase.userId,
         orgId: orgId,
         idempotencyKey: idempotencyKey,
+        clientReference: _resolvedClientReference(purchase),
       );
       final version = _currentVersion(purchase.id);
       final purchasePayload = await _buildPurchasePayload(
@@ -319,9 +341,19 @@ class MarketplaceHandlers {
         orgId: orgId,
         version: version,
       );
+      final createPurchaseObject = _createPurchaseObjectPayload(
+        purchasePayload,
+        clientReference: _resolvedClientReference(purchase),
+      );
       return _ok(
         request,
-        data: <String, Object?>{...purchasePayload, 'invoice': invoice},
+        data: <String, Object?>{
+          ...purchasePayload,
+          ...createPurchaseObject,
+          'purchase': createPurchaseObject,
+          'invoice': invoice,
+          'idempotency_key': idempotencyKey,
+        },
         headers: <String, String>{
           'x-idempotency-key': idempotencyKey,
           'x-marketplace-purchase-id': purchase.id,
@@ -452,6 +484,7 @@ class MarketplaceHandlers {
       ownerUserId: purchase.userId,
       orgId: resolvedOrgId ?? purchase.userId,
       idempotencyKey: idempotencyKey,
+      clientReference: _resolvedClientReference(purchase),
     );
     final payload = await _buildPurchasePayload(
       purchase: purchase,
@@ -1377,10 +1410,15 @@ class MarketplaceHandlers {
     required String ownerUserId,
     required String orgId,
     required String idempotencyKey,
+    String? clientReference,
   }) {
     _ownerUserIdByPurchaseId[purchaseId] = ownerUserId;
     _orgIdByPurchaseId[purchaseId] = orgId;
     _purchaseIdByOrgAndIdempotency['$orgId::$idempotencyKey'] = purchaseId;
+    final normalizedClientReference = (clientReference ?? '').trim();
+    if (normalizedClientReference.isNotEmpty) {
+      _clientReferenceByPurchaseId[purchaseId] = normalizedClientReference;
+    }
     _versionByPurchaseId.putIfAbsent(purchaseId, () => 1);
   }
 
@@ -1813,6 +1851,34 @@ class MarketplaceHandlers {
       'currency': purchase.currency,
       'offerTitle': purchase.offerTitle,
     };
+  }
+
+  Map<String, Object?> _createPurchaseObjectPayload(
+    Map<String, Object?> purchasePayload, {
+    required String clientReference,
+  }) {
+    final quantity = _toInt(purchasePayload['seatCount']) ?? 1;
+    final amountMinor = _toInt(purchasePayload['totalAmount']) ?? 0;
+    return <String, Object?>{
+      'id': purchasePayload['purchaseId'],
+      'purchase_id': purchasePayload['purchaseId'],
+      'offer_id': purchasePayload['offerId'],
+      'quantity': quantity,
+      'status': 'pending_payment',
+      'amount_minor': amountMinor,
+      'currency': purchasePayload['currency'],
+      if (clientReference.isNotEmpty) 'client_reference': clientReference,
+      'created_at': purchasePayload['createdAt'],
+      'updated_at': purchasePayload['createdAt'],
+    };
+  }
+
+  String _resolvedClientReference(MarketplacePurchaseRecord purchase) {
+    final fromRecord = (purchase.clientReference ?? '').trim();
+    if (fromRecord.isNotEmpty) {
+      return fromRecord;
+    }
+    return (_clientReferenceByPurchaseId[purchase.id] ?? '').trim();
   }
 
   Map<String, Object?> _timelineEventPayload({

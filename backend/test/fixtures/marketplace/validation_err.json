@@ -1,6 +1,6 @@
 {
   "ok": false,
-  "trace_id": "fixture-trace-error",
+  "trace_id": "fixture-trace-validation",
   "error_code": "VALIDATION_ERROR",
-  "message": "cursor must be a valid pagination cursor"
+  "message": "quantity must be >= 1"
 }

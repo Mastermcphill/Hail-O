@@ -142,7 +142,7 @@ void main() {
 
       expect(response.statusCode, 400);
       final payload = await _decodeBody(response);
-      expect(payload, _loadFixture('validation_err.json'));
+      expect(payload, _loadFixture('cursor_validation_err.json'));
     });
   });
 }

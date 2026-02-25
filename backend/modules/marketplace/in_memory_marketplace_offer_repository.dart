@@ -85,6 +85,7 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? clientReference,
   }) async {
     final key = '$userId::$idempotencyKey';
     final existingPurchaseId = _purchaseIdByUserAndIdempotency[key];
@@ -115,6 +116,9 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       idempotencyKey: idempotencyKey,
       createdAt: now,
       updatedAt: now,
+      clientReference: (clientReference ?? '').trim().isEmpty
+          ? null
+          : clientReference!.trim(),
     );
     _purchasesById[purchase.id] = purchase;
     _purchaseIdByUserAndIdempotency[key] = purchase.id;
@@ -194,6 +198,7 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       idempotencyKey: existing.idempotencyKey,
       createdAt: existing.createdAt,
       updatedAt: _nowUtc(),
+      clientReference: existing.clientReference,
     );
     _purchasesById[purchaseId] = updated;
     final delta = seatCount - existing.seatCount;
@@ -254,6 +259,7 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       idempotencyKey: existing.idempotencyKey,
       createdAt: existing.createdAt,
       updatedAt: now,
+      clientReference: existing.clientReference,
     );
     _purchasesById[purchaseId] = updated;
     _appendTimeline(
@@ -292,6 +298,7 @@ class InMemoryMarketplaceOfferRepository implements MarketplaceOfferRepository {
       idempotencyKey: existing.idempotencyKey,
       createdAt: existing.createdAt,
       updatedAt: _nowUtc(),
+      clientReference: existing.clientReference,
     );
     _purchasesById[purchaseId] = updated;
     _appendTimeline(

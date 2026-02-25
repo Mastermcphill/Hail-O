@@ -1,0 +1,12 @@
+{
+  "id": "<purchase_id>",
+  "purchase_id": "<purchase_id>",
+  "offer_id": "offer_sedan_01",
+  "quantity": 2,
+  "status": "pending_payment",
+  "amount_minor": 8400,
+  "currency": "NGN",
+  "client_reference": "mobile-checkout-001",
+  "created_at": "<timestamp>",
+  "updated_at": "<timestamp>"
+}

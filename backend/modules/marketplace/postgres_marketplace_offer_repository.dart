@@ -74,6 +74,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     required int seatCount,
     required String idempotencyKey,
     required String provider,
+    String? clientReference,
   }) async {
     return _postgresProvider.withTxn((txn) async {
       final offer = await _findOfferById(txn, offerId);
@@ -98,9 +99,12 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           status,
           currency,
           price_minor,
+          amount_minor,
           seats_total,
+          quantity,
           provider,
           idempotency_key,
+          client_reference,
           created_at,
           updated_at
         )
@@ -111,9 +115,12 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           @status,
           @currency,
           @price_minor,
+          @amount_minor,
           @seats_total,
+          @quantity,
           @provider,
           @idempotency_key,
+          @client_reference,
           @created_at,
           @updated_at
         )
@@ -128,6 +135,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           price_minor,
           seats_total,
           idempotency_key,
+          client_reference,
           created_at,
           updated_at
         ''',
@@ -138,9 +146,14 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           'status': initialStatus,
           'currency': offer.currency,
           'price_minor': offer.priceMinor * seatCount,
+          'amount_minor': offer.priceMinor * seatCount,
           'seats_total': seatCount,
+          'quantity': seatCount,
           'provider': normalizedProvider,
           'idempotency_key': idempotencyKey,
+          'client_reference': (clientReference ?? '').trim().isEmpty
+              ? null
+              : clientReference!.trim(),
           'created_at': now,
           'updated_at': now,
         },
@@ -217,6 +230,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           p.price_minor,
           p.seats_total,
           p.idempotency_key,
+          p.client_reference,
           p.created_at,
           p.updated_at,
           o.title
@@ -236,7 +250,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     if (rows.isEmpty) {
       return null;
     }
-    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[10]));
+    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[11]));
   }
 
   @override
@@ -269,7 +283,9 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
         UPDATE marketplace_purchases
         SET
           seats_total = @seats_total,
+          quantity = @quantity,
           price_minor = @price_minor,
+          amount_minor = @amount_minor,
           status = @status,
           updated_at = @updated_at
         WHERE id = CAST(@purchase_id AS UUID)
@@ -283,6 +299,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           price_minor,
           seats_total,
           idempotency_key,
+          client_reference,
           created_at,
           updated_at
         ''',
@@ -290,7 +307,9 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           'purchase_id': purchaseId,
           'user_id': userId,
           'seats_total': seatCount,
+          'quantity': seatCount,
           'price_minor': offer.priceMinor * seatCount,
+          'amount_minor': offer.priceMinor * seatCount,
           'status': 'SEATS_UPDATED',
           'updated_at': now,
         },
@@ -411,6 +430,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           price_minor,
           seats_total,
           idempotency_key,
+          client_reference,
           created_at,
           updated_at
         ''',
@@ -470,6 +490,8 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           status = @status,
           currency = @currency,
           price_minor = @price_minor,
+          amount_minor = @amount_minor,
+          quantity = @quantity,
           updated_at = @updated_at
         WHERE id = CAST(@purchase_id AS UUID)
           AND user_id = @user_id
@@ -482,6 +504,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           price_minor,
           seats_total,
           idempotency_key,
+          client_reference,
           created_at,
           updated_at
         ''',
@@ -490,6 +513,8 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
           'status': 'PLAN_CHANGED',
           'currency': newOffer.currency,
           'price_minor': newOffer.priceMinor * current.seatCount,
+          'amount_minor': newOffer.priceMinor * current.seatCount,
+          'quantity': current.seatCount,
           'updated_at': now,
           'purchase_id': purchaseId,
           'user_id': userId,
@@ -599,6 +624,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
         p.price_minor,
         p.seats_total,
         p.idempotency_key,
+        p.client_reference,
         p.created_at,
         p.updated_at,
         o.title
@@ -617,7 +643,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     if (rows.isEmpty) {
       return null;
     }
-    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[10]));
+    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[11]));
   }
 
   Future<MarketplacePurchaseRecord?> _findPurchaseByIdInternal({
@@ -636,6 +662,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
         p.price_minor,
         p.seats_total,
         p.idempotency_key,
+        p.client_reference,
         p.created_at,
         p.updated_at,
         o.title
@@ -654,7 +681,7 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
     if (rows.isEmpty) {
       return null;
     }
-    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[10]));
+    return _rowToPurchase(rows.first, offerTitle: _readString(rows.first[11]));
   }
 
   Future<void> _appendTimeline(
@@ -748,8 +775,9 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
       totalAmountMinor: (row[5] as num?)?.toInt() ?? 0,
       seatCount: (row[6] as num?)?.toInt() ?? 0,
       idempotencyKey: _readString(row[7]),
-      createdAt: _readDateTime(row[8]),
-      updatedAt: _readDateTime(row[9]),
+      clientReference: _readNullableString(row[8]),
+      createdAt: _readDateTime(row[9]),
+      updatedAt: _readDateTime(row[10]),
     );
   }
 
@@ -818,6 +846,14 @@ class PostgresMarketplaceOfferRepository implements MarketplaceOfferRepository {
       return value.trim();
     }
     return '';
+  }
+
+  String? _readNullableString(Object? value) {
+    final normalized = _readString(value);
+    if (normalized.isEmpty) {
+      return null;
+    }
+    return normalized;
   }
 
   DateTime _readDateTime(Object? value) {
