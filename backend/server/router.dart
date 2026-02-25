@@ -59,6 +59,8 @@ Handler buildApiRouter({
   OperationalRecordStore? operationalRecordStore,
 }) {
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
+  final runtimeEnvironment = (env['ENV'] ?? env['FLIPTRYBE_ENV'] ?? 'unknown')
+      .trim();
 
   final authService = db == null
       ? null
@@ -176,6 +178,7 @@ Handler buildApiRouter({
         request,
         dbMode,
         dbHealthCheck,
+        runtimeEnvironment,
         buildInfo,
         timeout: const Duration(milliseconds: 250),
       ),
@@ -186,6 +189,7 @@ Handler buildApiRouter({
         request,
         dbMode,
         dbHealthCheck,
+        runtimeEnvironment,
         buildInfo,
         timeout: const Duration(seconds: 2),
       ),
@@ -196,6 +200,7 @@ Handler buildApiRouter({
         request,
         dbMode,
         dbHealthCheck,
+        runtimeEnvironment,
         buildInfo,
         timeout: const Duration(seconds: 2),
       ),
@@ -268,6 +273,7 @@ Future<Response> _healthHandler(
   Request request,
   String dbMode,
   Future<bool> Function() dbHealthCheck,
+  String environment,
   Map<String, Object?> buildInfo, {
   required Duration timeout,
 }) async {
@@ -277,13 +283,33 @@ Future<Response> _healthHandler(
   } catch (_) {
     dbOk = false;
   }
-  return jsonResponse(dbOk ? 200 : 503, <String, Object?>{
+  final normalizedEnvironment = environment.trim();
+  final verboseRequested = _isTruthyQuery(
+    request.url.queryParameters['verbose'],
+  );
+  final isProduction =
+      normalizedEnvironment.toLowerCase() == 'production' ||
+      normalizedEnvironment.toLowerCase() == 'prod';
+  final allowVerbose = verboseRequested && !isProduction;
+  final commit = (buildInfo['commit'] ?? '').toString().trim();
+  final runtime = (buildInfo['runtime'] ?? '').toString().trim();
+  final slimBuild = <String, Object?>{
+    'commit': commit.isEmpty ? 'unknown' : commit,
+    if (runtime.isNotEmpty) 'runtime': runtime,
+  };
+  final payload = <String, Object?>{
     'ok': dbOk,
     'service': 'hail-o-backend',
+    'env': normalizedEnvironment.isEmpty ? 'unknown' : normalizedEnvironment,
     'db_mode': dbMode,
     'db_ok': dbOk,
-    'build': buildInfo,
-  });
+    'build': allowVerbose ? buildInfo : slimBuild,
+  };
+  final traceId = request.requestContext.traceId.trim();
+  if (traceId.isNotEmpty) {
+    payload['trace_id'] = traceId;
+  }
+  return jsonResponse(dbOk ? 200 : 503, payload);
 }
 
 Response _versionHandler(Map<String, Object?> buildInfo) {
@@ -296,4 +322,9 @@ Response _versionHandler(Map<String, Object?> buildInfo) {
     'commit': commit,
     'build': buildInfo,
   });
+}
+
+bool _isTruthyQuery(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return normalized == '1' || normalized == 'true' || normalized == 'yes';
 }

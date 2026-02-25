@@ -63,12 +63,104 @@ void main() {
     expect(body['ok'], false);
     expect(body['db_ok'], false);
   });
+
+  test('/health defaults to slim payload even in non-production', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: <String, Object?>{
+        'commit': 'abc1234',
+        'runtime': 'dart_vm',
+        'debug_blob': 'x' * 8000,
+      },
+      environmentMap: const <String, String>{'ENV': 'staging'},
+    );
+
+    final response = await _request(handler, '/health');
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], true);
+    expect(body['env'], 'staging');
+    final build = Map<String, Object?>.from(body['build'] as Map);
+    expect(build['commit'], 'abc1234');
+    expect(build['runtime'], 'dart_vm');
+    expect(build.containsKey('debug_blob'), isFalse);
+  });
+
+  test('/health verbose returns full payload outside production', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: <String, Object?>{
+        'commit': 'abc1234',
+        'runtime': 'dart_vm',
+        'debug_blob': 'x' * 8000,
+      },
+      environmentMap: const <String, String>{'ENV': 'staging'},
+    );
+
+    final response = await _request(handler, '/health?verbose=1');
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['env'], 'staging');
+    final build = Map<String, Object?>.from(body['build'] as Map);
+    expect(build['commit'], 'abc1234');
+    expect(build['runtime'], 'dart_vm');
+    expect(build.containsKey('debug_blob'), isTrue);
+  });
+
+  test('/health verbose is ignored in production and remains slim', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: <String, Object?>{
+        'commit': 'abc1234',
+        'runtime': 'dart_vm',
+        'debug_blob': 'x' * 8000,
+      },
+      environmentMap: const <String, String>{'ENV': 'production'},
+    );
+
+    final response = await _request(handler, '/health?verbose=true');
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['env'], 'production');
+    final build = Map<String, Object?>.from(body['build'] as Map);
+    expect(build['commit'], 'abc1234');
+    expect(build['runtime'], 'dart_vm');
+    expect(build.containsKey('debug_blob'), isFalse);
+  });
+
+  test('/health supports HEAD requests', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{'commit': 'abc1234'},
+      environmentMap: const <String, String>{'ENV': 'production'},
+    );
+
+    final response = await _request(handler, '/health', method: 'HEAD');
+    expect(response.statusCode, 200);
+  });
 }
 
 Handler _buildHandler({
   required Database db,
   required Future<bool> Function() dbHealthCheck,
   required Map<String, Object?> buildInfo,
+  Map<String, String> environmentMap = const <String, String>{},
 }) {
   return AppServer(
     db: db,
@@ -81,13 +173,18 @@ Handler _buildHandler({
     authCredentialsStore: SqliteAuthCredentialsStore(db),
     rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
     operationalRecordStore: const SqliteOperationalRecordStore(),
+    environmentMap: environmentMap,
   ).buildHandler();
 }
 
-Future<Response> _request(Handler handler, String path) async {
+Future<Response> _request(
+  Handler handler,
+  String path, {
+  String method = 'GET',
+}) async {
   return handler(
     shelf.Request(
-      'GET',
+      method,
       Uri.parse('http://localhost$path'),
       headers: const <String, String>{'accept': 'application/json'},
     ),
