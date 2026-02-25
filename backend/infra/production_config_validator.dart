@@ -1,3 +1,5 @@
+import 'dart:io';
+
 const String _insecureJwtPlaceholder = 'dev-only-insecure-secret-change-me';
 
 void validateProductionConfig({
@@ -5,12 +7,13 @@ void validateProductionConfig({
   required bool usePostgres,
   required Map<String, String> envMap,
 }) {
-  if (!_isStrictEnvironment(environment)) {
+  final normalizedEnv = environment.trim().toLowerCase();
+  if (!_isStrictEnvironment(normalizedEnv)) {
     return;
   }
 
   final missing = <String>[];
-  final jwtSecret = (envMap['JWT_SECRET'] ?? '').trim();
+  final jwtSecret = _getOptionalTrimmed(envMap, 'JWT_SECRET') ?? '';
   if (jwtSecret.isEmpty || jwtSecret == _insecureJwtPlaceholder) {
     missing.add('JWT_SECRET');
   }
@@ -19,14 +22,25 @@ void validateProductionConfig({
   if (allowedOrigins.isEmpty || allowedOrigins.contains('*')) {
     missing.add('ALLOWED_ORIGINS');
   }
-  final sentryDsn = (envMap['SENTRY_DSN'] ?? '').trim();
-  if (sentryDsn.isEmpty) {
+  final sentryEnabled = _parseBool(envMap['SENTRY_ENABLED']);
+  final sentryDsn = _getOptionalTrimmed(envMap, 'SENTRY_DSN');
+  final isProductionEnv =
+      normalizedEnv == 'production' || normalizedEnv == 'prod';
+  if (isProductionEnv) {
+    if (sentryEnabled && sentryDsn == null) {
+      missing.add('SENTRY_DSN');
+    } else if (!sentryEnabled && sentryDsn == null) {
+      stderr.writeln(
+        'WARN: SENTRY_DSN not set; Sentry is disabled. Set SENTRY_ENABLED=true and SENTRY_DSN to enable error reporting.',
+      );
+    }
+  } else if (sentryDsn == null) {
     missing.add('SENTRY_DSN');
   }
 
   if (usePostgres) {
-    final databaseUrl = (envMap['DATABASE_URL'] ?? '').trim();
-    if (databaseUrl.isEmpty) {
+    final databaseUrl = _getOptionalTrimmed(envMap, 'DATABASE_URL');
+    if (databaseUrl == null) {
       missing.add('DATABASE_URL');
     }
   }
@@ -35,17 +49,13 @@ void validateProductionConfig({
     return;
   }
 
-  final normalizedEnv = environment.trim().toLowerCase();
   throw StateError(
     'Missing required config for $normalizedEnv: ${missing.join(', ')}',
   );
 }
 
 bool _isStrictEnvironment(String value) {
-  final normalized = value.trim().toLowerCase();
-  return normalized == 'production' ||
-      normalized == 'prod' ||
-      normalized == 'staging';
+  return value == 'production' || value == 'prod' || value == 'staging';
 }
 
 Set<String> _parseAllowedOrigins(String? value) {
@@ -57,4 +67,21 @@ Set<String> _parseAllowedOrigins(String? value) {
       .map((item) => item.trim())
       .where((item) => item.isNotEmpty)
       .toSet();
+}
+
+String? _getOptionalTrimmed(Map<String, String> envMap, String key) {
+  final value = envMap[key]?.trim();
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+  return value;
+}
+
+bool _parseBool(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return normalized == '1' ||
+      normalized == 'true' ||
+      normalized == 'yes' ||
+      normalized == 'y' ||
+      normalized == 'on';
 }

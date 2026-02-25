@@ -40,7 +40,7 @@ void main() {
     );
   });
 
-  test('requires sentry dsn in strict env', () {
+  test('requires sentry dsn in staging strict env', () {
     expect(
       () => validateProductionConfig(
         environment: 'staging',
@@ -52,6 +52,59 @@ void main() {
         },
       ),
       throwsStateError,
+    );
+  });
+
+  test('requires sentry dsn in production when explicitly enabled', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_ENABLED': 'true',
+          'SENTRY_DSN': '',
+        },
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.toString(),
+          'message',
+          contains('SENTRY_DSN'),
+        ),
+      ),
+    );
+  });
+
+  test('does not require sentry dsn in production when sentry is disabled', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_ENABLED': 'false',
+          'SENTRY_DSN': '',
+        },
+      ),
+      returnsNormally,
+    );
+  });
+
+  test('does not require sentry dsn in production when flag is unset', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_DSN': '',
+        },
+      ),
+      returnsNormally,
     );
   });
 
