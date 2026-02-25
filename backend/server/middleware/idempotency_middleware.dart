@@ -9,6 +9,7 @@ Middleware idempotencyMiddleware({
   Set<String> exemptWritePaths = const <String>{
     'auth/login',
     'webhooks/payments',
+    'marketplace/purchases/restore',
   },
 }) {
   return (Handler innerHandler) {

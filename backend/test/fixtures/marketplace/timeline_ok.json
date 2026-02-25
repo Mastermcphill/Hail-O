@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "trace_id": "fixture-trace-timeline",
+  "data": [
+    {
+      "purchase_id": "<purchase_id>",
+      "type": "SEAT_ADDED",
+      "title": "Seat added",
+      "description": "Seat count updated to 3 (delta 1).",
+      "timestamp": "<timestamp>",
+      "status": "SUCCESS",
+      "eventData": {
+        "previous_seat_count": 2,
+        "seat_count": 3,
+        "delta": 1
+      }
+    },
+    {
+      "purchase_id": "<purchase_id>",
+      "type": "PAYMENT_SUCCEEDED",
+      "title": "Payment succeeded",
+      "description": "Payment completed successfully.",
+      "timestamp": "<timestamp>",
+      "status": "SUCCESS",
+      "eventData": {
+        "provider": "manual",
+        "source": "create_purchase_manual"
+      }
+    }
+  ],
+  "next_cursor": "Mg"
+}

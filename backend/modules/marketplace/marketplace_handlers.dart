@@ -40,8 +40,17 @@ class MarketplaceHandlers {
   final Map<String, int> _versionByPurchaseId = <String, int>{};
 
   Future<Response> listOffers(Request request) async {
+    final pagination = _parsePaginationOptions(
+      request: request,
+      defaultLimit: 20,
+      maxLimit: 100,
+    );
+    if (pagination.errorResponse != null) {
+      return pagination.errorResponse!;
+    }
+
     final offers = await _offerRepository.listActiveOffers();
-    final data = offers
+    final allOffers = offers
         .map(
           (offer) => <String, Object?>{
             'id': offer.id,
@@ -54,13 +63,135 @@ class MarketplaceHandlers {
           },
         )
         .toList(growable: false);
-    final etag = _etagForPayload(data);
+    final start = pagination.offset >= allOffers.length
+        ? allOffers.length
+        : pagination.offset;
+    final endExclusive = start + pagination.limit > allOffers.length
+        ? allOffers.length
+        : start + pagination.limit;
+    final data = allOffers.sublist(start, endExclusive);
+    final nextCursor = endExclusive < allOffers.length
+        ? _encodeCursor(endExclusive)
+        : null;
+    final etag = _etagForPayload(<String, Object?>{
+      'offset': start,
+      'limit': pagination.limit,
+      'next_cursor': nextCursor,
+      'data': data,
+    });
     final ifNoneMatch = request.headers['if-none-match'];
     if (ifNoneMatch != null &&
         _matchesAnyEtag(ifNoneMatch: ifNoneMatch, etag: etag)) {
       return Response.notModified(headers: <String, String>{'etag': etag});
     }
-    return _ok(request, data: data, headers: <String, String>{'etag': etag});
+    return _ok(
+      request,
+      data: data,
+      headers: <String, String>{'etag': etag},
+      extra: nextCursor == null
+          ? null
+          : <String, Object?>{'next_cursor': nextCursor},
+    );
+  }
+
+  Future<Response> listTimeline(Request request) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+    final pagination = _parsePaginationOptions(
+      request: request,
+      defaultLimit: 20,
+      maxLimit: 100,
+    );
+    if (pagination.errorResponse != null) {
+      return pagination.errorResponse!;
+    }
+    final activeOrgIds = <String>{};
+    final orgRepository = _orgRepository;
+    if (orgRepository != null) {
+      activeOrgIds.addAll(await orgRepository.listActiveOrgIdsForUser(userId));
+    }
+
+    final timelineEvents = <Map<String, Object?>>[];
+    final purchaseIds = _ownerUserIdByPurchaseId.keys.toList(growable: false)
+      ..sort();
+    for (final purchaseId in purchaseIds) {
+      final ownerUserId = _ownerUserIdByPurchaseId[purchaseId];
+      if (ownerUserId == null || ownerUserId.trim().isEmpty) {
+        continue;
+      }
+      final orgId = (_orgIdByPurchaseId[purchaseId] ?? ownerUserId).trim();
+      final isOwner = ownerUserId == userId;
+      final inActiveOrg = orgId == userId || activeOrgIds.contains(orgId);
+      if (!isOwner && !inActiveOrg) {
+        continue;
+      }
+      final events = await _offerRepository.listTimelineEvents(
+        userId: ownerUserId,
+        purchaseId: purchaseId,
+        limit: 100,
+      );
+      for (final event in events) {
+        timelineEvents.add(
+          _timelineEventPayload(event: event, purchaseId: purchaseId),
+        );
+      }
+    }
+
+    timelineEvents.sort((left, right) {
+      final leftTimestamp = _timestampSortValue(left['timestamp']);
+      final rightTimestamp = _timestampSortValue(right['timestamp']);
+      final timestampCompare = rightTimestamp.compareTo(leftTimestamp);
+      if (timestampCompare != 0) {
+        return timestampCompare;
+      }
+      final purchaseCompare = (left['purchase_id'] as String).compareTo(
+        right['purchase_id'] as String,
+      );
+      if (purchaseCompare != 0) {
+        return purchaseCompare;
+      }
+      return (left['type'] as String).compareTo(right['type'] as String);
+    });
+
+    final start = pagination.offset >= timelineEvents.length
+        ? timelineEvents.length
+        : pagination.offset;
+    final endExclusive = start + pagination.limit > timelineEvents.length
+        ? timelineEvents.length
+        : start + pagination.limit;
+    final page = timelineEvents
+        .sublist(start, endExclusive)
+        .map((event) => Map<String, Object?>.from(event))
+        .toList(growable: false);
+    final nextCursor = endExclusive < timelineEvents.length
+        ? _encodeCursor(endExclusive)
+        : null;
+    final etag = _etagForPayload(<String, Object?>{
+      'offset': start,
+      'limit': pagination.limit,
+      'next_cursor': nextCursor,
+      'events': page,
+    });
+    final ifNoneMatch = request.headers['if-none-match'];
+    if (ifNoneMatch != null &&
+        _matchesAnyEtag(ifNoneMatch: ifNoneMatch, etag: etag)) {
+      return Response.notModified(headers: <String, String>{'etag': etag});
+    }
+    return _ok(
+      request,
+      data: page,
+      headers: <String, String>{'etag': etag},
+      extra: nextCursor == null
+          ? null
+          : <String, Object?>{'next_cursor': nextCursor},
+    );
   }
 
   Future<Response> getOfferPaywall(Request request, String offerId) async {
@@ -224,16 +355,6 @@ class MarketplaceHandlers {
   }
 
   Future<Response> restorePurchase(Request request) async {
-    final userId = _requireUserId(request);
-    if (userId == null) {
-      return _error(
-        request,
-        401,
-        errorCode: 'UNAUTHORIZED',
-        message: 'Bearer token required',
-      );
-    }
-
     final idempotencyKey = (request.url.queryParameters['idempotencyKey'] ?? '')
         .trim();
     if (idempotencyKey.isEmpty) {
@@ -241,7 +362,44 @@ class MarketplaceHandlers {
         request,
         400,
         errorCode: 'VALIDATION_ERROR',
-        message: 'idempotencyKey query parameter is required',
+        message: 'idempotencyKey is required',
+      );
+    }
+    return _restorePurchaseByIdempotencyKey(request, idempotencyKey);
+  }
+
+  Future<Response> restorePurchasePost(Request request) async {
+    final body = await _readBodyOrValidationError(request);
+    if (body.response != null) {
+      return body.response!;
+    }
+    final payload = body.payload!;
+    final idempotencyKey =
+        (payload['idempotencyKey'] as String?)?.trim() ??
+        (payload['idempotency_key'] as String?)?.trim() ??
+        (request.url.queryParameters['idempotencyKey'] ?? '').trim();
+    if (idempotencyKey.isEmpty) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: 'idempotencyKey is required',
+      );
+    }
+    return _restorePurchaseByIdempotencyKey(request, idempotencyKey);
+  }
+
+  Future<Response> _restorePurchaseByIdempotencyKey(
+    Request request,
+    String idempotencyKey,
+  ) async {
+    final userId = _requireUserId(request);
+    if (userId == null) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
       );
     }
 
@@ -759,11 +917,18 @@ class MarketplaceHandlers {
         )) {
       return forbiddenOrgRole(request);
     }
-    final limit = _toInt(request.url.queryParameters['limit']) ?? 100;
+    final pagination = _parsePaginationOptions(
+      request: request,
+      defaultLimit: 20,
+      maxLimit: 100,
+    );
+    if (pagination.errorResponse != null) {
+      return pagination.errorResponse!;
+    }
     var events = await _offerRepository.listTimelineEvents(
       userId: purchaseAccess.ownerUserId,
       purchaseId: purchaseId,
-      limit: limit,
+      limit: 100,
     );
     if (events.isEmpty) {
       final purchase = await _offerRepository.findPurchaseById(
@@ -789,22 +954,28 @@ class MarketplaceHandlers {
           .where((event) => event.createdAt.toUtc().isAfter(sinceUtc!))
           .toList(growable: false);
     }
-
-    final timelineEvents = events
-        .map(
-          (event) => <String, Object?>{
-            'type': _timelineEventTypeLabel(event.eventType),
-            'title': _timelineEventTitle(event.eventType),
-            'description': _timelineEventDescription(
-              eventType: event.eventType,
-              eventData: event.eventData,
-            ),
-            'timestamp': event.createdAt.toUtc().toIso8601String(),
-            'status': _timelineStatus(event.eventType),
-            'eventData': event.eventData,
-          },
-        )
+    events.sort((left, right) {
+      final timestampCompare = left.createdAt.toUtc().compareTo(
+        right.createdAt.toUtc(),
+      );
+      if (timestampCompare != 0) {
+        return timestampCompare;
+      }
+      return left.eventType.compareTo(right.eventType);
+    });
+    final start = pagination.offset >= events.length
+        ? events.length
+        : pagination.offset;
+    final endExclusive = start + pagination.limit > events.length
+        ? events.length
+        : start + pagination.limit;
+    final pagedEvents = events.sublist(start, endExclusive);
+    final timelineEvents = pagedEvents
+        .map((event) => _timelineEventPayload(event: event))
         .toList(growable: false);
+    final nextCursor = endExclusive < events.length
+        ? _encodeCursor(endExclusive)
+        : null;
     final latestEventAt = events.isEmpty
         ? ''
         : events
@@ -821,6 +992,9 @@ class MarketplaceHandlers {
       latestEventAt,
       timelineEvents.length,
       sinceRaw,
+      start,
+      pagination.limit,
+      nextCursor,
     ]);
     final ifNoneMatch = request.headers['if-none-match'];
     if (ifNoneMatch != null &&
@@ -840,6 +1014,9 @@ class MarketplaceHandlers {
         'etag': etag,
         'x-marketplace-purchase-id': purchaseId,
       },
+      extra: nextCursor == null
+          ? null
+          : <String, Object?>{'next_cursor': nextCursor},
     );
   }
 
@@ -1431,12 +1608,15 @@ class MarketplaceHandlers {
     required Object? data,
     int statusCode = 200,
     Map<String, String>? headers,
+    Map<String, Object?>? extra,
   }) {
-    return jsonResponse(statusCode, <String, Object?>{
+    final payload = <String, Object?>{
       'ok': true,
       'trace_id': _resolveTraceId(request),
       'data': data,
-    }, headers: headers);
+      ...?extra,
+    };
+    return jsonResponse(statusCode, payload, headers: headers);
   }
 
   String _etagForPayload(Object? payload) {
@@ -1495,6 +1675,111 @@ class MarketplaceHandlers {
     return null;
   }
 
+  _PaginationOptions _parsePaginationOptions({
+    required Request request,
+    required int defaultLimit,
+    required int maxLimit,
+  }) {
+    final limitRaw = (request.url.queryParameters['limit'] ?? '').trim();
+    var limit = defaultLimit;
+    if (limitRaw.isNotEmpty) {
+      final parsedLimit = int.tryParse(limitRaw);
+      if (parsedLimit == null || parsedLimit < 1) {
+        return _PaginationOptions(
+          limit: defaultLimit,
+          offset: 0,
+          errorResponse: _error(
+            request,
+            400,
+            errorCode: 'VALIDATION_ERROR',
+            message: 'limit must be a positive integer',
+          ),
+        );
+      }
+      limit = parsedLimit > maxLimit ? maxLimit : parsedLimit;
+    }
+
+    final cursorRaw = (request.url.queryParameters['cursor'] ?? '').trim();
+    final offsetRaw = (request.url.queryParameters['offset'] ?? '').trim();
+    var offset = 0;
+    if (cursorRaw.isNotEmpty) {
+      final decodedOffset = _decodeCursorOffset(cursorRaw);
+      if (decodedOffset == null) {
+        return _PaginationOptions(
+          limit: limit,
+          offset: 0,
+          errorResponse: _error(
+            request,
+            400,
+            errorCode: 'VALIDATION_ERROR',
+            message: 'cursor must be a valid pagination cursor',
+          ),
+        );
+      }
+      offset = decodedOffset;
+    } else if (offsetRaw.isNotEmpty) {
+      final parsedOffset = int.tryParse(offsetRaw);
+      if (parsedOffset == null || parsedOffset < 0) {
+        return _PaginationOptions(
+          limit: limit,
+          offset: 0,
+          errorResponse: _error(
+            request,
+            400,
+            errorCode: 'VALIDATION_ERROR',
+            message: 'offset must be a non-negative integer',
+          ),
+        );
+      }
+      offset = parsedOffset;
+    }
+
+    return _PaginationOptions(
+      limit: limit,
+      offset: offset,
+      errorResponse: null,
+    );
+  }
+
+  int? _decodeCursorOffset(String cursor) {
+    try {
+      final normalized = _normalizeCursorBase64(cursor);
+      final decoded = utf8.decode(base64Url.decode(normalized)).trim();
+      final offset = int.tryParse(decoded);
+      if (offset == null || offset < 0) {
+        return null;
+      }
+      return offset;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _encodeCursor(int offset) {
+    final encoded = base64UrlEncode(utf8.encode(offset.toString()));
+    return encoded.replaceAll('=', '');
+  }
+
+  String _normalizeCursorBase64(String rawCursor) {
+    final cursor = rawCursor.trim();
+    final remainder = cursor.length % 4;
+    if (remainder == 0) {
+      return cursor;
+    }
+    final padding = List<String>.filled(4 - remainder, '=').join();
+    return '$cursor$padding';
+  }
+
+  int _timestampSortValue(Object? rawTimestamp) {
+    if (rawTimestamp is String) {
+      final parsed = DateTime.tryParse(rawTimestamp)?.toUtc();
+      if (parsed != null) {
+        return parsed.microsecondsSinceEpoch;
+      }
+    }
+    return 0;
+  }
+
   String? _requireUserId(Request request) {
     final userId = request.requestContext.userId?.trim() ?? '';
     if (userId.isEmpty) {
@@ -1527,6 +1812,24 @@ class MarketplaceHandlers {
       'totalAmount': purchase.totalAmountMinor,
       'currency': purchase.currency,
       'offerTitle': purchase.offerTitle,
+    };
+  }
+
+  Map<String, Object?> _timelineEventPayload({
+    required MarketplaceTimelineEventRecord event,
+    String? purchaseId,
+  }) {
+    return <String, Object?>{
+      if (purchaseId != null) 'purchase_id': purchaseId,
+      'type': _timelineEventTypeLabel(event.eventType),
+      'title': _timelineEventTitle(event.eventType),
+      'description': _timelineEventDescription(
+        eventType: event.eventType,
+        eventData: event.eventData,
+      ),
+      'timestamp': event.createdAt.toUtc().toIso8601String(),
+      'status': _timelineStatus(event.eventType),
+      'eventData': event.eventData,
     };
   }
 
@@ -1594,6 +1897,10 @@ class MarketplaceHandlers {
         final oldOffer = (eventData['old_offer_id'] ?? '').toString();
         final newOffer = (eventData['new_offer_id'] ?? '').toString();
         return 'Plan changed from $oldOffer to $newOffer.';
+      case 'payment_succeeded':
+        return 'Payment completed successfully.';
+      case 'payment_failed':
+        return 'Payment failed.';
       default:
         return eventData.isEmpty
             ? 'No additional details.'
@@ -1607,6 +1914,18 @@ class _BodyParseResult {
 
   final Map<String, Object?>? payload;
   final Response? response;
+}
+
+class _PaginationOptions {
+  const _PaginationOptions({
+    required this.limit,
+    required this.offset,
+    required this.errorResponse,
+  });
+
+  final int limit;
+  final int offset;
+  final Response? errorResponse;
 }
 
 class _PurchaseAccess {

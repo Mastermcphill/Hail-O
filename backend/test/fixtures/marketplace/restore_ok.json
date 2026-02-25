@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "trace_id": "fixture-trace-restore",
+  "data": {
+    "purchaseId": "<purchase_id>",
+    "offerId": "offer_sedan_01",
+    "seatCount": 2,
+    "status": "ACTIVE",
+    "createdAt": "<timestamp>",
+    "totalAmount": 8400,
+    "currency": "NGN",
+    "offerTitle": "Budget Sedan",
+    "org_id": "fixture-user-restore-1",
+    "assignments": [
+      {
+        "seatIndex": 1,
+        "name": "fixture-user-restore-1",
+        "email": "fixture-user-restore-1"
+      }
+    ],
+    "version": 1
+  }
+}
