@@ -30,6 +30,7 @@ void main() {
     final invoicesDunningCommsSql =
         sqlByName['015_invoices_dunning_comms.sql'] ?? '';
     final riskSql = sqlByName['016_risk_engine.sql'] ?? '';
+    final paymentIntentsSql = sqlByName['017_payment_intents.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -155,7 +156,9 @@ void main() {
       reason: 'coupons table must exist',
     );
     expect(
-      referralCouponSql.contains('CREATE TABLE IF NOT EXISTS coupon_redemptions'),
+      referralCouponSql.contains(
+        'CREATE TABLE IF NOT EXISTS coupon_redemptions',
+      ),
       isTrue,
       reason: 'coupon redemptions table must exist',
     );
@@ -184,7 +187,9 @@ void main() {
       reason: 'billing invoices table must exist',
     );
     expect(
-      invoicesDunningCommsSql.contains('CREATE TABLE IF NOT EXISTS dunning_cases'),
+      invoicesDunningCommsSql.contains(
+        'CREATE TABLE IF NOT EXISTS dunning_cases',
+      ),
       isTrue,
       reason: 'dunning cases table must exist',
     );
@@ -196,7 +201,9 @@ void main() {
       reason: 'dunning attempts table must exist',
     );
     expect(
-      invoicesDunningCommsSql.contains('CREATE TABLE IF NOT EXISTS comms_outbox'),
+      invoicesDunningCommsSql.contains(
+        'CREATE TABLE IF NOT EXISTS comms_outbox',
+      ),
       isTrue,
       reason: 'comms outbox table must exist',
     );
@@ -220,6 +227,18 @@ void main() {
       riskSql.contains('CREATE TABLE IF NOT EXISTS risk_rules'),
       isTrue,
       reason: 'risk rules table must exist',
+    );
+    expect(
+      paymentIntentsSql.contains('CREATE TABLE IF NOT EXISTS payment_intents'),
+      isTrue,
+      reason: 'payment intents table must exist',
+    );
+    expect(
+      paymentIntentsSql.contains(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_intents_purchase_active_unique',
+      ),
+      isTrue,
+      reason: 'payment intents active uniqueness must exist',
     );
   });
 }

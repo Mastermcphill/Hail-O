@@ -8,6 +8,7 @@ import '../../infra/postgres_provider.dart';
 import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
+import 'payment_intent_repository.dart';
 import 'manual_payment_provider.dart';
 import 'paystack_payment_provider.dart';
 import 'payment_provider.dart';
@@ -33,11 +34,23 @@ class PaymentWebhookSignatureException implements Exception {
   const PaymentWebhookSignatureException();
 }
 
+class PaymentIntentPurchaseNotFoundException implements Exception {
+  const PaymentIntentPurchaseNotFoundException();
+}
+
+class PaymentIntentPurchaseStateException implements Exception {
+  const PaymentIntentPurchaseStateException({required this.currentStatus});
+
+  final String currentStatus;
+}
+
 class PaymentService {
   PaymentService({
     required PaymentProvider provider,
     PostgresProvider? postgresProvider,
     BillingLedgerRepository? billingLedgerRepository,
+    MarketplaceOfferRepository? offerRepository,
+    PaymentIntentRepository? paymentIntentRepository,
     MarketplaceEntitlementService? entitlementService,
     RequestMetrics? metrics,
     void Function(String line)? logSink,
@@ -47,6 +60,16 @@ class PaymentService {
        _postgresProvider = postgresProvider,
        _billingLedgerRepository =
            billingLedgerRepository ?? InMemoryBillingLedgerRepository(),
+       _offerRepository = offerRepository,
+       _paymentIntentRepository =
+           paymentIntentRepository ??
+           (postgresProvider == null
+               ? InMemoryPaymentIntentRepository(uuid: uuid, nowUtc: nowUtc)
+               : PostgresPaymentIntentRepository(
+                   postgresProvider,
+                   uuid: uuid,
+                   nowUtc: nowUtc,
+                 )),
        _entitlementService = entitlementService,
        _metrics = metrics,
        _logSink = logSink ?? print,
@@ -56,6 +79,8 @@ class PaymentService {
   factory PaymentService.fromEnvironment({
     required PostgresProvider? postgresProvider,
     BillingLedgerRepository? billingLedgerRepository,
+    MarketplaceOfferRepository? offerRepository,
+    PaymentIntentRepository? paymentIntentRepository,
     MarketplaceEntitlementService? entitlementService,
     String? configuredProvider,
     String? paystackSecretKey,
@@ -82,6 +107,8 @@ class PaymentService {
       provider: provider,
       postgresProvider: postgresProvider,
       billingLedgerRepository: billingLedgerRepository,
+      offerRepository: offerRepository,
+      paymentIntentRepository: paymentIntentRepository,
       entitlementService: entitlementService,
       metrics: metrics,
       logSink: logSink,
@@ -93,6 +120,8 @@ class PaymentService {
   final PaymentProvider _provider;
   final PostgresProvider? _postgresProvider;
   final BillingLedgerRepository _billingLedgerRepository;
+  final MarketplaceOfferRepository? _offerRepository;
+  final PaymentIntentRepository _paymentIntentRepository;
   final MarketplaceEntitlementService? _entitlementService;
   final RequestMetrics? _metrics;
   final void Function(String line) _logSink;
@@ -105,6 +134,88 @@ class PaymentService {
   );
 
   String get providerName => _provider.provider;
+
+  Future<PaymentIntentRecord> createPaymentIntent({
+    required String userId,
+    required String purchaseId,
+  }) async {
+    final normalizedUserId = userId.trim();
+    final normalizedPurchaseId = purchaseId.trim();
+    if (normalizedPurchaseId.isEmpty) {
+      throw const FormatException('purchase_id is required');
+    }
+    final offerRepository = _offerRepository;
+    if (offerRepository == null) {
+      throw StateError('payment_intents_require_offer_repository');
+    }
+
+    final purchase = await offerRepository.findPurchaseById(
+      userId: normalizedUserId,
+      purchaseId: normalizedPurchaseId,
+    );
+    if (purchase == null) {
+      throw const PaymentIntentPurchaseNotFoundException();
+    }
+    if (!_isPendingPaymentStatus(purchase.status)) {
+      throw PaymentIntentPurchaseStateException(currentStatus: purchase.status);
+    }
+
+    final existing = await _paymentIntentRepository.findActiveByPurchaseId(
+      purchaseId: purchase.id,
+    );
+    if (existing != null) {
+      return existing;
+    }
+
+    final providerRef = '${_provider.provider}_${_uuid.v4()}';
+    PaymentIntentRecord intent;
+    try {
+      intent = await _paymentIntentRepository.createIntent(
+        purchaseId: purchase.id,
+        userId: purchase.userId,
+        provider: _provider.provider,
+        status: 'pending',
+        amountMinor: purchase.totalAmountMinor,
+        currency: purchase.currency,
+        providerRef: providerRef,
+      );
+    } catch (_) {
+      final concurrent = await _paymentIntentRepository.findActiveByPurchaseId(
+        purchaseId: purchase.id,
+      );
+      if (concurrent != null) {
+        return concurrent;
+      }
+      rethrow;
+    }
+
+    await _billingLedgerRepository.appendEntry(
+      purchaseId: purchase.id,
+      userId: purchase.userId,
+      entryType: 'charge_authorized',
+      provider: _provider.provider,
+      providerRef: providerRef,
+      amountMinor: purchase.totalAmountMinor,
+      currency: purchase.currency,
+      metadata: <String, Object?>{
+        'intent_id': intent.id,
+        'intent_status': intent.status,
+        'phase': 'authorization_pending',
+      },
+      occurredAt: _nowUtc(),
+    );
+    return intent;
+  }
+
+  Future<PaymentIntentRecord?> getPaymentIntentForUser({
+    required String userId,
+    required String intentId,
+  }) {
+    return _paymentIntentRepository.findByIdForUser(
+      intentId: intentId.trim(),
+      userId: userId.trim(),
+    );
+  }
 
   Future<PaymentCheckoutResult> createCheckoutOrIntent({
     required MarketplacePurchaseRecord purchase,
@@ -614,6 +725,11 @@ class PaymentService {
       return false;
     }
     return _uuidPattern.hasMatch(value.trim());
+  }
+
+  bool _isPendingPaymentStatus(String status) {
+    final normalized = status.trim().toLowerCase();
+    return normalized == 'pending' || normalized == 'pending_payment';
   }
 
   void _logWebhookOutcome({

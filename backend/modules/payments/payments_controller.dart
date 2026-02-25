@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
+import 'payment_intent_repository.dart';
 import 'payment_service.dart';
 
 class PaymentsController {
@@ -14,9 +15,16 @@ class PaymentsController {
   final PaymentService _paymentService;
   final Uuid _uuid;
 
-  Router get router {
+  Router get webhookRouter {
     final router = Router();
     router.post('/payments', _handleWebhook);
+    return router;
+  }
+
+  Router get intentsRouter {
+    final router = Router();
+    router.post('/intents', _createIntent);
+    router.get('/intents/<intentId>', _getIntent);
     return router;
   }
 
@@ -69,6 +77,85 @@ class PaymentsController {
     }
   }
 
+  Future<Response> _createIntent(Request request) async {
+    final userId = request.requestContext.userId?.trim() ?? '';
+    if (userId.isEmpty) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    try {
+      final payload = await readJsonBody(request);
+      final purchaseId =
+          (payload['purchase_id'] as String?)?.trim() ??
+          (payload['purchaseId'] as String?)?.trim() ??
+          '';
+      final intent = await _paymentService.createPaymentIntent(
+        userId: userId,
+        purchaseId: purchaseId,
+      );
+      return _ok(request, data: _intentPayload(intent));
+    } on FormatException catch (error) {
+      return _error(
+        request,
+        400,
+        errorCode: 'VALIDATION_ERROR',
+        message: error.message,
+      );
+    } on PaymentIntentPurchaseNotFoundException {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Purchase not found',
+      );
+    } on PaymentIntentPurchaseStateException {
+      return _error(
+        request,
+        409,
+        errorCode: 'CONFLICT',
+        message: 'Purchase is not pending_payment',
+      );
+    } catch (_) {
+      return _error(
+        request,
+        500,
+        errorCode: 'INTERNAL_ERROR',
+        message: 'Unable to create payment intent',
+      );
+    }
+  }
+
+  Future<Response> _getIntent(Request request, String intentId) async {
+    final userId = request.requestContext.userId?.trim() ?? '';
+    if (userId.isEmpty) {
+      return _error(
+        request,
+        401,
+        errorCode: 'UNAUTHORIZED',
+        message: 'Bearer token required',
+      );
+    }
+
+    final intent = await _paymentService.getPaymentIntentForUser(
+      userId: userId,
+      intentId: intentId,
+    );
+    if (intent == null) {
+      return _error(
+        request,
+        404,
+        errorCode: 'NOT_FOUND',
+        message: 'Payment intent not found',
+      );
+    }
+    return _ok(request, data: _intentPayload(intent));
+  }
+
   Response _ok(
     Request request, {
     required Object? data,
@@ -113,5 +200,20 @@ class PaymentsController {
     }
 
     return _uuid.v4();
+  }
+
+  Map<String, Object?> _intentPayload(PaymentIntentRecord intent) {
+    final data = <String, Object?>{
+      'id': intent.id,
+      'status': intent.status,
+      'amount_minor': intent.amountMinor,
+      'currency': intent.currency,
+      'provider': intent.provider,
+    };
+    final clientSecret = (intent.clientSecret ?? '').trim();
+    if (clientSecret.isNotEmpty) {
+      data['client_secret'] = clientSecret;
+    }
+    return data;
   }
 }

@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "trace_id": "fixture-trace-payment-intent-validation",
+  "error_code": "VALIDATION_ERROR",
+  "message": "purchase_id is required"
+}

@@ -112,6 +112,7 @@ Handler buildApiRouter({
   final paymentService = payments.PaymentService.fromEnvironment(
     postgresProvider: postgresProvider,
     billingLedgerRepository: billingLedgerRepository,
+    offerRepository: offerRepository,
     entitlementService: entitlementService,
     configuredProvider: env['PAYMENT_PROVIDER'],
     paystackSecretKey: env['PAYSTACK_SECRET_KEY'],
@@ -213,8 +214,10 @@ Handler buildApiRouter({
     )
     ..mount('/api/marketplace/', marketplaceHandler)
     ..mount('/marketplace/', marketplaceHandler)
+    ..mount('/api/payments/', paymentsController.intentsRouter.call)
+    ..mount('/payments/', paymentsController.intentsRouter.call)
     ..mount('/api/orgs', orgApiHandler)
-    ..mount('/webhooks/', paymentsController.router.call)
+    ..mount('/webhooks/', paymentsController.webhookRouter.call)
     ..mount('/admin/', adminController.router.call);
   if (authController != null) {
     router.mount('/auth/', authController.router.call);

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "trace_id": "fixture-trace-payment-intent-create",
+  "data": {
+    "id": "<intent_id>",
+    "status": "pending",
+    "amount_minor": 4200,
+    "currency": "NGN",
+    "provider": "paystack"
+  }
+}

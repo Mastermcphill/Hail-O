@@ -22,6 +22,7 @@ Middleware authMiddleware(
     'settlement/',
     'disputes',
     'marketplace/',
+    'payments/',
     'orgs',
     'orgs/',
     'admin/',
