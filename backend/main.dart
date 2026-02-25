@@ -300,22 +300,17 @@ Future<void> main() async {
       stdout.writeln(
         'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
       );
-      final server = await bindServerOrExit(
-        handler: handler,
-        host: host,
-        port: port,
-      );
-      final boundPort = server.port;
+      final server = await io.serve(handler, host, port);
       server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
-      stdout.writeln('Listening on $host:$boundPort');
+      stdout.writeln('Listening on $host:$port');
 
       try {
-        await _verifyBindContract(port: boundPort);
+        await _verifyBindContract(port: server.port);
         stdout.writeln(
           jsonEncode(<String, Object?>{
             'event': 'bind_check_ok',
             'path': '/api/healthz',
-            'port': boundPort,
+            'port': server.port,
           }),
         );
       } catch (error) {
@@ -323,7 +318,7 @@ Future<void> main() async {
           jsonEncode(<String, Object?>{
             'event': 'bind_check_failed',
             'path': '/api/healthz',
-            'port': boundPort,
+            'port': server.port,
             'reason': error.toString(),
           }),
         );
@@ -331,59 +326,56 @@ Future<void> main() async {
         await DbProvider.instance.close();
         rethrow;
       }
+      try {
+        final shutdownCompleter = Completer<void>();
+        final signalSubscriptions = <StreamSubscription<ProcessSignal>>[];
 
-      final shutdownCompleter = Completer<void>();
-      final signalSubscriptions = <StreamSubscription<ProcessSignal>>[];
-
-      void triggerShutdown(String signal) {
-        if (shutdownCompleter.isCompleted) {
-          return;
+        Future<void> triggerShutdown(String signal) async {
+          if (shutdownCompleter.isCompleted) {
+            return;
+          }
+          stdout.writeln(
+            jsonEncode(<String, Object?>{
+              'event': 'shutdown_signal',
+              'signal': signal,
+            }),
+          );
+          await server.close(force: false);
+          shutdownCompleter.complete();
         }
-        stdout.writeln(
-          jsonEncode(<String, Object?>{
-            'event': 'shutdown_signal',
-            'signal': signal,
-          }),
-        );
-        shutdownCompleter.complete();
-      }
 
-      if (!Platform.isWindows) {
+        if (!Platform.isWindows) {
+          signalSubscriptions.add(
+            ProcessSignal.sigterm.watch().listen(
+              (_) => unawaited(triggerShutdown('sigterm')),
+            ),
+          );
+        }
         signalSubscriptions.add(
-          ProcessSignal.sigterm.watch().listen(
-            (_) => triggerShutdown('sigterm'),
+          ProcessSignal.sigint.watch().listen(
+            (_) => unawaited(triggerShutdown('sigint')),
           ),
         );
-      }
-      signalSubscriptions.add(
-        ProcessSignal.sigint.watch().listen((_) => triggerShutdown('sigint')),
-      );
 
-      await shutdownCompleter.future;
-      for (final subscription in signalSubscriptions) {
-        await subscription.cancel();
+        await shutdownCompleter.future;
+        for (final subscription in signalSubscriptions) {
+          await subscription.cancel();
+        }
+      } finally {
+        await DbProvider.instance.close();
       }
-      await server.close(force: false);
-      await DbProvider.instance.close();
-      stdout.writeln(
-        jsonEncode(<String, Object?>{
-          'event': 'server_stopped',
-          'port': boundPort,
-        }),
-      );
     },
-    (error, stackTrace) async {
-      await BackendSentryObservability.captureException(
-        error,
-        stackTrace,
-        source: 'backend_main',
+    (error, stackTrace) {
+      unawaited(
+        BackendSentryObservability.captureException(
+          error,
+          stackTrace,
+          source: 'backend_main',
+        ),
       );
-      stderr.writeln(
-        jsonEncode(<String, Object?>{
-          'event': 'unhandled_exception',
-          'error': error.toString(),
-        }),
-      );
+      stderr.writeln('FATAL: $error');
+      stderr.writeln(stackTrace);
+      exitCode = 1;
     },
   );
 }
