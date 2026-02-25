@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:sqflite_common/sqlite_api.dart';
 
@@ -253,23 +254,20 @@ Future<void> main() async {
         environmentMap: env,
       ).buildHandler();
 
-      final port = int.parse(Platform.environment['PORT'] ?? '8080');
       const listenHost = '0.0.0.0';
+      final port = int.parse((Platform.environment['PORT'] ?? '8080').trim());
       stdout.writeln(
         'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
       );
       stdout.writeln(
         'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
       );
-      final server = await io.serve(handler, InternetAddress.anyIPv4, port);
-      server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
-      stdout.writeln(
-        jsonEncode(<String, Object?>{
-          'event': 'server_listen',
-          'host': listenHost,
-          'port': server.port,
-        }),
+      final server = await bindServerOrExit(
+        handler: handler,
+        host: listenHost,
+        port: port,
       );
+      server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
       stdout.writeln(
         'Hail-O backend listening on http://$listenHost:${server.port}',
       );
@@ -353,6 +351,45 @@ Future<void> main() async {
   );
 }
 
+typedef ServerBinder = Future<HttpServer> Function(String host, int port);
+typedef RequestServer = void Function(HttpServer server, Handler handler);
+typedef BindErrorReporter =
+    Future<void> Function(Object error, StackTrace stackTrace);
+typedef ExitProcess = void Function(int exitCode);
+typedef EventLogger = void Function(Map<String, Object?> event);
+
+Future<HttpServer> bindServerOrExit({
+  required Handler handler,
+  required String host,
+  required int port,
+  ServerBinder binder = _defaultServerBinder,
+  RequestServer serveRequests = _defaultServeRequests,
+  BindErrorReporter reportError = _defaultBindErrorReporter,
+  EventLogger logEvent = _defaultEventLogger,
+  ExitProcess exitProcess = _defaultExitProcess,
+}) async {
+  try {
+    final server = await binder(host, port);
+    serveRequests(server, handler);
+    logEvent(<String, Object?>{
+      'event': 'server_listen',
+      'host': server.address.address,
+      'port': server.port,
+    });
+    return server;
+  } catch (error, stackTrace) {
+    logEvent(<String, Object?>{
+      'event': 'server_bind_failed',
+      'host': host,
+      'port': port,
+      'error': error.toString(),
+    });
+    await reportError(error, stackTrace);
+    exitProcess(1);
+    throw _ServerBindFailure(error);
+  }
+}
+
 Future<void> _verifyBindContract({required int port}) async {
   final client = HttpClient();
   client.connectionTimeout = const Duration(seconds: 3);
@@ -371,6 +408,39 @@ Future<void> _verifyBindContract({required int port}) async {
   } finally {
     client.close(force: true);
   }
+}
+
+Future<HttpServer> _defaultServerBinder(String host, int port) {
+  return HttpServer.bind(host, port);
+}
+
+void _defaultServeRequests(HttpServer server, Handler handler) {
+  io.serveRequests(server, handler);
+}
+
+Future<void> _defaultBindErrorReporter(Object error, StackTrace stackTrace) {
+  return BackendSentryObservability.captureException(
+    error,
+    stackTrace,
+    source: 'server_bind',
+  );
+}
+
+void _defaultEventLogger(Map<String, Object?> event) {
+  stdout.writeln(jsonEncode(event));
+}
+
+void _defaultExitProcess(int exitCodeValue) {
+  exit(exitCodeValue);
+}
+
+class _ServerBindFailure implements Exception {
+  _ServerBindFailure(this.error);
+
+  final Object error;
+
+  @override
+  String toString() => 'ServerBindFailure($error)';
 }
 
 class _PostgresModeNoopDatabase implements Database {
