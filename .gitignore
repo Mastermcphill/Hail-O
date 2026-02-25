@@ -48,7 +48,8 @@ app.*.map.json
 # Local IDE/workspace
 *.code-workspace
 
-<<<<<<< HEAD
+# Local secrets (never commit)
+.env.local
+tool/secrets.local.ps1
 ~$*.rtf
-=======
->>>>>>> f4889a3ff4f94d344d500190b6ace426f99af181
+.sentry-native/

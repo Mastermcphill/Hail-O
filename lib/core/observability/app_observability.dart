@@ -48,31 +48,31 @@ class AppObservability {
 
   static FutureOr<SentryEvent?> beforeSend(SentryEvent event, Hint hint) {
     final message = event.message;
-    final sanitizedMessage = message?.copyWith(
-      formatted: scrubText(message.formatted),
-      template: _scrubNullable(message.template),
-      params: message.params?.map(_sanitizeDynamic).toList(growable: false),
-    );
+    if (message != null) {
+      message.formatted = scrubText(message.formatted);
+      message.template = _scrubNullable(message.template);
+      message.params = message.params
+          ?.map(_sanitizeDynamic)
+          .toList(growable: false);
+      event.message = message;
+    }
 
-    final sanitizedBreadcrumbs = event.breadcrumbs
-        ?.map(
-          (breadcrumb) => breadcrumb.copyWith(
-            message: breadcrumb.message == null
-                ? null
-                : scrubText(breadcrumb.message!),
-            data: breadcrumb.data == null
-                ? null
-                : _sanitizeDynamicMap(breadcrumb.data!),
-          ),
-        )
-        .toList(growable: false);
+    final breadcrumbs = event.breadcrumbs;
+    if (breadcrumbs != null) {
+      for (final breadcrumb in breadcrumbs) {
+        if (breadcrumb.message != null) {
+          breadcrumb.message = scrubText(breadcrumb.message!);
+        }
+        if (breadcrumb.data != null) {
+          breadcrumb.data = _sanitizeDynamicMap(breadcrumb.data!);
+        }
+      }
+      event.breadcrumbs = breadcrumbs;
+    }
 
-    return event.copyWith(
-      message: sanitizedMessage,
-      breadcrumbs: sanitizedBreadcrumbs,
-      user: _sanitizeUser(event.user),
-      tags: _sanitizeStringMap(event.tags),
-    );
+    event.user = _sanitizeUser(event.user);
+    event.tags = _sanitizeStringMap(event.tags);
+    return event;
   }
 
   @visibleForTesting
