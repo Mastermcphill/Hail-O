@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf_io.dart' as io;
+import 'package:sqflite_common/sqlite_api.dart';
 
 import 'infra/db_provider.dart';
 import 'infra/migrator.dart';
@@ -42,14 +43,29 @@ Future<void> main() async {
         usePostgres: config.usePostgres,
         envMap: env,
       );
-      final db = await DbProvider.instance.open(
-        databasePath: config.sqlitePath,
-        dbMode: config.dbMode,
-      );
-      final requestMetrics = RequestMetrics();
       final dbQueryTimeoutMs =
           int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
       final dbPoolSize = int.tryParse((env['DB_POOL_SIZE'] ?? '4').trim()) ?? 4;
+      final dbHandle = await DbProvider.instance.open(
+        databasePath: config.sqlitePath,
+        dbMode: config.dbMode,
+        databaseUrl: config.databaseUrl,
+        dbSchema: config.dbSchema,
+        poolSize: dbPoolSize,
+        statementTimeoutMs: dbQueryTimeoutMs,
+      );
+      final sqliteDb = dbHandle.sqliteDatabase;
+      PostgresProvider? postgresProvider = dbHandle.postgresProvider;
+      if (!config.usePostgres && sqliteDb == null) {
+        throw StateError('BACKEND_DB_MODE=sqlite requires sqlite database.');
+      }
+      if (config.usePostgres && postgresProvider == null) {
+        throw StateError(
+          'BACKEND_DB_MODE=postgres requires postgres provider.',
+        );
+      }
+      final db = sqliteDb ?? const _PostgresModeNoopDatabase();
+      final requestMetrics = RequestMetrics();
       final requestIdleTimeoutSeconds =
           int.tryParse((env['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim()) ??
           30;
@@ -126,39 +142,26 @@ Future<void> main() async {
           'true';
       final migrationHeadVersion =
           BackendPostgresMigrator.migrationHeadVersion();
-      PostgresProvider? postgresProvider;
-      AuthCredentialsStore authCredentialsStore = SqliteAuthCredentialsStore(
-        db,
-      );
-      RideRequestMetadataStore rideRequestMetadataStore =
-          SqliteRideRequestMetadataStore(db);
-      OperationalRecordStore operationalRecordStore =
-          const SqliteOperationalRecordStore();
+      late final AuthCredentialsStore authCredentialsStore;
+      late final RideRequestMetadataStore rideRequestMetadataStore;
+      late final OperationalRecordStore operationalRecordStore;
 
       if (config.usePostgres) {
-        final databaseUrl = config.databaseUrl;
-        if (databaseUrl == null || databaseUrl.isEmpty) {
-          throw StateError(
-            'BACKEND_DB_MODE=postgres requires DATABASE_URL environment variable',
-          );
-        }
-        postgresProvider = PostgresProvider(
-          databaseUrl,
-          dbSchema: config.dbSchema,
-          poolSize: dbPoolSize,
-          statementTimeoutMs: dbQueryTimeoutMs,
-        );
+        final provider = postgresProvider!;
         await BackendPostgresMigrator(
-          postgresProvider: postgresProvider,
+          postgresProvider: provider,
           dbSchema: config.dbSchema,
         ).runPendingMigrations();
-        authCredentialsStore = PostgresAuthCredentialsStore(postgresProvider);
-        rideRequestMetadataStore = PostgresRideRequestMetadataStore(
-          postgresProvider,
+        authCredentialsStore = PostgresAuthCredentialsStore(provider);
+        rideRequestMetadataStore = PostgresRideRequestMetadataStore(provider);
+        operationalRecordStore = PostgresOperationalRecordStore(provider);
+      } else {
+        final sqliteDatabase = sqliteDb!;
+        authCredentialsStore = SqliteAuthCredentialsStore(sqliteDatabase);
+        rideRequestMetadataStore = SqliteRideRequestMetadataStore(
+          sqliteDatabase,
         );
-        operationalRecordStore = PostgresOperationalRecordStore(
-          postgresProvider,
-        );
+        operationalRecordStore = const SqliteOperationalRecordStore();
       }
 
       Future<bool> dbHealthCheck() async {
@@ -290,10 +293,7 @@ Future<void> main() async {
           }),
         );
         await server.close(force: true);
-        await db.close();
-        if (postgresProvider != null) {
-          await postgresProvider.close();
-        }
+        await DbProvider.instance.close();
         rethrow;
       }
 
@@ -329,10 +329,7 @@ Future<void> main() async {
         await subscription.cancel();
       }
       await server.close(force: false);
-      await db.close();
-      if (postgresProvider != null) {
-        await postgresProvider.close();
-      }
+      await DbProvider.instance.close();
       stdout.writeln(
         jsonEncode(<String, Object?>{
           'event': 'server_stopped',
@@ -373,5 +370,19 @@ Future<void> _verifyBindContract({required int port}) async {
     }
   } finally {
     client.close(force: true);
+  }
+}
+
+class _PostgresModeNoopDatabase implements Database {
+  const _PostgresModeNoopDatabase();
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    throw UnsupportedError(
+      'SQLite APIs are unavailable when BACKEND_DB_MODE=postgres.',
+    );
   }
 }

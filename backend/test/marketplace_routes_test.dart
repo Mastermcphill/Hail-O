@@ -381,6 +381,16 @@ void main() {
       expect(payload['db_ok'], isTrue);
     });
 
+    test('/version remains available in postgres mode', () async {
+      final response = await _send(handler, method: 'GET', path: '/version');
+
+      expect(response.statusCode, 200);
+      final payload = await _decodeJsonMap(response);
+      expect(payload['ok'], isTrue);
+      expect(payload['service'], 'hail-o-backend');
+      expect(payload['build'], isA<Map<dynamic, dynamic>>());
+    });
+
     test(
       'POST /webhooks/payments accepts payload and deduplicates events',
       () async {
@@ -559,14 +569,35 @@ void main() {
         logger: (message) => logMessage = message,
       );
 
-      await provider.open(dbMode: BackendDbMode.postgres);
+      final handle = await provider.open(
+        dbMode: BackendDbMode.postgres,
+        databaseUrl: 'postgres://hailo:secret@localhost:5432/hailo',
+      );
 
       expect(sqliteOpenCalls, 0);
+      expect(handle.postgresProvider, isNotNull);
+      expect(handle.sqliteDatabase, isNull);
       expect(
         logMessage,
-        contains('db_mode=postgres: skipping sqlite initialization'),
+        contains('db_mode=postgres: initialized postgres provider'),
       );
     });
+
+    test(
+      'postgres mode close is a safe no-op when pool was never opened',
+      () async {
+        final provider = DbProvider.forTesting(
+          sqliteOpener: (_) async => const _NoopDatabase(),
+        );
+
+        await provider.open(
+          dbMode: BackendDbMode.postgres,
+          databaseUrl: 'postgres://hailo:secret@localhost:5432/hailo',
+        );
+
+        await expectLater(provider.close(), completes);
+      },
+    );
 
     test('sqlite mode still invokes sqlite initialization path', () async {
       var sqliteOpenCalls = 0;
@@ -577,9 +608,11 @@ void main() {
         },
       );
 
-      await provider.open(dbMode: BackendDbMode.sqlite);
+      final handle = await provider.open(dbMode: BackendDbMode.sqlite);
 
       expect(sqliteOpenCalls, 1);
+      expect(handle.sqliteDatabase, isNotNull);
+      expect(handle.postgresProvider, isNull);
     });
   });
 }
