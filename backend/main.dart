@@ -25,6 +25,57 @@ import 'modules/rides/sqlite_ride_request_metadata_store.dart';
 import 'server/middleware/cors_policy_middleware.dart';
 import 'server/app_server.dart';
 
+class BackendDatabaseRuntime {
+  const BackendDatabaseRuntime({
+    required this.usePostgres,
+    required this.dbPoolSize,
+    required this.dbQueryTimeoutMs,
+    this.sqliteDb,
+    this.postgresProvider,
+  });
+
+  final bool usePostgres;
+  final int dbPoolSize;
+  final int dbQueryTimeoutMs;
+  final Database? sqliteDb;
+  final PostgresProvider? postgresProvider;
+}
+
+Future<BackendDatabaseRuntime> openBackendDatabaseRuntime({
+  required BackendRuntimeConfig config,
+  required Map<String, String> env,
+  DbProvider? dbProvider,
+}) async {
+  final provider = dbProvider ?? DbProvider.instance;
+  final dbQueryTimeoutMs =
+      int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
+  final dbPoolSize = int.tryParse((env['DB_POOL_SIZE'] ?? '4').trim()) ?? 4;
+  final dbHandle = await provider.open(
+    databasePath: config.sqlitePath,
+    dbMode: config.dbMode,
+    databaseUrl: config.databaseUrl,
+    dbSchema: config.dbSchema,
+    poolSize: dbPoolSize,
+    statementTimeoutMs: dbQueryTimeoutMs,
+  );
+  final Database? sqliteDb = dbHandle.sqliteDatabase;
+  final PostgresProvider? postgresProvider = dbHandle.postgresProvider;
+  final bool usePostgres = config.usePostgres;
+  if (!usePostgres && sqliteDb == null) {
+    throw StateError('BACKEND_DB_MODE=sqlite requires sqlite database.');
+  }
+  if (usePostgres && postgresProvider == null) {
+    throw StateError('BACKEND_DB_MODE=postgres requires postgres provider.');
+  }
+  return BackendDatabaseRuntime(
+    usePostgres: usePostgres,
+    dbPoolSize: dbPoolSize,
+    dbQueryTimeoutMs: dbQueryTimeoutMs,
+    sqliteDb: sqliteDb,
+    postgresProvider: postgresProvider,
+  );
+}
+
 Future<void> main() async {
   final bootstrapEnv = Platform.environment;
   final bootstrapEnvironment = (bootstrapEnv['ENV'] ?? 'development').trim();
@@ -44,28 +95,15 @@ Future<void> main() async {
         usePostgres: config.usePostgres,
         envMap: env,
       );
-      final dbQueryTimeoutMs =
-          int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
-      final dbPoolSize = int.tryParse((env['DB_POOL_SIZE'] ?? '4').trim()) ?? 4;
-      final dbHandle = await DbProvider.instance.open(
-        databasePath: config.sqlitePath,
-        dbMode: config.dbMode,
-        databaseUrl: config.databaseUrl,
-        dbSchema: config.dbSchema,
-        poolSize: dbPoolSize,
-        statementTimeoutMs: dbQueryTimeoutMs,
+      final dbRuntime = await openBackendDatabaseRuntime(
+        config: config,
+        env: env,
       );
-      final sqliteDb = dbHandle.sqliteDatabase;
-      PostgresProvider? postgresProvider = dbHandle.postgresProvider;
-      if (!config.usePostgres && sqliteDb == null) {
-        throw StateError('BACKEND_DB_MODE=sqlite requires sqlite database.');
-      }
-      if (config.usePostgres && postgresProvider == null) {
-        throw StateError(
-          'BACKEND_DB_MODE=postgres requires postgres provider.',
-        );
-      }
-      final db = sqliteDb ?? const _PostgresModeNoopDatabase();
+      final bool usePostgres = dbRuntime.usePostgres;
+      final int dbPoolSize = dbRuntime.dbPoolSize;
+      final int dbQueryTimeoutMs = dbRuntime.dbQueryTimeoutMs;
+      final Database? sqliteDb = dbRuntime.sqliteDb;
+      final PostgresProvider? postgresProvider = dbRuntime.postgresProvider;
       final requestMetrics = RequestMetrics();
       final requestIdleTimeoutSeconds =
           int.tryParse((env['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim()) ??
@@ -147,7 +185,7 @@ Future<void> main() async {
       late final RideRequestMetadataStore rideRequestMetadataStore;
       late final OperationalRecordStore operationalRecordStore;
 
-      if (config.usePostgres) {
+      if (usePostgres) {
         final provider = postgresProvider!;
         await BackendPostgresMigrator(
           postgresProvider: provider,
@@ -167,13 +205,13 @@ Future<void> main() async {
 
       Future<bool> dbHealthCheck() async {
         try {
-          if (config.usePostgres) {
+          if (usePostgres) {
             final rows = await postgresProvider!.withConnection(
               (connection) => connection.query('SELECT 1'),
             );
             return rows.isNotEmpty;
           }
-          final rows = await db.rawQuery('SELECT 1');
+          final rows = await sqliteDb!.rawQuery('SELECT 1');
           return rows.isNotEmpty;
         } catch (_) {
           return false;
@@ -222,7 +260,7 @@ Future<void> main() async {
         'request_max_body_bytes': requestMaxBodyBytes,
       };
       final handler = AppServer(
-        db: db,
+        db: sqliteDb,
         tokenService: tokenService,
         dbMode: config.dbMode.name,
         environment: environment,
@@ -440,18 +478,4 @@ class _ServerBindFailure implements Exception {
 
   @override
   String toString() => 'ServerBindFailure($error)';
-}
-
-class _PostgresModeNoopDatabase implements Database {
-  const _PostgresModeNoopDatabase();
-
-  @override
-  Future<void> close() async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    throw UnsupportedError(
-      'SQLite APIs are unavailable when BACKEND_DB_MODE=postgres.',
-    );
-  }
 }

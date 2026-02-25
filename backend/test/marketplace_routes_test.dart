@@ -619,7 +619,7 @@ void main() {
 
 Handler _buildHandler() {
   return AppServer(
-    db: const _NoopDatabase(),
+    db: null,
     tokenService: TokenService(secret: 'backend-test-secret'),
     dbMode: 'postgres',
     environment: 'test',

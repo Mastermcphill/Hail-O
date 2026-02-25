@@ -51,7 +51,7 @@ class AppServer {
     this.environmentMap = const <String, String>{},
   });
 
-  final Database db;
+  final Database? db;
   final TokenService tokenService;
   final String dbMode;
   final Future<bool> Function() dbHealthCheck;

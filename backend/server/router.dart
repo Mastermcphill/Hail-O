@@ -43,7 +43,7 @@ import '../modules/payments/payments_controller.dart';
 import 'http_utils.dart';
 
 Handler buildApiRouter({
-  required Database db,
+  required Database? db,
   required TokenService tokenService,
   required String dbMode,
   required Future<bool> Function() dbHealthCheck,
@@ -60,29 +60,34 @@ Handler buildApiRouter({
 }) {
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
 
-  final authService = AuthService(db, externalStore: authCredentialsStore);
-  final authController = AuthController(
-    authService: authService,
-    tokenService: tokenService,
-  );
-  final ridesController = RidesController(
-    db: db,
-    rideApiFlowService: RideApiFlowService(
-      db,
-      externalMetadataStore: rideRequestMetadataStore,
-      externalOperationalStore: operationalRecordStore,
-    ),
-    rideSnapshotService: RideSnapshotService(db),
-  );
-  final routesController = RoutesController(db);
-  final meController = MeController(db);
-  final settlementController = SettlementController(
-    rideSettlementService: RideSettlementService(db),
-    escrowService: EscrowService(db),
-  );
-  final disputesController = DisputesController(
-    disputeService: DisputeService(db),
-  );
+  final authService = db == null
+      ? null
+      : AuthService(db, externalStore: authCredentialsStore);
+  final authController = authService == null
+      ? null
+      : AuthController(authService: authService, tokenService: tokenService);
+  final ridesController = db == null
+      ? null
+      : RidesController(
+          db: db,
+          rideApiFlowService: RideApiFlowService(
+            db,
+            externalMetadataStore: rideRequestMetadataStore,
+            externalOperationalStore: operationalRecordStore,
+          ),
+          rideSnapshotService: RideSnapshotService(db),
+        );
+  final routesController = db == null ? null : RoutesController(db);
+  final meController = db == null ? null : MeController(db);
+  final settlementController = db == null
+      ? null
+      : SettlementController(
+          rideSettlementService: RideSettlementService(db),
+          escrowService: EscrowService(db),
+        );
+  final disputesController = db == null
+      ? null
+      : DisputesController(disputeService: DisputeService(db));
   final offerRepository = postgresProvider != null
       ? PostgresMarketplaceOfferRepository(postgresProvider)
       : InMemoryMarketplaceOfferRepository();
@@ -142,14 +147,16 @@ Handler buildApiRouter({
           entitlementService: entitlementService,
         );
   final adminController = AdminController(
-    walletReversalService: WalletReversalService(db),
+    walletReversalService: db == null ? null : WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,
     enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
     reconciliationService: reconciliationService,
     revenueService: revenueService,
   );
-  final adminUsersController = AdminUsersController(authService: authService);
+  final adminUsersController = authService == null
+      ? null
+      : AdminUsersController(authService: authService);
 
   final router = Router()
     ..get('/', (Request request) {
@@ -199,27 +206,41 @@ Handler buildApiRouter({
       '/metrics',
       (request) => _metricsHandler(request, requestMetrics, metricsPublic),
     )
-    ..mount('/auth/', authController.router.call)
-    ..mount('/me/', meController.router.call)
-    ..mount('/routes/', routesController.router.call)
-    ..mount('/rides/', ridesController.router.call)
-    ..mount('/settlement/', settlementController.router.call)
-    ..mount('/disputes', disputesController.router.call)
     ..mount('/api/marketplace/', marketplaceHandler)
     ..mount('/marketplace/', marketplaceHandler)
     ..mount('/api/orgs', orgApiHandler)
-    ..post('/api/admin/users', adminUsersController.createUser)
     ..mount('/webhooks/', paymentsController.router.call)
-    ..mount('/admin/', adminController.router.call)
-    ..all(
-      '/<ignored|.*>',
-      (request, _) => jsonErrorResponse(
-        request,
-        404,
-        code: 'route_not_found',
-        message: 'Route not found',
-      ),
-    );
+    ..mount('/admin/', adminController.router.call);
+  if (authController != null) {
+    router.mount('/auth/', authController.router.call);
+  }
+  if (meController != null) {
+    router.mount('/me/', meController.router.call);
+  }
+  if (routesController != null) {
+    router.mount('/routes/', routesController.router.call);
+  }
+  if (ridesController != null) {
+    router.mount('/rides/', ridesController.router.call);
+  }
+  if (settlementController != null) {
+    router.mount('/settlement/', settlementController.router.call);
+  }
+  if (disputesController != null) {
+    router.mount('/disputes', disputesController.router.call);
+  }
+  if (adminUsersController != null) {
+    router.post('/api/admin/users', adminUsersController.createUser);
+  }
+  router.all(
+    '/<ignored|.*>',
+    (request, _) => jsonErrorResponse(
+      request,
+      404,
+      code: 'route_not_found',
+      message: 'Route not found',
+    ),
+  );
 
   return router.call;
 }

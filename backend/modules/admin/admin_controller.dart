@@ -16,7 +16,7 @@ import '../../server/http_utils.dart';
 
 class AdminController {
   AdminController({
-    required WalletReversalService walletReversalService,
+    WalletReversalService? walletReversalService,
     required Map<String, Object?> runtimeConfigSnapshot,
     required Map<String, Object?> buildInfo,
     bool enableSentrySmokeEndpoint = false,
@@ -33,7 +33,7 @@ class AdminController {
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger();
 
-  final WalletReversalService _walletReversalService;
+  final WalletReversalService? _walletReversalService;
   final Map<String, Object?> _runtimeConfigSnapshot;
   final Map<String, Object?> _buildInfo;
   final bool _enableSentrySmokeEndpoint;
@@ -83,6 +83,15 @@ class AdminController {
 
   Future<Response> _reverseTransaction(Request request) async {
     _requireAdmin(request);
+    final walletReversalService = _walletReversalService;
+    if (walletReversalService == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Wallet reversal is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
     final body = await readJsonBody(request);
 
     final originalLedgerId = (body['original_ledger_id'] as num?)?.toInt();
@@ -91,7 +100,7 @@ class AdminController {
     }
 
     try {
-      final result = await _walletReversalService.reverseWalletLedgerEntry(
+      final result = await walletReversalService.reverseWalletLedgerEntry(
         originalLedgerId: originalLedgerId,
         requestedByUserId: request.requestContext.userId ?? '',
         requesterIsAdmin: true,
