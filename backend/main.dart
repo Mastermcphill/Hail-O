@@ -294,13 +294,24 @@ Future<void> main() async {
 
       const host = '0.0.0.0';
       final port = int.parse(Platform.environment['PORT'] ?? '8080');
+      stderr.writeln(
+        "BIND: host=$host port=$port envPORT=${Platform.environment['PORT']}",
+      );
       stdout.writeln(
         'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
       );
       stdout.writeln(
         'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
       );
-      final server = await io.serve(handler, host, port);
+      late final HttpServer server;
+      try {
+        server = await io.serve(handler, host, port);
+        stderr.writeln('LISTENING: http://$host:$port');
+      } catch (error, stackTrace) {
+        stderr.writeln('BIND FAILED: $error');
+        stderr.writeln(stackTrace);
+        rethrow;
+      }
       server.idleTimeout = Duration(seconds: requestIdleTimeoutSeconds);
       stdout.writeln('Listening on $host:$port');
 
