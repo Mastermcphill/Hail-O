@@ -7,6 +7,7 @@ class TokenStorage {
 
   static const _tokenKey = 'auth_token';
   static const _roleKey = 'user_role';
+  static const _refreshTokenKey = 'refresh_token';
 
   final FlutterSecureStorage _storage;
 
@@ -14,8 +15,16 @@ class TokenStorage {
     return _storage.write(key: _tokenKey, value: token);
   }
 
-  Future<void> saveAuth({required String token, required String role}) async {
-    await Future.wait<void>(<Future<void>>[saveToken(token), saveRole(role)]);
+  Future<void> saveAuth({
+    required String token,
+    required String role,
+    String? refreshToken,
+  }) async {
+    final writes = <Future<void>>[saveToken(token), saveRole(role)];
+    if ((refreshToken ?? '').trim().isNotEmpty) {
+      writes.add(saveRefreshToken(refreshToken!.trim()));
+    }
+    await Future.wait<void>(writes);
   }
 
   Future<String?> readToken() {
@@ -38,8 +47,24 @@ class TokenStorage {
     return _storage.delete(key: _roleKey);
   }
 
+  Future<void> saveRefreshToken(String refreshToken) {
+    return _storage.write(key: _refreshTokenKey, value: refreshToken);
+  }
+
+  Future<String?> readRefreshToken() {
+    return _storage.read(key: _refreshTokenKey);
+  }
+
+  Future<void> deleteRefreshToken() {
+    return _storage.delete(key: _refreshTokenKey);
+  }
+
   Future<void> clearAuth() async {
-    await Future.wait<void>(<Future<void>>[deleteToken(), deleteRole()]);
+    await Future.wait<void>(<Future<void>>[
+      deleteToken(),
+      deleteRole(),
+      deleteRefreshToken(),
+    ]);
   }
 
   Future<void> writeValue(String key, String value) {

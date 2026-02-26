@@ -192,12 +192,35 @@ class InMemoryTokenStorage extends TokenStorage {
   Future<void> clearAuth() async {
     _values.remove('token');
     _values.remove('role');
+    _values.remove('refresh_token');
   }
 
   @override
-  Future<void> saveAuth({required String token, required String role}) async {
+  Future<void> saveAuth({
+    required String token,
+    required String role,
+    String? refreshToken,
+  }) async {
     await saveToken(token);
     await saveRole(role);
+    if ((refreshToken ?? '').trim().isNotEmpty) {
+      await saveRefreshToken(refreshToken!);
+    }
+  }
+
+  @override
+  Future<void> saveRefreshToken(String refreshToken) async {
+    _values['refresh_token'] = refreshToken;
+  }
+
+  @override
+  Future<String?> readRefreshToken() async {
+    return _values['refresh_token'];
+  }
+
+  @override
+  Future<void> deleteRefreshToken() async {
+    _values.remove('refresh_token');
   }
 
   @override

@@ -48,13 +48,20 @@ class AuthSession extends ChangeNotifier {
     try {
       final storedToken = await _tokenStorage.readToken();
       final storedRole = await _tokenStorage.readRole();
+      final storedRefreshToken = await _tokenStorage.readRefreshToken();
       if (storedToken != null && storedToken.trim().isNotEmpty) {
         final normalizedToken = storedToken.trim();
         if (_isTokenInvalidOrExpired(normalizedToken)) {
-          await _tokenStorage.clearAuth();
-          _token = null;
-          _role = null;
-          _status = AuthStatus.anonymous;
+          final refreshed = await _refreshUsingStoredToken(
+            refreshToken: storedRefreshToken,
+            role: storedRole,
+          );
+          if (!refreshed) {
+            await _tokenStorage.clearAuth();
+            _token = null;
+            _role = null;
+            _status = AuthStatus.anonymous;
+          }
         } else {
           _token = normalizedToken;
           _role = normalizeRole(storedRole);
@@ -76,6 +83,33 @@ class AuthSession extends ChangeNotifier {
     }
   }
 
+  Future<bool> _refreshUsingStoredToken({
+    required String? refreshToken,
+    required String? role,
+  }) async {
+    final normalizedRefreshToken = (refreshToken ?? '').trim();
+    if (normalizedRefreshToken.isEmpty) {
+      return false;
+    }
+    try {
+      final refreshedAccessToken = await _authApi.refreshAccessToken(
+        refreshToken: normalizedRefreshToken,
+      );
+      final normalizedRole = normalizeRole(role);
+      await _tokenStorage.saveAuth(
+        token: refreshedAccessToken,
+        role: normalizedRole,
+        refreshToken: normalizedRefreshToken,
+      );
+      _token = refreshedAccessToken;
+      _role = normalizedRole;
+      _status = AuthStatus.authenticated;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<AuthLoginResult> login(
     String email,
     String password, {
@@ -88,15 +122,25 @@ class AuthSession extends ChangeNotifier {
         message: 'Not authorized.',
       );
     }
-    await _tokenStorage.saveAuth(token: result.token, role: result.role);
-    _token = result.token;
-    _role = normalizeRole(result.role);
-    _status = AuthStatus.authenticated;
-    if (!_initialized) {
-      _initialized = true;
-    }
-    notifyListeners();
+    await _persistSession(token: result.token, role: result.role);
     return result;
+  }
+
+  Future<void> requestOtp(String phoneE164) {
+    return _authApi.requestOtp(phoneE164: phoneE164);
+  }
+
+  Future<AuthLoginResult> verifyOtp({
+    required String phoneE164,
+    required String code,
+  }) async {
+    final result = await _authApi.verifyOtp(phoneE164: phoneE164, code: code);
+    await _persistSession(
+      token: result.accessToken,
+      role: result.role,
+      refreshToken: result.refreshToken,
+    );
+    return AuthLoginResult(token: result.accessToken, role: result.role);
   }
 
   Future<AuthLoginResult> register(String email, String password) async {
@@ -117,6 +161,25 @@ class AuthSession extends ChangeNotifier {
 
   Future<void> invalidateToken() async {
     await logout();
+  }
+
+  Future<void> _persistSession({
+    required String token,
+    required String role,
+    String? refreshToken,
+  }) async {
+    await _tokenStorage.saveAuth(
+      token: token,
+      role: role,
+      refreshToken: refreshToken,
+    );
+    _token = token;
+    _role = normalizeRole(role);
+    _status = AuthStatus.authenticated;
+    if (!_initialized) {
+      _initialized = true;
+    }
+    notifyListeners();
   }
 
   bool _isTokenInvalidOrExpired(String token) {
