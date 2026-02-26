@@ -159,6 +159,7 @@ Handler buildApiRouter({
     entitlementService: entitlementService,
     configuredProvider: env['PAYMENTS_PROVIDER'] ?? env['PAYMENT_PROVIDER'],
     paystackSecretKey: env['PAYSTACK_SECRET_KEY'],
+    paystackWebhookSecret: env['PAYSTACK_WEBHOOK_SECRET'],
     paystackApiBaseUrl: env['PAYSTACK_API_BASE_URL'],
     paystackCallbackUrl: env['PAYSTACK_CALLBACK_URL'],
     stripeWebhookSecret: env['STRIPE_WEBHOOK_SECRET'],
@@ -169,6 +170,7 @@ Handler buildApiRouter({
     paymentService: paymentService,
     environment: runtimeEnvironment,
     webhookSecret: (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim(),
+    paystackWebhookSecret: (env['PAYSTACK_WEBHOOK_SECRET'] ?? '').trim(),
   );
   final revenueService = MarketplaceRevenueService(
     postgresProvider: postgresProvider,

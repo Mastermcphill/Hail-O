@@ -16,20 +16,24 @@ class PaymentsController {
     required PaymentService paymentService,
     String environment = 'development',
     String webhookSecret = '',
+    String paystackWebhookSecret = '',
     void Function(String line)? warningSink,
     Uuid? uuid,
   }) : _paymentService = paymentService,
        _environment = environment,
        _webhookSecret = webhookSecret,
+       _paystackWebhookSecret = paystackWebhookSecret,
        _warningSink = warningSink ?? stderr.writeln,
        _uuid = uuid ?? const Uuid();
 
   final PaymentService _paymentService;
   final String _environment;
   final String _webhookSecret;
+  final String _paystackWebhookSecret;
   final void Function(String line) _warningSink;
   final Uuid _uuid;
   bool _missingSecretWarningLogged = false;
+  bool _missingPaystackSecretWarningLogged = false;
 
   Router get webhookRouter {
     final router = Router();
@@ -101,6 +105,71 @@ class PaymentsController {
   }
 
   Response? _validateWebhookSecretPolicy({
+    required Request request,
+    required String rawBody,
+  }) {
+    if (_paymentService.providerName == 'paystack') {
+      return _validatePaystackWebhookSecretPolicy(
+        request: request,
+        rawBody: rawBody,
+      );
+    }
+    return _validateGenericWebhookSecretPolicy(
+      request: request,
+      rawBody: rawBody,
+    );
+  }
+
+  Response? _validatePaystackWebhookSecretPolicy({
+    required Request request,
+    required String rawBody,
+  }) {
+    final secret = _paystackWebhookSecret.trim();
+    if (secret.isEmpty) {
+      if (_isProductionEnvironment()) {
+        return _error(
+          request,
+          503,
+          errorCode: 'WEBHOOK_CONFIG_ERROR',
+          message:
+              'PAYSTACK_WEBHOOK_SECRET is required in production for webhook verification',
+        );
+      }
+      if (!_missingPaystackSecretWarningLogged) {
+        _missingPaystackSecretWarningLogged = true;
+        _warningSink(
+          'WARN: PAYSTACK_WEBHOOK_SECRET not set; paystack webhook signature checks are disabled outside production.',
+        );
+      }
+      return null;
+    }
+
+    final providedSignature = (request.headers['x-paystack-signature'] ?? '')
+        .trim();
+    if (providedSignature.isEmpty) {
+      return _error(
+        request,
+        401,
+        errorCode: 'INVALID_WEBHOOK_SIGNATURE',
+        message: 'Missing x-paystack-signature header',
+      );
+    }
+    final expectedSignature = Hmac(
+      sha512,
+      utf8.encode(secret),
+    ).convert(utf8.encode(rawBody)).toString();
+    if (expectedSignature.toLowerCase() != providedSignature.toLowerCase()) {
+      return _error(
+        request,
+        401,
+        errorCode: 'INVALID_WEBHOOK_SIGNATURE',
+        message: 'Webhook signature verification failed',
+      );
+    }
+    return null;
+  }
+
+  Response? _validateGenericWebhookSecretPolicy({
     required Request request,
     required String rawBody,
   }) {

@@ -99,6 +99,7 @@ class PaymentService {
     MarketplaceEntitlementService? entitlementService,
     String? configuredProvider,
     String? paystackSecretKey,
+    String? paystackWebhookSecret,
     String? paystackApiBaseUrl,
     String? paystackCallbackUrl,
     String? stripeWebhookSecret,
@@ -112,6 +113,7 @@ class PaymentService {
     final provider = switch (providerName) {
       'paystack' => PaystackPaymentProvider(
         secretKey: (paystackSecretKey ?? '').trim(),
+        webhookSecret: (paystackWebhookSecret ?? '').trim(),
         apiBaseUrl: (paystackApiBaseUrl ?? '').trim().isEmpty
             ? PaystackPaymentProvider.defaultApiBaseUrl
             : (paystackApiBaseUrl ?? '').trim(),

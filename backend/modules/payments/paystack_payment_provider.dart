@@ -10,12 +10,16 @@ import 'payment_provider.dart';
 class PaystackPaymentProvider implements PaymentProvider {
   PaystackPaymentProvider({
     required String secretKey,
+    String webhookSecret = '',
     String apiBaseUrl = defaultApiBaseUrl,
     String callbackUrl = '',
     http.Client? httpClient,
     Duration initializeTimeout = const Duration(seconds: 8),
     Uuid? uuid,
   }) : _secretKey = secretKey.trim(),
+       _webhookSecret = webhookSecret.trim().isEmpty
+           ? secretKey.trim()
+           : webhookSecret.trim(),
        _apiBaseUrl = _normalizeApiBaseUrl(apiBaseUrl),
        _callbackUrl = callbackUrl.trim(),
        _httpClient = httpClient ?? http.Client(),
@@ -25,6 +29,7 @@ class PaystackPaymentProvider implements PaymentProvider {
   static const String defaultApiBaseUrl = 'https://api.paystack.co';
 
   final String _secretKey;
+  final String _webhookSecret;
   final String _apiBaseUrl;
   final String _callbackUrl;
   final http.Client _httpClient;
@@ -174,12 +179,12 @@ class PaystackPaymentProvider implements PaymentProvider {
   }
 
   bool _verifySignature({required String rawBody, required String signature}) {
-    if (signature.isEmpty || _secretKey.isEmpty) {
+    if (signature.isEmpty || _webhookSecret.isEmpty) {
       return false;
     }
     final digest = Hmac(
       sha512,
-      utf8.encode(_secretKey),
+      utf8.encode(_webhookSecret),
     ).convert(utf8.encode(rawBody)).toString();
     return digest.toLowerCase() == signature.toLowerCase();
   }

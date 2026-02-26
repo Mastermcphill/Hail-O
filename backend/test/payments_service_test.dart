@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:test/test.dart';
 
 import '../infra/request_metrics.dart';
@@ -77,6 +78,44 @@ void main() {
         expect(parsed['component'], 'payment_webhook');
         expect(parsed['verified'], isFalse);
         expect(parsed['action'], 'signature_invalid');
+      },
+    );
+
+    test(
+      'deduplicates signed paystack webhooks by provider_event_id',
+      () async {
+        const webhookSecret = 'paystack-webhook-secret';
+        final service = PaymentService(
+          provider: PaystackPaymentProvider(
+            secretKey: 'sk_test_key',
+            webhookSecret: webhookSecret,
+          ),
+        );
+        final body = jsonEncode(<String, Object?>{
+          'event': 'charge.success',
+          'data': <String, Object?>{
+            'id': 'evt-paystack-dedupe-1',
+            'metadata': <String, Object?>{
+              'purchase_id': '3f5720c3-fc3b-450d-9760-404f476fddf2',
+            },
+          },
+        });
+        final signature = Hmac(
+          sha512,
+          utf8.encode(webhookSecret),
+        ).convert(utf8.encode(body)).toString();
+
+        final first = await service.handleWebhook(
+          headers: <String, String>{'x-paystack-signature': signature},
+          rawBody: body,
+        );
+        final second = await service.handleWebhook(
+          headers: <String, String>{'x-paystack-signature': signature},
+          rawBody: body,
+        );
+        expect(first.duplicate, isFalse);
+        expect(second.duplicate, isTrue);
+        expect(second.action, 'duplicate_ignored');
       },
     );
 

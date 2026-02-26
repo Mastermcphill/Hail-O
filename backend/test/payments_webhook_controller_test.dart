@@ -123,6 +123,100 @@ void main() {
       expect(envelope['ok'], isTrue);
     });
   });
+
+  group('paystack webhook signature policy', () {
+    const payload = <String, Object?>{
+      'event': 'charge.success',
+      'data': <String, Object?>{
+        'id': 'evt-paystack-policy-1',
+        'metadata': <String, Object?>{
+          'purchase_id': '4fdd4a6f-63b1-4a9e-bcf6-36f18bb1988f',
+        },
+      },
+    };
+
+    test(
+      'valid x-paystack-signature is accepted when paystack secret is configured',
+      () async {
+        const webhookSecret = 'paystack-webhook-secret';
+        final handler = _buildHandler(
+          environment: 'test',
+          environmentMap: const <String, String>{
+            'ENV': 'test',
+            'PAYMENT_PROVIDER': 'paystack',
+            'PAYSTACK_SECRET_KEY': 'sk_test_key',
+            'PAYSTACK_WEBHOOK_SECRET': webhookSecret,
+          },
+        );
+        final rawBody = jsonEncode(payload);
+        final signature = Hmac(
+          sha512,
+          utf8.encode(webhookSecret),
+        ).convert(utf8.encode(rawBody)).toString();
+        final response = await _request(
+          handler,
+          method: 'POST',
+          path: '/webhooks/payments',
+          headers: <String, String>{'x-paystack-signature': signature},
+          rawBody: rawBody,
+        );
+
+        expect(response.statusCode, 200);
+        final envelope = await _decodeBody(response);
+        expect(envelope['ok'], isTrue);
+      },
+    );
+
+    test('invalid x-paystack-signature is rejected', () async {
+      final handler = _buildHandler(
+        environment: 'test',
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'PAYMENT_PROVIDER': 'paystack',
+          'PAYSTACK_SECRET_KEY': 'sk_test_key',
+          'PAYSTACK_WEBHOOK_SECRET': 'paystack-webhook-secret-2',
+        },
+      );
+
+      final response = await _request(
+        handler,
+        method: 'POST',
+        path: '/webhooks/payments',
+        headers: const <String, String>{
+          'x-paystack-signature': 'invalid-signature',
+        },
+        rawBody: jsonEncode(payload),
+      );
+
+      expect(response.statusCode, 401);
+      final envelope = await _decodeBody(response);
+      expect(envelope['ok'], isFalse);
+      expect(envelope['error_code'], 'INVALID_WEBHOOK_SIGNATURE');
+    });
+
+    test('missing paystack webhook secret is rejected in production', () async {
+      final handler = _buildHandler(
+        environment: 'production',
+        environmentMap: const <String, String>{
+          'ENV': 'production',
+          'PAYMENT_PROVIDER': 'paystack',
+          'PAYSTACK_SECRET_KEY': 'sk_live_key',
+        },
+      );
+
+      final response = await _request(
+        handler,
+        method: 'POST',
+        path: '/webhooks/payments',
+        rawBody: jsonEncode(payload),
+      );
+
+      expect(response.statusCode, 503);
+      final envelope = await _decodeBody(response);
+      expect(envelope['ok'], isFalse);
+      expect(envelope['error_code'], 'WEBHOOK_CONFIG_ERROR');
+    });
+  });
 }
 
 Handler _buildHandler({
