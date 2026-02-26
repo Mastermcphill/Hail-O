@@ -7,6 +7,44 @@ import '../infra/redis_client.dart';
 import '../server/middleware/rate_limit_middleware.dart';
 
 void main() {
+  test(
+    'in-memory fallback rate limiting works when redis is disabled',
+    () async {
+      final now = DateTime.utc(2026, 2, 26, 12, 0, 0);
+      final handler = Pipeline()
+          .addMiddleware(
+            rateLimitMiddleware(
+              window: const Duration(minutes: 1),
+              maxRequestsPerIp: 1,
+              maxRequestsPerUser: 1,
+              nowProvider: () => now,
+            ),
+          )
+          .addHandler((_) async => Response.ok('ok'));
+
+      final first = await handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/rides/one'),
+          headers: const <String, String>{'x-forwarded-for': '203.0.113.11'},
+        ),
+      );
+      final second = await handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/rides/two'),
+          headers: const <String, String>{'x-forwarded-for': '203.0.113.11'},
+        ),
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 429);
+      final body =
+          jsonDecode(await second.readAsString()) as Map<String, dynamic>;
+      expect(body['error_code'], 'RATE_LIMITED');
+    },
+  );
+
   test('redis-backed rate limits persist across handler restarts', () async {
     final now = DateTime.utc(2026, 2, 26, 12, 0, 0);
     final redisClient = InMemoryRedisClient(nowUtc: () => now);

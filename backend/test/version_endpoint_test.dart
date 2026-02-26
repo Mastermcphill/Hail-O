@@ -245,7 +245,39 @@ void main() {
   });
 
   test(
-    '/ready returns 503 when REDIS_URL is set but redis is unavailable',
+    '/ready returns redis_ready=false when redis is disabled and ok remains true',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      await db.execute('DROP TABLE IF EXISTS schema_migrations');
+      await db.execute(
+        'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+      );
+      await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+      final handler = _buildHandler(
+        db: db,
+        dbHealthCheck: () async => true,
+        buildInfo: const <String, Object?>{
+          'commit': 'ready-test',
+          'migration_head': 25,
+        },
+        environmentMap: const <String, String>{'REDIS_ENABLED': 'false'},
+      );
+
+      final response = await _request(handler, '/ready');
+      expect(response.statusCode, 200);
+      final body = await _decodeBody(response);
+      expect(body['ready'], isTrue);
+      expect(body['redis'], isFalse);
+      expect(body['redis_configured'], isFalse);
+      expect(body['redis_enabled'], isFalse);
+      expect(body['redis_ready'], isFalse);
+    },
+  );
+
+  test(
+    '/ready returns 503 when REDIS_ENABLED=true and redis is unavailable',
     () async {
       final db = await HailODatabase().openInMemory();
       addTearDown(() async => db.close());
@@ -263,6 +295,7 @@ void main() {
           'migration_head': 25,
         },
         environmentMap: const <String, String>{
+          'REDIS_ENABLED': 'true',
           'REDIS_URL': 'redis://localhost:6379/0',
         },
       );
@@ -271,13 +304,14 @@ void main() {
       expect(response.statusCode, 503);
       final body = await _decodeBody(response);
       expect(body['ready'], isFalse);
-      expect(body['redis'], isFalse);
+      expect(body['redis_enabled'], isTrue);
+      expect(body['redis_configured'], isTrue);
       expect(body['redis_ready'], isFalse);
     },
   );
 
   test(
-    '/ready returns 200 when REDIS_URL is set and redis health is good',
+    '/ready returns 200 when REDIS_ENABLED=true and redis health is good',
     () async {
       final db = await HailODatabase().openInMemory();
       addTearDown(() async => db.close());
@@ -295,6 +329,7 @@ void main() {
           'migration_head': 25,
         },
         environmentMap: const <String, String>{
+          'REDIS_ENABLED': 'true',
           'REDIS_URL': 'redis://localhost:6379/0',
         },
         redisClient: InMemoryRedisClient(),
@@ -305,6 +340,8 @@ void main() {
       final body = await _decodeBody(response);
       expect(body['ready'], isTrue);
       expect(body['redis'], isTrue);
+      expect(body['redis_enabled'], isTrue);
+      expect(body['redis_configured'], isTrue);
       expect(body['redis_ready'], isTrue);
     },
   );

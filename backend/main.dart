@@ -11,6 +11,7 @@ import 'infra/migrator.dart';
 import 'infra/postgres_provider.dart';
 import 'infra/production_config_validator.dart';
 import 'infra/redis_client.dart';
+import 'infra/redis_manager.dart';
 import 'infra/request_metrics.dart';
 import 'infra/runtime_config.dart';
 import 'infra/sentry_observability.dart';
@@ -192,7 +193,6 @@ Future<void> main() async {
           'false';
       final metricsPublic =
           (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
-      final redisUrl = (env['REDIS_URL'] ?? '').trim();
       final adminTokenEnabled =
           (env['ADMIN_TOKEN_ENABLED'] ?? 'false').trim().toLowerCase() ==
           'true';
@@ -203,19 +203,17 @@ Future<void> main() async {
           'true';
       final migrationHeadVersion =
           BackendPostgresMigrator.migrationHeadVersion();
-      RedisQueueClient? redisClient;
+      final redisManager = await RedisManager.fromEnvironment(
+        env,
+        warningSink: stderr.writeln,
+      );
+      final RedisQueueClient? redisClient = redisManager.client;
       QueueJobRegistry? queueJobRegistry;
       QueueJobProcessor? queueJobProcessor;
-      if (redisUrl.isNotEmpty) {
-        final redis = RedisClient(
-          redisUrl: redisUrl,
-          warningSink: stderr.writeln,
-        );
-        await redis.connect();
-        redisClient = redis;
+      if (redisManager.enabled && redisClient != null) {
         queueJobRegistry = QueueJobRegistry();
         queueJobProcessor = QueueJobProcessor(
-          redisClient: redis,
+          redisClient: redisClient,
           registry: queueJobRegistry,
           warningSink: stderr.writeln,
         );
@@ -303,7 +301,9 @@ Future<void> main() async {
         'db_query_timeout_ms': dbQueryTimeoutMs,
         'request_idle_timeout_seconds': requestIdleTimeoutSeconds,
         'request_max_body_bytes': requestMaxBodyBytes,
-        'redis_enabled': redisClient != null,
+        'redis_enabled': redisManager.enabled,
+        'redis_configured': redisManager.configured,
+        'redis_client_connected': redisClient != null,
       };
       final handler = AppServer(
         db: sqliteDb,
@@ -387,7 +387,7 @@ Future<void> main() async {
         );
         queueJobProcessor?.stop();
         await server.close(force: true);
-        await redisClient?.close();
+        await redisManager.close();
         await DbProvider.instance.close();
         rethrow;
       }
@@ -436,7 +436,7 @@ Future<void> main() async {
         }
       } finally {
         queueJobProcessor?.stop();
-        await redisClient?.close();
+        await redisManager.close();
         await DbProvider.instance.close();
       }
     },

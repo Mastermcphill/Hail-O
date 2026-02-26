@@ -90,7 +90,6 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
-          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       returnsNormally,
@@ -109,7 +108,6 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
-          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       returnsNormally,
@@ -125,7 +123,6 @@ void main() {
           'JWT_SECRET': 'super-secret',
           'ALLOWED_ORIGINS': 'https://app.hailo.dev',
           'SENTRY_DSN': 'https://public@sentry.io/1',
-          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       throwsA(
@@ -151,7 +148,6 @@ void main() {
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
           'OTP_DEV_BYPASS': 'true',
-          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       throwsA(
@@ -164,7 +160,7 @@ void main() {
     );
   });
 
-  test('requires redis url in production', () {
+  test('requires redis url in production only when REDIS_ENABLED=true', () {
     expect(
       () => validateProductionConfig(
         environment: 'production',
@@ -175,6 +171,7 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
+          'REDIS_ENABLED': 'true',
         },
       ),
       throwsA(
@@ -184,6 +181,24 @@ void main() {
           contains('REDIS_URL'),
         ),
       ),
+    );
+  });
+
+  test('does not require redis url in production when REDIS_ENABLED=false', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
+          'REDIS_ENABLED': 'false',
+        },
+      ),
+      returnsNormally,
     );
   });
 
@@ -200,7 +215,7 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
-          'REDIS_URL': 'redis://localhost:6379/0',
+          'REDIS_ENABLED': 'false',
         },
       ),
       returnsNormally,

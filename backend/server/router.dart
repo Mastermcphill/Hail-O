@@ -81,6 +81,7 @@ Handler buildApiRouter({
   final strictEnvironment = _isStrictEnvironment(normalizedRuntimeEnvironment);
   final essentialEnvReady =
       !strictEnvironment || (env['JWT_SECRET'] ?? '').trim().isNotEmpty;
+  final redisEnabled = _parseBool(env['REDIS_ENABLED']);
   final redisConfigured = (env['REDIS_URL'] ?? '').trim().isNotEmpty;
   final auditLogStore = AuditLogStore(
     sqliteDb: db,
@@ -151,7 +152,6 @@ Handler buildApiRouter({
             defaultValue: 8,
           ),
           redisClient: redisClient,
-          warningSink: stderr.writeln,
         );
   final ridesController = db == null
       ? null
@@ -355,6 +355,7 @@ Handler buildApiRouter({
         essentialEnvReady: essentialEnvReady,
         paymentsReady: paymentsReady,
         otpReady: otpReady,
+        redisEnabled: redisEnabled,
         redisClient: redisClient,
         redisConfigured: redisConfigured,
       ),
@@ -372,6 +373,7 @@ Handler buildApiRouter({
         essentialEnvReady: essentialEnvReady,
         paymentsReady: paymentsReady,
         otpReady: otpReady,
+        redisEnabled: redisEnabled,
         redisClient: redisClient,
         redisConfigured: redisConfigured,
       ),
@@ -439,6 +441,7 @@ Future<Response> _readyHandler(
   required bool essentialEnvReady,
   required bool paymentsReady,
   required bool otpReady,
+  required bool redisEnabled,
   required RedisQueueClient? redisClient,
   required bool redisConfigured,
 }) async {
@@ -468,16 +471,16 @@ Future<Response> _readyHandler(
   }
 
   final migrationsOk = migrationsMatch ?? true;
-  final redisOk = !redisConfigured
-      ? true
-      : redisClient != null && await redisClient.ping();
+  final redisReady = redisEnabled
+      ? redisClient != null && await redisClient.ping()
+      : false;
   final isReady =
       dbOk &&
       migrationsOk &&
       essentialEnvReady &&
       paymentsReady &&
       otpReady &&
-      redisOk;
+      (!redisEnabled || redisReady);
   final payload = <String, Object?>{
     'ok': isReady,
     'service': 'hail-o-backend',
@@ -488,8 +491,10 @@ Future<Response> _readyHandler(
     'essential_env_ready': essentialEnvReady,
     'payments_ready': paymentsReady,
     'otp_ready': otpReady,
-    'redis': redisOk,
-    'redis_ready': redisOk,
+    'redis': redisReady,
+    'redis_configured': redisConfigured,
+    'redis_enabled': redisEnabled,
+    'redis_ready': redisReady,
     'ready': isReady,
     if (expectedMigrationHead != null)
       'expected_migration_head': expectedMigrationHead,

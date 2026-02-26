@@ -26,7 +26,6 @@ class _OtpRateLimiter {
     required this.verifyLimitPerIp,
     required this.verifyLimitPerPhone,
     this.redisClient,
-    this.warningSink,
     DateTime Function()? nowUtc,
   }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
 
@@ -36,7 +35,6 @@ class _OtpRateLimiter {
   final int verifyLimitPerIp;
   final int verifyLimitPerPhone;
   final RedisQueueClient? redisClient;
-  final void Function(String line)? warningSink;
   final DateTime Function() _nowUtc;
 
   final Map<String, _OtpRateLimitBucket> _requestIpBuckets =
@@ -154,8 +152,7 @@ class _OtpRateLimiter {
     try {
       final count = await client.incrementWithWindow(key, window: window);
       return count <= limit;
-    } catch (error) {
-      warningSink?.call('WARN: otp redis rate limit unavailable: $error');
+    } catch (_) {
       return null;
     }
   }
@@ -174,7 +171,6 @@ class AuthController {
     int otpVerifyLimitPerIp = 12,
     int otpVerifyLimitPerPhone = 8,
     RedisQueueClient? redisClient,
-    void Function(String line)? warningSink,
     DateTime Function()? nowUtc,
   }) : _authService = authService,
        _tokenService = tokenService,
@@ -190,7 +186,6 @@ class AuthController {
                verifyLimitPerIp: otpVerifyLimitPerIp,
                verifyLimitPerPhone: otpVerifyLimitPerPhone,
                redisClient: redisClient,
-               warningSink: warningSink,
                nowUtc: nowUtc,
              );
 

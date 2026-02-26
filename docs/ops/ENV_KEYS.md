@@ -26,7 +26,8 @@ This file is the operational inventory of environment variables used by backend 
 | `REQUEST_IDLE_TIMEOUT_SECONDS` | Optional | dev, staging, prod | HTTP idle timeout. |
 | `REQUEST_MAX_BODY_BYTES` | Optional | dev, staging, prod | Request body size limit. |
 | `ALLOWED_ORIGINS` | Yes | staging, prod | CORS origin allow-list. |
-| `REDIS_URL` | Required in prod (recommended staging) | staging, prod | Redis connection URL for distributed rate limiting and job queues. |
+| `REDIS_ENABLED` | Optional (default false) | dev, staging, prod | Enables Redis-backed queue/rate-limit features and strict Redis readiness checks. |
+| `REDIS_URL` | Required only when `REDIS_ENABLED=true` in prod | staging, prod | Redis connection URL for distributed rate limiting and job queues. |
 
 ## Auth / Tokens
 

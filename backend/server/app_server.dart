@@ -189,7 +189,6 @@ class AppServer {
                         maxAdminRequestsPerUser: maxAdminRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
                         redisClient: redisClient,
-                        warningSink: stderr.writeln,
                       ),
                     )
                     .addHandler(router)

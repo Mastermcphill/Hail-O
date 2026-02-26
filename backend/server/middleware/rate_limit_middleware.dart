@@ -32,7 +32,6 @@ Middleware rateLimitMiddleware({
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'healthz', 'ready'},
   RedisQueueClient? redisClient,
-  void Function(String line)? warningSink,
   NowProvider? nowProvider,
 }) {
   final ipBuckets = <String, _CounterBucket>{};
@@ -40,6 +39,7 @@ Middleware rateLimitMiddleware({
   final now = nowProvider ?? () => DateTime.now().toUtc();
   final webhookRequestsPerUser =
       maxWebhookRequestsPerUser ?? maxRequestsPerUser;
+  var redisOperational = redisClient != null;
 
   bool consumeInMemory(
     Map<String, _CounterBucket> buckets,
@@ -60,20 +60,6 @@ Middleware rateLimitMiddleware({
     }
     bucket.count += 1;
     return true;
-  }
-
-  Future<bool> consumeRedis(String key, int maxRequests) async {
-    final client = redisClient;
-    if (client == null || maxRequests <= 0) {
-      return true;
-    }
-    try {
-      final count = await client.incrementWithWindow(key, window: window);
-      return count <= maxRequests;
-    } catch (error) {
-      warningSink?.call('WARN: redis rate limit counter unavailable: $error');
-      return true;
-    }
   }
 
   return (Handler innerHandler) {
@@ -129,9 +115,16 @@ Middleware rateLimitMiddleware({
       }
       final ipBucketKey = 'ratelimit:$bucketScope:ip:$ipKey';
       final userBucketKey = 'ratelimit:$bucketScope:user:$userId';
-      final ipAllowed = redisClient == null
-          ? consumeInMemory(ipBuckets, ipBucketKey, currentUtc, ipLimit)
-          : await consumeRedis(ipBucketKey, ipLimit);
+      final ipAllowed = await _consumeWithFallback(
+        redisClient: redisClient,
+        useRedis: redisOperational,
+        key: ipBucketKey,
+        maxRequests: ipLimit,
+        window: window,
+        consumeInMemory: () =>
+            consumeInMemory(ipBuckets, ipBucketKey, currentUtc, ipLimit),
+        onRedisFailure: () => redisOperational = false,
+      );
       if (!ipAllowed) {
         return Future<Response>.value(
           jsonErrorResponse(
@@ -146,14 +139,20 @@ Middleware rateLimitMiddleware({
 
       if (userLimit > 0 &&
           userId.isNotEmpty &&
-          !(redisClient == null
-              ? consumeInMemory(
-                  userBuckets,
-                  userBucketKey,
-                  currentUtc,
-                  userLimit,
-                )
-              : await consumeRedis(userBucketKey, userLimit))) {
+          !await _consumeWithFallback(
+            redisClient: redisClient,
+            useRedis: redisOperational,
+            key: userBucketKey,
+            maxRequests: userLimit,
+            window: window,
+            consumeInMemory: () => consumeInMemory(
+              userBuckets,
+              userBucketKey,
+              currentUtc,
+              userLimit,
+            ),
+            onRedisFailure: () => redisOperational = false,
+          )) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,
@@ -168,6 +167,31 @@ Middleware rateLimitMiddleware({
       return innerHandler(request);
     };
   };
+}
+
+Future<bool> _consumeWithFallback({
+  required RedisQueueClient? redisClient,
+  required bool useRedis,
+  required String key,
+  required int maxRequests,
+  required Duration window,
+  required bool Function() consumeInMemory,
+  required void Function() onRedisFailure,
+}) async {
+  if (maxRequests <= 0) {
+    return true;
+  }
+  final client = redisClient;
+  if (!useRedis || client == null) {
+    return consumeInMemory();
+  }
+  try {
+    final count = await client.incrementWithWindow(key, window: window);
+    return count <= maxRequests;
+  } catch (_) {
+    onRedisFailure();
+    return consumeInMemory();
+  }
 }
 
 String _canonicalPath(String path) {
