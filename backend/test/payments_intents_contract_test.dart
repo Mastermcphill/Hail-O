@@ -279,6 +279,14 @@ Map<String, Object?> _normalizeIntentPayload(Map<String, Object?> payload) {
       data.map((key, value) => MapEntry(key.toString(), value)),
     );
     normalizedData['id'] = '<intent_id>';
+    if ((normalizedData['provider_ref'] as String?)?.trim().isNotEmpty ==
+        true) {
+      normalizedData['provider_ref'] = '<provider_ref>';
+    }
+    if ((normalizedData['client_secret'] as String?)?.trim().isNotEmpty ==
+        true) {
+      normalizedData['client_secret'] = '<client_secret>';
+    }
     normalized['data'] = normalizedData;
   }
   return normalized;

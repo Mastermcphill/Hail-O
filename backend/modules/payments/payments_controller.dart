@@ -286,6 +286,7 @@ class PaymentsController {
       'amount_minor': intent.amountMinor,
       'currency': intent.currency,
       'provider': intent.provider,
+      'provider_ref': intent.providerRef,
     };
     final clientSecret = (intent.clientSecret ?? '').trim();
     if (clientSecret.isNotEmpty) {

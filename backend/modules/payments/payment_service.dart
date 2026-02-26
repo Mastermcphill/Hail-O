@@ -99,6 +99,8 @@ class PaymentService {
     MarketplaceEntitlementService? entitlementService,
     String? configuredProvider,
     String? paystackSecretKey,
+    String? paystackApiBaseUrl,
+    String? paystackCallbackUrl,
     String? stripeWebhookSecret,
     RequestMetrics? metrics,
     AuditLogStore? auditLogStore,
@@ -110,6 +112,10 @@ class PaymentService {
     final provider = switch (providerName) {
       'paystack' => PaystackPaymentProvider(
         secretKey: (paystackSecretKey ?? '').trim(),
+        apiBaseUrl: (paystackApiBaseUrl ?? '').trim().isEmpty
+            ? PaystackPaymentProvider.defaultApiBaseUrl
+            : (paystackApiBaseUrl ?? '').trim(),
+        callbackUrl: (paystackCallbackUrl ?? '').trim(),
         uuid: uuid,
       ),
       'stripe' => StripePaymentProvider(
@@ -187,17 +193,27 @@ class PaymentService {
       return existing;
     }
 
-    final providerRef = '${_provider.provider}_${_uuid.v4()}';
+    final checkout = await _provider.createCheckoutOrIntent(purchase: purchase);
+    final providerName = checkout.provider.trim().isEmpty
+        ? _provider.provider
+        : checkout.provider.trim().toLowerCase();
+    final providerRef = _resolveProviderRefFromCheckout(
+      checkout: checkout,
+      purchaseId: purchase.id,
+    );
+    final intentStatus = _resolveIntentStatusFromCheckout(checkout.status);
+    final clientSecret = _extractClientSecret(checkout.raw);
     PaymentIntentRecord intent;
     try {
       intent = await _paymentIntentRepository.createIntent(
         purchaseId: purchase.id,
         userId: purchase.userId,
-        provider: _provider.provider,
-        status: 'pending',
+        provider: providerName,
+        status: intentStatus,
         amountMinor: purchase.totalAmountMinor,
         currency: purchase.currency,
         providerRef: providerRef,
+        clientSecret: clientSecret,
       );
     } catch (_) {
       final concurrent = await _paymentIntentRepository.findActiveByPurchaseId(
@@ -213,7 +229,7 @@ class PaymentService {
       purchaseId: purchase.id,
       userId: purchase.userId,
       entryType: 'charge_authorized',
-      provider: _provider.provider,
+      provider: providerName,
       providerRef: providerRef,
       amountMinor: purchase.totalAmountMinor,
       currency: purchase.currency,
@@ -221,6 +237,8 @@ class PaymentService {
         'intent_id': intent.id,
         'intent_status': intent.status,
         'phase': 'authorization_pending',
+        'checkout_status': checkout.status,
+        ..._sanitizeCheckoutRaw(checkout.raw),
       },
       occurredAt: _nowUtc(),
     );
@@ -922,6 +940,89 @@ class PaymentService {
   bool _isPendingPaymentStatus(String status) {
     final normalized = status.trim().toLowerCase();
     return normalized == 'pending' || normalized == 'pending_payment';
+  }
+
+  String _resolveProviderRefFromCheckout({
+    required PaymentCheckoutResult checkout,
+    required String purchaseId,
+  }) {
+    final provided = checkout.providerPaymentIntentId.trim();
+    if (provided.isNotEmpty) {
+      return provided;
+    }
+    return '${checkout.provider.trim().isEmpty ? _provider.provider : checkout.provider.trim()}_${purchaseId.trim()}';
+  }
+
+  String _resolveIntentStatusFromCheckout(String checkoutStatus) {
+    final normalized = checkoutStatus.trim().toLowerCase();
+    switch (normalized) {
+      case 'failed':
+        return 'failed';
+      case 'canceled':
+      case 'cancelled':
+        return 'canceled';
+      case 'processing':
+        return 'processing';
+      case 'requires_action':
+        return 'requires_action';
+      case 'pending':
+      case 'succeeded':
+      case 'captured':
+      default:
+        // Intent creation remains pre-settlement; final state changes on webhook.
+        return 'pending';
+    }
+  }
+
+  String? _extractClientSecret(Map<String, Object?> raw) {
+    final directClientSecret = _trimString(raw['client_secret']);
+    if (directClientSecret != null) {
+      return directClientSecret;
+    }
+    final authorizationUrl = _trimString(raw['authorization_url']);
+    if (authorizationUrl != null) {
+      return authorizationUrl;
+    }
+    final checkoutUrl = _trimString(raw['checkout_url']);
+    if (checkoutUrl != null) {
+      return checkoutUrl;
+    }
+    final accessCode = _trimString(raw['access_code']);
+    if (accessCode != null) {
+      return accessCode;
+    }
+    return null;
+  }
+
+  Map<String, Object?> _sanitizeCheckoutRaw(Map<String, Object?> raw) {
+    final sanitized = <String, Object?>{};
+    final reference = _trimString(raw['reference']);
+    final authorizationUrl = _trimString(raw['authorization_url']);
+    final accessCode = _trimString(raw['access_code']);
+    final initMode = _trimString(raw['init_mode']);
+    if (reference != null) {
+      sanitized['reference'] = reference;
+    }
+    if (authorizationUrl != null) {
+      sanitized['authorization_url'] = authorizationUrl;
+    }
+    if (accessCode != null) {
+      sanitized['access_code'] = accessCode;
+    }
+    if (initMode != null) {
+      sanitized['init_mode'] = initMode;
+    }
+    return sanitized;
+  }
+
+  String? _trimString(Object? value) {
+    if (value is String) {
+      final normalized = value.trim();
+      if (normalized.isNotEmpty) {
+        return normalized;
+      }
+    }
+    return null;
   }
 
   void _logWebhookOutcome({

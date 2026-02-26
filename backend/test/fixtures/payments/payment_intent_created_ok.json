@@ -6,6 +6,7 @@
     "status": "pending",
     "amount_minor": 4200,
     "currency": "NGN",
-    "provider": "paystack"
+    "provider": "paystack",
+    "provider_ref": "<provider_ref>"
   }
 }
