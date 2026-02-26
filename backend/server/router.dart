@@ -14,6 +14,7 @@ import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
+import '../infra/audit_log_store.dart';
 import '../infra/request_context.dart';
 import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
@@ -68,6 +69,10 @@ Handler buildApiRouter({
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
   final runtimeEnvironment = (env['ENV'] ?? env['FLIPTRYBE_ENV'] ?? 'unknown')
       .trim();
+  final auditLogStore = AuditLogStore(
+    sqliteDb: db,
+    postgresProvider: postgresProvider,
+  );
 
   final authService = db == null
       ? null
@@ -117,6 +122,7 @@ Handler buildApiRouter({
           dispatchPricingService: DispatchPricingService(
             config: DispatchPricingConfig.fromEnvironment(env),
           ),
+          auditLogStore: auditLogStore,
         );
   final settlementController = db == null
       ? null
@@ -155,6 +161,7 @@ Handler buildApiRouter({
     paystackSecretKey: env['PAYSTACK_SECRET_KEY'],
     stripeWebhookSecret: env['STRIPE_WEBHOOK_SECRET'],
     metrics: requestMetrics,
+    auditLogStore: auditLogStore,
   );
   final paymentsController = PaymentsController(
     paymentService: paymentService,
@@ -198,6 +205,7 @@ Handler buildApiRouter({
     enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
     reconciliationService: reconciliationService,
     revenueService: revenueService,
+    auditLogStore: auditLogStore,
   );
   final adminUsersController = authService == null
       ? null

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:postgres/postgres.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../infra/audit_log_store.dart';
 import '../../infra/request_metrics.dart';
 import '../../infra/postgres_provider.dart';
 import '../marketplace/billing_ledger_repository.dart';
@@ -55,6 +56,7 @@ class PaymentService {
     PaymentWebhookEventRepository? paymentWebhookEventRepository,
     MarketplaceEntitlementService? entitlementService,
     RequestMetrics? metrics,
+    AuditLogStore? auditLogStore,
     void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
@@ -83,6 +85,7 @@ class PaymentService {
                  )),
        _entitlementService = entitlementService,
        _metrics = metrics,
+       _auditLogStore = auditLogStore,
        _logSink = logSink ?? print,
        _uuid = uuid ?? const Uuid(),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
@@ -98,6 +101,7 @@ class PaymentService {
     String? paystackSecretKey,
     String? stripeWebhookSecret,
     RequestMetrics? metrics,
+    AuditLogStore? auditLogStore,
     void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
@@ -124,6 +128,7 @@ class PaymentService {
       paymentWebhookEventRepository: paymentWebhookEventRepository,
       entitlementService: entitlementService,
       metrics: metrics,
+      auditLogStore: auditLogStore,
       logSink: logSink,
       uuid: uuid,
       nowUtc: nowUtc,
@@ -138,6 +143,7 @@ class PaymentService {
   final PaymentWebhookEventRepository _paymentWebhookEventRepository;
   final MarketplaceEntitlementService? _entitlementService;
   final RequestMetrics? _metrics;
+  final AuditLogStore? _auditLogStore;
   final void Function(String line) _logSink;
   final Uuid _uuid;
   final DateTime Function() _nowUtc;
@@ -383,6 +389,7 @@ class PaymentService {
       return;
     }
 
+    var purchaseActivated = false;
     await _postgresProvider.withTxn((txn) async {
       final rows = await txn.query(
         '''
@@ -403,6 +410,7 @@ class PaymentService {
         },
       );
       if (rows.isNotEmpty) {
+        purchaseActivated = true;
         await _appendTimeline(
           txn,
           purchaseId: purchaseId,
@@ -414,6 +422,21 @@ class PaymentService {
         );
       }
     });
+    if (purchaseActivated) {
+      await _auditLogStore?.record(
+        actorType: 'user',
+        actorUserId: null,
+        action: 'payments.purchase.status_transition',
+        resourceType: 'marketplace_purchase',
+        resourceId: purchaseId,
+        metadata: <String, Object?>{
+          'from_status': 'unknown',
+          'to_status': 'ACTIVE',
+          'provider': _provider.provider,
+          'provider_payment_intent_id': providerPaymentIntentId,
+        },
+      );
+    }
     final entitlementService = _entitlementService;
     if (entitlementService != null) {
       await entitlementService.syncByPurchaseId(
@@ -552,9 +575,9 @@ class PaymentService {
       return eventType.isEmpty ? 'webhook_recorded' : eventType;
     }
 
-    final timelineAction = await _postgresProvider.withTxn((txn) async {
-      String? status;
-      String timelineType;
+    final timelineMutation = await _postgresProvider.withTxn((txn) async {
+      late final String status;
+      late final String timelineType;
       switch (eventType) {
         case 'payment_failed':
           status = 'pending_payment';
@@ -629,27 +652,47 @@ class PaymentService {
           'processed_at': _nowUtc(),
         },
       );
-      return timelineType;
+      return _WebhookTimelineMutation(
+        action: timelineType,
+        toStatus: status,
+        purchaseUpdated: updated.isNotEmpty,
+      );
     });
+    if (timelineMutation.purchaseUpdated) {
+      await _auditLogStore?.record(
+        actorType: 'user',
+        actorUserId: null,
+        action: 'payments.purchase.status_transition',
+        resourceType: 'marketplace_purchase',
+        resourceId: purchaseId,
+        metadata: <String, Object?>{
+          'from_status': 'unknown',
+          'to_status': timelineMutation.toStatus,
+          'provider': event.provider,
+          'provider_event_id': event.providerEventId,
+          'event_type': event.eventType,
+        },
+      );
+    }
 
     final entitlementService = _entitlementService;
     if (entitlementService != null) {
-      if (timelineAction == 'payment_succeeded' ||
-          timelineAction == 'invoice_paid') {
+      if (timelineMutation.action == 'payment_succeeded' ||
+          timelineMutation.action == 'invoice_paid') {
         await entitlementService.syncByPurchaseId(
           purchaseId: purchaseId,
           reason: 'payment_status_paid',
         );
-      } else if (timelineAction == 'subscription_canceled' ||
-          timelineAction == 'chargeback' ||
-          timelineAction == 'refund_succeeded') {
+      } else if (timelineMutation.action == 'subscription_canceled' ||
+          timelineMutation.action == 'chargeback' ||
+          timelineMutation.action == 'refund_succeeded') {
         await entitlementService.revokeByPurchaseId(
           purchaseId: purchaseId,
-          reason: 'payment_status_$timelineAction',
+          reason: 'payment_status_${timelineMutation.action}',
         );
       }
     }
-    return timelineAction;
+    return timelineMutation.action;
   }
 
   Future<void> _appendEscrowTransferLedgerEntries({
@@ -909,4 +952,16 @@ class _FinancialContext {
   final String userId;
   final int amountMinor;
   final String currency;
+}
+
+class _WebhookTimelineMutation {
+  const _WebhookTimelineMutation({
+    required this.action,
+    required this.toStatus,
+    required this.purchaseUpdated,
+  });
+
+  final String action;
+  final String toStatus;
+  final bool purchaseUpdated;
 }

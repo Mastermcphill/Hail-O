@@ -4,7 +4,8 @@ import 'package:shelf/shelf.dart';
 
 import '../../infra/request_context.dart';
 
-const String _defaultEmergencyActorUserId = 'admin-token-emergency';
+const String kEmergencyAdminActorUserId = 'admin-token-emergency';
+const String kAdminTokenAuthContextKey = 'hailo.admin_token_authenticated';
 
 Middleware adminEmergencyAccessMiddleware({
   required String adminToken,
@@ -34,13 +35,23 @@ Middleware adminEmergencyAccessMiddleware({
         current.copyWith(
           userId: (current.userId?.trim().isNotEmpty ?? false)
               ? current.userId
-              : _defaultEmergencyActorUserId,
+              : kEmergencyAdminActorUserId,
           role: 'admin',
         ),
       );
-      return innerHandler(emergencyRequest);
+      final markedRequest = emergencyRequest.change(
+        context: <String, Object?>{
+          ...emergencyRequest.context,
+          kAdminTokenAuthContextKey: true,
+        },
+      );
+      return innerHandler(markedRequest);
     };
   };
+}
+
+bool requestUsedAdminToken(Request request) {
+  return request.context[kAdminTokenAuthContextKey] == true;
 }
 
 String _canonicalPath(String path) {

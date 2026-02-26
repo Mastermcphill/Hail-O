@@ -108,6 +108,18 @@ void main() {
     expect(usersList, isNotEmpty);
     expect(usersList.first.containsKey('id'), isTrue);
     expect(usersList.first.containsKey('roles'), isTrue);
+    final adminAuditRows = await db.query(
+      'audit_logs',
+      where: 'action = ? AND resource_type = ?',
+      whereArgs: <Object>['admin.list_users', 'admin_endpoint'],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    expect(adminAuditRows, isNotEmpty);
+    expect(adminAuditRows.first['actor_type'], 'user');
+    expect(adminAuditRows.first['actor_user_id'], 'admin-user-1');
+    final resourceId = (adminAuditRows.first['resource_id'] as String?) ?? '';
+    expect(resourceId == 'users' || resourceId == 'admin/users', isTrue);
 
     final trips = await _request(
       handler,

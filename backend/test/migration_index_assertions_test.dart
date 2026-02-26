@@ -37,6 +37,7 @@ void main() {
     final dispatchSql = sqlByName['021_dispatch_trips.sql'] ?? '';
     final dispatchAssignmentsSql =
         sqlByName['022_dispatch_trip_assignments.sql'] ?? '';
+    final auditLogsSql = sqlByName['023_audit_logs.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -349,6 +350,32 @@ void main() {
       ),
       isTrue,
       reason: 'dispatch trip assignments driver timeline index must exist',
+    );
+    expect(
+      auditLogsSql.contains('CREATE TABLE IF NOT EXISTS audit_logs'),
+      isTrue,
+      reason: 'audit logs table must exist',
+    );
+    expect(
+      auditLogsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at_desc',
+      ),
+      isTrue,
+      reason: 'audit logs created_at index must exist',
+    );
+    expect(
+      auditLogsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user_id',
+      ),
+      isTrue,
+      reason: 'audit logs actor index must exist',
+    );
+    expect(
+      auditLogsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_audit_logs_resource',
+      ),
+      isTrue,
+      reason: 'audit logs resource index must exist',
     );
   });
 }

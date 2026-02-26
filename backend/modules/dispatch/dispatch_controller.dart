@@ -4,6 +4,7 @@ import 'package:shelf_router/shelf_router.dart';
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/dispatch_pricing_service.dart';
 import '../../../lib/domain/services/dispatch_trip_service.dart';
+import '../../infra/audit_log_store.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 
@@ -11,11 +12,14 @@ class DispatchController {
   DispatchController({
     required DispatchTripService dispatchTripService,
     required DispatchPricingService dispatchPricingService,
+    required AuditLogStore auditLogStore,
   }) : _dispatchTripService = dispatchTripService,
-       _dispatchPricingService = dispatchPricingService;
+       _dispatchPricingService = dispatchPricingService,
+       _auditLogStore = auditLogStore;
 
   final DispatchTripService _dispatchTripService;
   final DispatchPricingService _dispatchPricingService;
+  final AuditLogStore _auditLogStore;
 
   Router get router {
     final router = Router();
@@ -79,6 +83,20 @@ class DispatchController {
       actorIsAdmin: _isAdmin(request),
       payload: payload,
     );
+    final event = Map<String, Object?>.from(
+      (updated['event'] as Map?) ?? const <String, Object?>{},
+    );
+    await _auditLogStore.recordFromRequest(
+      request,
+      action: 'dispatch.trip.status_transition',
+      resourceType: 'trip',
+      resourceId: tripId.trim(),
+      metadata: <String, Object?>{
+        'from_status': (event['from_status'] as String?)?.trim(),
+        'to_status': (event['to_status'] as String?)?.trim(),
+        'event_id': (event['id'] as String?)?.trim(),
+      },
+    );
     return jsonResponse(200, <String, Object?>{'ok': true, ...updated});
   }
 
@@ -91,6 +109,23 @@ class DispatchController {
         actorUserId: actorUserId,
         actorIsAdmin: _isAdmin(request),
         payload: payload,
+      );
+      final trip = Map<String, Object?>.from(
+        (assigned['trip'] as Map?) ?? const <String, Object?>{},
+      );
+      final assignment = Map<String, Object?>.from(
+        (assigned['assignment'] as Map?) ?? const <String, Object?>{},
+      );
+      await _auditLogStore.recordFromRequest(
+        request,
+        action: 'dispatch.trip.assignment',
+        resourceType: 'trip',
+        resourceId: tripId.trim(),
+        metadata: <String, Object?>{
+          'driver_id': (assignment['driver_id'] as String?)?.trim(),
+          'assignment_id': (assignment['id'] as String?)?.trim(),
+          'trip_status': (trip['status'] as String?)?.trim(),
+        },
       );
       return jsonResponse(200, <String, Object?>{'ok': true, ...assigned});
     } on DispatchNotFoundError catch (error) {

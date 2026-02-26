@@ -109,7 +109,7 @@ void main() {
     final db = await HailODatabase().openInMemory();
     addTearDown(() async => db.close());
     final handler = _buildHandler(db);
-    final token = await _registerAndLogin(
+    final session = await _registerAndLoginSession(
       handler,
       email: 'dispatch.transition.ok@example.com',
       role: 'rider',
@@ -120,7 +120,7 @@ void main() {
       handler,
       method: 'POST',
       path: '/dispatch/trips',
-      token: token,
+      token: session.token,
       body: const <String, Object?>{
         'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
         'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
@@ -134,7 +134,7 @@ void main() {
       handler,
       method: 'POST',
       path: '/dispatch/trips/$tripId/status',
-      token: token,
+      token: session.token,
       body: const <String, Object?>{
         'status': 'searching',
         'metadata': <String, Object?>{'source': 'test'},
@@ -148,6 +148,24 @@ void main() {
     expect(event['from_status'], 'created');
     expect(event['to_status'], 'searching');
     expect(event['actor_user_id'], isNotNull);
+    final auditRows = await db.query(
+      'audit_logs',
+      where: 'action = ? AND resource_type = ? AND resource_id = ?',
+      whereArgs: <Object>['dispatch.trip.status_transition', 'trip', tripId],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    expect(auditRows, isNotEmpty);
+    final audit = Map<String, Object?>.from(auditRows.first);
+    expect(audit['actor_type'], 'user');
+    expect(audit['actor_user_id'], session.userId);
+    expect(audit['resource_type'], 'trip');
+    expect(audit['resource_id'], tripId);
+    final metadata = Map<String, Object?>.from(
+      jsonDecode((audit['metadata'] as String?) ?? '{}') as Map,
+    );
+    expect(metadata['from_status'], 'created');
+    expect(metadata['to_status'], 'searching');
   });
 
   test(

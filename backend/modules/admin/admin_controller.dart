@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
@@ -7,6 +8,7 @@ import 'package:sqflite_common/sqlite_api.dart';
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/wallet_reversal_service.dart';
 import '../../infra/api_contract.dart';
+import '../../infra/audit_log_store.dart';
 import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../../infra/sentry_observability.dart';
@@ -27,6 +29,7 @@ class AdminController {
     MarketplaceReconciliationService? reconciliationService,
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
+    AuditLogStore? auditLogStore,
   }) : _db = db,
        _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
@@ -36,7 +39,8 @@ class AdminController {
        _enableSentrySmokeEndpoint = enableSentrySmokeEndpoint,
        _reconciliationService = reconciliationService,
        _revenueService = revenueService ?? MarketplaceRevenueService(),
-       _auditLogger = auditLogger ?? AuditLogger();
+       _auditLogger = auditLogger ?? AuditLogger(),
+       _auditLogStore = auditLogStore ?? AuditLogStore(sqliteDb: db);
 
   final Database? _db;
   final WalletReversalService? _walletReversalService;
@@ -46,6 +50,7 @@ class AdminController {
   final MarketplaceReconciliationService? _reconciliationService;
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
+  final AuditLogStore _auditLogStore;
 
   static const Set<String> _tripStatuses = <String>{
     'created',
@@ -170,6 +175,12 @@ class AdminController {
 
   Future<Response> _listUsers(Request request) async {
     _requireAdmin(request);
+    await _auditLogStore.recordFromRequest(
+      request,
+      action: 'admin.list_users',
+      resourceType: 'admin_endpoint',
+      resourceId: _auditResourceId(request),
+    );
     final db = _db;
     if (db == null) {
       return jsonResponse(501, <String, Object?>{
@@ -1042,6 +1053,29 @@ class AdminController {
       targetId: targetId,
       reasonCode: reasonCode,
     );
+    unawaited(
+      _auditLogStore.recordFromRequest(
+        request,
+        action: 'admin.$action',
+        resourceType: 'admin_endpoint',
+        resourceId: _auditResourceId(request),
+        metadata: <String, Object?>{
+          'success': success,
+          if (targetId != null && targetId.trim().isNotEmpty)
+            'target_id': targetId.trim(),
+          if (reasonCode != null && reasonCode.trim().isNotEmpty)
+            'reason_code': reasonCode.trim(),
+        },
+      ),
+    );
+  }
+
+  String _auditResourceId(Request request) {
+    final path = request.url.path.trim();
+    if (path.isEmpty) {
+      return 'admin';
+    }
+    return path;
   }
 }
 
