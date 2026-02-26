@@ -3,6 +3,7 @@ import 'package:shelf_router/shelf_router.dart';
 
 import '../../../lib/domain/models/user.dart';
 import '../../../lib/domain/services/auth_service.dart';
+import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../../infra/token_service.dart';
@@ -15,15 +16,18 @@ class AuthController {
     required TokenService tokenService,
     PhoneAuthService? phoneAuthService,
     AuditLogger? auditLogger,
+    AnalyticsEventStore? analyticsEventStore,
   }) : _authService = authService,
        _tokenService = tokenService,
        _phoneAuthService = phoneAuthService,
-       _auditLogger = auditLogger ?? AuditLogger();
+       _auditLogger = auditLogger ?? AuditLogger(),
+       _analyticsEventStore = analyticsEventStore;
 
   final AuthService? _authService;
   final TokenService _tokenService;
   final PhoneAuthService? _phoneAuthService;
   final AuditLogger _auditLogger;
+  final AnalyticsEventStore? _analyticsEventStore;
 
   Router get router {
     final router = Router();
@@ -181,6 +185,10 @@ class AuthController {
         email: phoneE164,
         success: true,
       );
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'auth.otp_requested',
+      );
       return jsonResponse(200, payload);
     } on PhoneAuthFailure catch (error) {
       _auditLogger.authAttempt(
@@ -222,6 +230,10 @@ class AuthController {
         action: 'otp_verify',
         email: phoneE164,
         success: true,
+      );
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'auth.otp_verified',
       );
       return jsonResponse(200, payload);
     } on PhoneAuthFailure catch (error) {

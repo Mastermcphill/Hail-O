@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:shelf/shelf.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../infra/analytics_event_store.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 import 'marketplace_entitlement_service.dart';
@@ -21,12 +22,14 @@ class MarketplaceHandlers {
     MarketplaceRevenueService? revenueService,
     OrgRepository? orgRepository,
     Uuid? uuid,
+    AnalyticsEventStore? analyticsEventStore,
   }) : _offerRepository = offerRepository,
        _paymentService = paymentService,
        _entitlementService = entitlementService,
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _orgRepository = orgRepository,
-       _uuid = uuid ?? const Uuid();
+       _uuid = uuid ?? const Uuid(),
+       _analyticsEventStore = analyticsEventStore;
 
   final MarketplaceOfferRepository _offerRepository;
   final PaymentService? _paymentService;
@@ -34,6 +37,7 @@ class MarketplaceHandlers {
   final MarketplaceRevenueService _revenueService;
   final OrgRepository? _orgRepository;
   final Uuid _uuid;
+  final AnalyticsEventStore? _analyticsEventStore;
   final Map<String, String> _orgIdByPurchaseId = <String, String>{};
   final Map<String, String> _ownerUserIdByPurchaseId = <String, String>{};
   final Map<String, String> _purchaseIdByOrgAndIdempotency = <String, String>{};
@@ -74,6 +78,11 @@ class MarketplaceHandlers {
     final nextCursor = endExclusive < allOffers.length
         ? _encodeCursor(endExclusive)
         : null;
+    await _analyticsEventStore?.emitFromRequest(
+      request,
+      name: 'marketplace.offers_listed',
+      properties: <String, Object?>{'count': data.length},
+    );
     final etag = _etagForPayload(<String, Object?>{
       'offset': start,
       'limit': pagination.limit,
@@ -344,6 +353,17 @@ class MarketplaceHandlers {
       final createPurchaseObject = _createPurchaseObjectPayload(
         purchasePayload,
         clientReference: _resolvedClientReference(purchase),
+      );
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'marketplace.purchase_created',
+        userId: userId,
+        properties: <String, Object?>{
+          'purchase_id': purchase.id,
+          'offer_id': offerId,
+          'quantity': quantity,
+          'org_id': orgId,
+        },
       );
       return _ok(
         request,

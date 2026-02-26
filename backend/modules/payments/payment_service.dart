@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:postgres/postgres.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_log_store.dart';
 import '../../infra/request_metrics.dart';
 import '../../infra/postgres_provider.dart';
@@ -73,6 +74,7 @@ class PaymentService {
     MarketplaceEntitlementService? entitlementService,
     RequestMetrics? metrics,
     AuditLogStore? auditLogStore,
+    AnalyticsEventStore? analyticsEventStore,
     void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
@@ -102,6 +104,7 @@ class PaymentService {
        _entitlementService = entitlementService,
        _metrics = metrics,
        _auditLogStore = auditLogStore,
+       _analyticsEventStore = analyticsEventStore,
        _logSink = logSink ?? print,
        _uuid = uuid ?? const Uuid(),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
@@ -121,6 +124,7 @@ class PaymentService {
     String? stripeWebhookSecret,
     RequestMetrics? metrics,
     AuditLogStore? auditLogStore,
+    AnalyticsEventStore? analyticsEventStore,
     void Function(String line)? logSink,
     Uuid? uuid,
     DateTime Function()? nowUtc,
@@ -153,6 +157,7 @@ class PaymentService {
       entitlementService: entitlementService,
       metrics: metrics,
       auditLogStore: auditLogStore,
+      analyticsEventStore: analyticsEventStore,
       logSink: logSink,
       uuid: uuid,
       nowUtc: nowUtc,
@@ -168,6 +173,7 @@ class PaymentService {
   final MarketplaceEntitlementService? _entitlementService;
   final RequestMetrics? _metrics;
   final AuditLogStore? _auditLogStore;
+  final AnalyticsEventStore? _analyticsEventStore;
   final void Function(String line) _logSink;
   final Uuid _uuid;
   final DateTime Function() _nowUtc;
@@ -340,6 +346,16 @@ class PaymentService {
       );
       throw const PaymentWebhookSignatureException();
     }
+
+    await _analyticsEventStore?.emit(
+      name: 'payments.webhook_received',
+      properties: <String, Object?>{
+        'provider': event.provider,
+        'provider_event_id': event.providerEventId,
+        'event_type': event.eventType,
+        'has_purchase_id': (event.purchaseId ?? '').trim().isNotEmpty,
+      },
+    );
 
     final now = _nowUtc();
     final canonicalRecorded = await _recordCanonicalWebhookEvent(
@@ -711,6 +727,15 @@ class PaymentService {
           'provider_payment_intent_id': providerPaymentIntentId,
         },
       );
+      await _analyticsEventStore?.emit(
+        name: 'payments.succeeded',
+        properties: <String, Object?>{
+          'provider': _provider.provider,
+          'event_type': 'checkout_succeeded',
+          'purchase_id': purchaseId,
+          'provider_payment_intent_id': providerPaymentIntentId,
+        },
+      );
     }
     final entitlementService = _entitlementService;
     if (entitlementService != null) {
@@ -847,6 +872,16 @@ class PaymentService {
     }
 
     if (_postgresProvider == null || purchaseId == null) {
+      await _emitPaymentOutcomeAnalytics(
+        event: event,
+        userId: financialContext.userId,
+        purchaseId: purchaseId ?? event.purchaseId,
+        outcomeStatus: isPaymentSucceeded
+            ? 'succeeded'
+            : isPaymentFailed
+            ? 'failed'
+            : null,
+      );
       return eventType.isEmpty ? 'webhook_recorded' : eventType;
     }
 
@@ -967,7 +1002,41 @@ class PaymentService {
         );
       }
     }
+    await _emitPaymentOutcomeAnalytics(
+      event: event,
+      userId: financialContext.userId,
+      purchaseId: purchaseId,
+      outcomeStatus: timelineMutation.toStatus,
+    );
     return timelineMutation.action;
+  }
+
+  Future<void> _emitPaymentOutcomeAnalytics({
+    required PaymentWebhookEvent event,
+    required String? userId,
+    required String? purchaseId,
+    required String? outcomeStatus,
+  }) async {
+    final eventType = event.eventType.trim().toLowerCase();
+    final isSuccess =
+        eventType == 'payment_succeeded' || eventType == 'invoice_paid';
+    final isFailure = eventType == 'payment_failed';
+    if (!isSuccess && !isFailure) {
+      return;
+    }
+    await _analyticsEventStore?.emit(
+      name: isSuccess ? 'payments.succeeded' : 'payments.failed',
+      userId: _looksLikeUuid(userId) ? userId?.trim() : null,
+      properties: <String, Object?>{
+        'provider': event.provider,
+        'provider_event_id': event.providerEventId,
+        'event_type': event.eventType,
+        if ((purchaseId ?? '').trim().isNotEmpty)
+          'purchase_id': purchaseId!.trim(),
+        if ((outcomeStatus ?? '').trim().isNotEmpty)
+          'status': outcomeStatus!.trim(),
+      },
+    );
   }
 
   Future<void> _appendEscrowTransferLedgerEntries({

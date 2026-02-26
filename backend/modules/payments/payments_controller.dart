@@ -6,6 +6,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../infra/analytics_event_store.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 import 'payment_intent_repository.dart';
@@ -19,12 +20,14 @@ class PaymentsController {
     String paystackWebhookSecret = '',
     void Function(String line)? warningSink,
     Uuid? uuid,
+    AnalyticsEventStore? analyticsEventStore,
   }) : _paymentService = paymentService,
        _environment = environment,
        _webhookSecret = webhookSecret,
        _paystackWebhookSecret = paystackWebhookSecret,
        _warningSink = warningSink ?? stderr.writeln,
-       _uuid = uuid ?? const Uuid();
+       _uuid = uuid ?? const Uuid(),
+       _analyticsEventStore = analyticsEventStore;
 
   final PaymentService _paymentService;
   final String _environment;
@@ -32,6 +35,7 @@ class PaymentsController {
   final String _paystackWebhookSecret;
   final void Function(String line) _warningSink;
   final Uuid _uuid;
+  final AnalyticsEventStore? _analyticsEventStore;
   bool _missingSecretWarningLogged = false;
   bool _missingPaystackSecretWarningLogged = false;
 
@@ -243,6 +247,15 @@ class PaymentsController {
       final intent = await _paymentService.createPaymentIntent(
         userId: userId,
         purchaseId: purchaseId,
+      );
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'payments.intent_created',
+        properties: <String, Object?>{
+          'intent_id': intent.id,
+          'purchase_id': intent.purchaseId,
+          'provider': intent.provider,
+        },
       );
       return _ok(request, data: _intentPayload(intent));
     } on FormatException catch (error) {

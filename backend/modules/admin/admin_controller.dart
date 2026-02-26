@@ -9,6 +9,7 @@ import 'package:sqflite_common/sqlite_api.dart';
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/wallet_reversal_service.dart';
 import '../../infra/api_contract.dart';
+import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_log_store.dart';
 import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
@@ -37,6 +38,7 @@ class AdminController {
     String paystackApiBaseUrl = 'https://api.paystack.co',
     http.Client? httpClient,
     Duration paystackVerifyTimeout = const Duration(seconds: 8),
+    AnalyticsEventStore? analyticsEventStore,
   }) : _db = db,
        _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
@@ -52,7 +54,8 @@ class AdminController {
        _paystackSecretKey = paystackSecretKey.trim(),
        _paystackApiBaseUrl = _normalizeApiBaseUrl(paystackApiBaseUrl),
        _httpClient = httpClient ?? http.Client(),
-       _paystackVerifyTimeout = paystackVerifyTimeout;
+       _paystackVerifyTimeout = paystackVerifyTimeout,
+       _analyticsEventStore = analyticsEventStore;
 
   final Database? _db;
   final WalletReversalService? _walletReversalService;
@@ -68,6 +71,7 @@ class AdminController {
   final String _paystackApiBaseUrl;
   final http.Client _httpClient;
   final Duration _paystackVerifyTimeout;
+  final AnalyticsEventStore? _analyticsEventStore;
 
   static const Set<String> _tripStatuses = <String>{
     'created',
@@ -689,6 +693,11 @@ class AdminController {
       success: true,
       targetId: normalizedUserId,
     );
+    await _analyticsEventStore?.emitFromRequest(
+      request,
+      name: 'admin.user_disabled',
+      properties: <String, Object?>{'user_id': normalizedUserId},
+    );
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'user_id': normalizedUserId,
@@ -746,6 +755,11 @@ class AdminController {
       action: 'enable_user',
       success: true,
       targetId: normalizedUserId,
+    );
+    await _analyticsEventStore?.emitFromRequest(
+      request,
+      name: 'admin.user_enabled',
+      properties: <String, Object?>{'user_id': normalizedUserId},
     );
     return jsonResponse(200, <String, Object?>{
       'ok': true,

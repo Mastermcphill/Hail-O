@@ -14,6 +14,7 @@ import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
+import '../infra/analytics_event_store.dart';
 import '../infra/audit_log_store.dart';
 import '../infra/request_context.dart';
 import '../infra/postgres_provider.dart';
@@ -73,6 +74,10 @@ Handler buildApiRouter({
     sqliteDb: db,
     postgresProvider: postgresProvider,
   );
+  final analyticsEventStore = AnalyticsEventStore(
+    sqliteDb: db,
+    postgresProvider: postgresProvider,
+  );
 
   final authService = db == null
       ? null
@@ -101,6 +106,7 @@ Handler buildApiRouter({
           authService: authService,
           tokenService: tokenService,
           phoneAuthService: phoneAuthService,
+          analyticsEventStore: analyticsEventStore,
         );
   final ridesController = db == null
       ? null
@@ -123,6 +129,7 @@ Handler buildApiRouter({
             config: DispatchPricingConfig.fromEnvironment(env),
           ),
           auditLogStore: auditLogStore,
+          analyticsEventStore: analyticsEventStore,
         );
   final settlementController = db == null
       ? null
@@ -165,12 +172,14 @@ Handler buildApiRouter({
     stripeWebhookSecret: env['STRIPE_WEBHOOK_SECRET'],
     metrics: requestMetrics,
     auditLogStore: auditLogStore,
+    analyticsEventStore: analyticsEventStore,
   );
   final paymentsController = PaymentsController(
     paymentService: paymentService,
     environment: runtimeEnvironment,
     webhookSecret: (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim(),
     paystackWebhookSecret: (env['PAYSTACK_WEBHOOK_SECRET'] ?? '').trim(),
+    analyticsEventStore: analyticsEventStore,
   );
   final revenueService = MarketplaceRevenueService(
     postgresProvider: postgresProvider,
@@ -182,6 +191,7 @@ Handler buildApiRouter({
     entitlementService: entitlementService,
     revenueService: revenueService,
     orgRepository: orgRepository,
+    analyticsEventStore: analyticsEventStore,
   );
   final marketplaceRouter = MarketplaceRouter(handlers: marketplaceHandlers);
   final marketplaceHandler = marketplaceRouter.router.call;
@@ -213,6 +223,7 @@ Handler buildApiRouter({
     paymentService: paymentService,
     paystackSecretKey: (env['PAYSTACK_SECRET_KEY'] ?? '').trim(),
     paystackApiBaseUrl: (env['PAYSTACK_API_BASE_URL'] ?? '').trim(),
+    analyticsEventStore: analyticsEventStore,
   );
   final adminUsersController = authService == null
       ? null

@@ -4,6 +4,7 @@ import 'package:shelf_router/shelf_router.dart';
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/dispatch_pricing_service.dart';
 import '../../../lib/domain/services/dispatch_trip_service.dart';
+import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_log_store.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
@@ -13,13 +14,16 @@ class DispatchController {
     required DispatchTripService dispatchTripService,
     required DispatchPricingService dispatchPricingService,
     required AuditLogStore auditLogStore,
+    AnalyticsEventStore? analyticsEventStore,
   }) : _dispatchTripService = dispatchTripService,
        _dispatchPricingService = dispatchPricingService,
-       _auditLogStore = auditLogStore;
+       _auditLogStore = auditLogStore,
+       _analyticsEventStore = analyticsEventStore;
 
   final DispatchTripService _dispatchTripService;
   final DispatchPricingService _dispatchPricingService;
   final AuditLogStore _auditLogStore;
+  final AnalyticsEventStore? _analyticsEventStore;
 
   Router get router {
     final router = Router();
@@ -37,6 +41,13 @@ class DispatchController {
     _requireUserId(request);
     final payload = await readJsonBody(request);
     final quote = _dispatchPricingService.quoteFromPayload(payload);
+    await _analyticsEventStore?.emitFromRequest(
+      request,
+      name: 'dispatch.quote_created',
+      properties: <String, Object?>{
+        'service_level': (quote['service_level'] ?? '').toString(),
+      },
+    );
     return jsonResponse(200, <String, Object?>{'ok': true, ...quote});
   }
 
@@ -46,6 +57,17 @@ class DispatchController {
     final created = await _dispatchTripService.createTrip(
       userId: userId,
       payload: payload,
+    );
+    final trip = Map<String, Object?>.from(
+      (created['trip'] as Map?) ?? const <String, Object?>{},
+    );
+    await _analyticsEventStore?.emitFromRequest(
+      request,
+      name: 'dispatch.trip_created',
+      properties: <String, Object?>{
+        'trip_id': (trip['id'] ?? '').toString(),
+        'status': (trip['status'] ?? '').toString(),
+      },
     );
     return jsonResponse(201, <String, Object?>{'ok': true, ...created});
   }
@@ -97,6 +119,18 @@ class DispatchController {
         'event_id': (event['id'] as String?)?.trim(),
       },
     );
+    final toStatus =
+        (event['to_status'] as String?)?.trim().toLowerCase() ?? '';
+    if (toStatus == 'delivered') {
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'dispatch.trip_delivered',
+        properties: <String, Object?>{
+          'trip_id': tripId.trim(),
+          'event_id': (event['id'] ?? '').toString(),
+        },
+      );
+    }
     return jsonResponse(200, <String, Object?>{'ok': true, ...updated});
   }
 
@@ -125,6 +159,15 @@ class DispatchController {
           'driver_id': (assignment['driver_id'] as String?)?.trim(),
           'assignment_id': (assignment['id'] as String?)?.trim(),
           'trip_status': (trip['status'] as String?)?.trim(),
+        },
+      );
+      await _analyticsEventStore?.emitFromRequest(
+        request,
+        name: 'dispatch.trip_assigned',
+        properties: <String, Object?>{
+          'trip_id': tripId.trim(),
+          'assignment_id': (assignment['id'] ?? '').toString(),
+          'driver_id': (assignment['driver_id'] ?? '').toString(),
         },
       );
       return jsonResponse(200, <String, Object?>{'ok': true, ...assigned});

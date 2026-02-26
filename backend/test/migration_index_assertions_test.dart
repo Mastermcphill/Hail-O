@@ -41,6 +41,7 @@ void main() {
     final adminModerationMetricsSql =
         sqlByName['024_admin_moderation_metrics.sql'] ?? '';
     final webhookRetrySql = sqlByName['025_webhook_events_retry.sql'] ?? '';
+    final analyticsEventsSql = sqlByName['026_analytics_events.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -410,6 +411,27 @@ void main() {
       ),
       isTrue,
       reason: 'users disabled_at index must exist',
+    );
+    expect(
+      analyticsEventsSql.contains(
+        'CREATE TABLE IF NOT EXISTS analytics_events',
+      ),
+      isTrue,
+      reason: 'analytics events table must exist',
+    );
+    expect(
+      analyticsEventsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_analytics_events_name_created_desc',
+      ),
+      isTrue,
+      reason: 'analytics events name timeline index must exist',
+    );
+    expect(
+      analyticsEventsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_analytics_events_user_created_desc',
+      ),
+      isTrue,
+      reason: 'analytics events user timeline index must exist',
     );
   });
 }
