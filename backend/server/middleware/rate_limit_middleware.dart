@@ -27,7 +27,7 @@ Middleware rateLimitMiddleware({
   int maxWebhookRequestsPerIp = 300,
   int? maxWebhookRequestsPerUser,
   bool trustProxyHeaders = true,
-  Set<String> exemptPaths = const <String>{'health', 'healthz'},
+  Set<String> exemptPaths = const <String>{'health', 'healthz', 'ready'},
   NowProvider? nowProvider,
 }) {
   final ipBuckets = <String, _CounterBucket>{};

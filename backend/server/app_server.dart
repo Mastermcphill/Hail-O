@@ -118,6 +118,8 @@ class AppServer {
       'health',
       'healthz',
       'api/healthz',
+      'ready',
+      'api/ready',
       'version',
       'api/version',
       'webhooks/payments',

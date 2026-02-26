@@ -262,6 +262,30 @@ Handler buildApiRouter({
         timeout: const Duration(seconds: 2),
       ),
     )
+    ..get(
+      '/ready',
+      (request) => _readyHandler(
+        request,
+        dbMode: dbMode,
+        dbHealthCheck: dbHealthCheck,
+        buildInfo: buildInfo,
+        sqliteDb: db,
+        postgresProvider: postgresProvider,
+        dbSchema: (env['DB_SCHEMA'] ?? 'public').trim(),
+      ),
+    )
+    ..get(
+      '/api/ready',
+      (request) => _readyHandler(
+        request,
+        dbMode: dbMode,
+        dbHealthCheck: dbHealthCheck,
+        buildInfo: buildInfo,
+        sqliteDb: db,
+        postgresProvider: postgresProvider,
+        dbSchema: (env['DB_SCHEMA'] ?? 'public').trim(),
+      ),
+    )
     ..get('/version', (request) => _versionHandler(buildInfo))
     ..get('/api/version', (request) => _versionHandler(buildInfo))
     ..get(
@@ -312,6 +336,118 @@ Handler buildApiRouter({
   );
 
   return router.call;
+}
+
+Future<Response> _readyHandler(
+  Request request, {
+  required String dbMode,
+  required Future<bool> Function() dbHealthCheck,
+  required Map<String, Object?> buildInfo,
+  required Database? sqliteDb,
+  required PostgresProvider? postgresProvider,
+  required String dbSchema,
+}) async {
+  bool dbOk;
+  try {
+    dbOk = await dbHealthCheck().timeout(
+      const Duration(milliseconds: 750),
+      onTimeout: () => false,
+    );
+  } catch (_) {
+    dbOk = false;
+  }
+
+  final expectedMigrationHead =
+      (buildInfo['migration_head'] as num?)?.toInt() ??
+      int.tryParse((buildInfo['migration_head'] ?? '').toString());
+  final appliedMigrationHead = await _readAppliedMigrationHead(
+    dbMode: dbMode,
+    sqliteDb: sqliteDb,
+    postgresProvider: postgresProvider,
+    dbSchema: dbSchema,
+  );
+
+  bool? migrationsMatch;
+  if (expectedMigrationHead != null && appliedMigrationHead != null) {
+    migrationsMatch = appliedMigrationHead == expectedMigrationHead;
+  }
+
+  final isReady = dbOk && (migrationsMatch ?? true);
+  final payload = <String, Object?>{
+    'ok': isReady,
+    'service': 'hail-o-backend',
+    'db_mode': dbMode,
+    'db_ok': dbOk,
+    'ready': isReady,
+    if (expectedMigrationHead != null)
+      'expected_migration_head': expectedMigrationHead,
+    if (appliedMigrationHead != null)
+      'applied_migration_head': appliedMigrationHead,
+    if (migrationsMatch != null) 'migrations_ok': migrationsMatch,
+  };
+  final traceId = request.requestContext.traceId.trim();
+  if (traceId.isNotEmpty) {
+    payload['trace_id'] = traceId;
+  }
+  return jsonResponse(isReady ? 200 : 503, payload);
+}
+
+Future<int?> _readAppliedMigrationHead({
+  required String dbMode,
+  required Database? sqliteDb,
+  required PostgresProvider? postgresProvider,
+  required String dbSchema,
+}) async {
+  try {
+    if (dbMode.trim().toLowerCase() == 'sqlite') {
+      final db = sqliteDb;
+      if (db == null) {
+        return null;
+      }
+      final tableRows = await db.rawQuery(
+        'SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1',
+        <Object>['table', 'schema_migrations'],
+      );
+      if (tableRows.isEmpty) {
+        return null;
+      }
+      final rows = await db.rawQuery(
+        'SELECT COALESCE(MAX(version), 0) AS head FROM schema_migrations',
+      );
+      if (rows.isEmpty) {
+        return 0;
+      }
+      return (rows.first['head'] as num?)?.toInt() ?? 0;
+    }
+    final provider = postgresProvider;
+    if (provider == null) {
+      return null;
+    }
+    final normalizedSchema = _normalizeSchemaName(dbSchema);
+    final qualifiedTable = '"$normalizedSchema".schema_migrations';
+    final rows = await provider.withConnection(
+      (connection) => connection.query(
+        'SELECT COALESCE(MAX(version), 0)::int AS head FROM $qualifiedTable',
+      ),
+    );
+    if (rows.isEmpty) {
+      return 0;
+    }
+    return (rows.first.toColumnMap()['head'] as num?)?.toInt() ?? 0;
+  } catch (_) {
+    return null;
+  }
+}
+
+String _normalizeSchemaName(String schema) {
+  final normalized = schema.trim();
+  if (normalized.isEmpty) {
+    return 'public';
+  }
+  if (RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(normalized)) {
+    return normalized;
+  }
+  return 'public';
 }
 
 Response _metricsHandler(

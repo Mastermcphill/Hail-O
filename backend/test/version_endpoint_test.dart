@@ -154,6 +154,85 @@ void main() {
     final response = await _request(handler, '/health', method: 'HEAD');
     expect(response.statusCode, 200);
   });
+
+  test('/ready returns 200 when db is healthy and migrations match', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    await db.execute('DROP TABLE IF EXISTS schema_migrations');
+    await db.execute(
+      'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+    );
+    await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{
+        'commit': 'ready-test',
+        'migration_head': 25,
+      },
+    );
+
+    final response = await _request(handler, '/ready');
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+    expect(body['ready'], isTrue);
+    expect(body['db_ok'], isTrue);
+    expect(body['migrations_ok'], isTrue);
+    expect(body['expected_migration_head'], 25);
+    expect(body['applied_migration_head'], 25);
+  });
+
+  test('/ready returns 503 when migration head mismatches', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    await db.execute('DROP TABLE IF EXISTS schema_migrations');
+    await db.execute(
+      'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+    );
+    await db.insert('schema_migrations', <String, Object?>{'version': 24});
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{
+        'commit': 'ready-test',
+        'migration_head': 25,
+      },
+    );
+
+    final response = await _request(handler, '/ready');
+    expect(response.statusCode, 503);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isFalse);
+    expect(body['ready'], isFalse);
+    expect(body['db_ok'], isTrue);
+    expect(body['migrations_ok'], isFalse);
+    expect(body['expected_migration_head'], 25);
+    expect(body['applied_migration_head'], 24);
+  });
+
+  test('/api/ready mirrors readiness result', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => false,
+      buildInfo: const <String, Object?>{
+        'commit': 'ready-test',
+        'migration_head': 25,
+      },
+    );
+
+    final response = await _request(handler, '/api/ready');
+    expect(response.statusCode, 503);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isFalse);
+    expect(body['ready'], isFalse);
+    expect(body['db_ok'], isFalse);
+  });
 }
 
 Handler _buildHandler({
