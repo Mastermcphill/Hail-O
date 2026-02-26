@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="priyaTitle priyaDesc">
+  <title id="priyaTitle">Priya testimonial placeholder</title>
+  <desc id="priyaDesc">Illustrated avatar placeholder with initials PN.</desc>
+  <defs>
+    <linearGradient id="priyaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF4081"/>
+      <stop offset="100%" stop-color="#FF8AB3"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="78" fill="url(#priyaGrad)"/>
+  <text x="80" y="95" text-anchor="middle" fill="#FFFFFF" font-family="'Space Grotesk','Segoe UI',sans-serif" font-weight="700" font-size="48">PN</text>
+</svg>

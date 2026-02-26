@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="mateoTitle mateoDesc">
+  <title id="mateoTitle">Mateo testimonial placeholder</title>
+  <desc id="mateoDesc">Illustrated avatar placeholder with initials MS.</desc>
+  <defs>
+    <linearGradient id="mateoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A0F2C"/>
+      <stop offset="100%" stop-color="#3452B9"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="78" fill="url(#mateoGrad)"/>
+  <text x="80" y="95" text-anchor="middle" fill="#FFFFFF" font-family="'Space Grotesk','Segoe UI',sans-serif" font-weight="700" font-size="48">MS</text>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 280" role="img" aria-labelledby="codexLogoDarkTitle codexLogoDarkDesc">
+  <title id="codexLogoDarkTitle">Codex logo monochrome</title>
+  <desc id="codexLogoDarkDesc">Monochrome Codex wordmark and bracketed C icon for dark surfaces.</desc>
+  <g transform="translate(40 40)">
+    <rect x="0" y="0" width="200" height="200" rx="44" fill="none" stroke="#FFFFFF" stroke-width="6"/>
+    <path d="M155 58C120 52 87 74 78 108C69 142 88 175 122 184C133 187 145 187 155 184" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M52 70H38V146H52" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M148 70H162V146H148" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M89 108H111" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="282" y="134" fill="#FFFFFF" font-family="'Space Grotesk','Segoe UI',sans-serif" font-size="98" font-weight="700" letter-spacing="1">Codex</text>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" role="img" aria-labelledby="heroVisualTitle heroVisualDesc">
+  <title id="heroVisualTitle">Codex interface placeholder</title>
+  <desc id="heroVisualDesc">Decorative placeholder interface showing panels and command execution states.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A0F2C"/>
+      <stop offset="100%" stop-color="#1A73E8"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="620" rx="30" fill="url(#bg)"/>
+  <rect x="48" y="42" width="804" height="536" rx="20" fill="url(#panel)" stroke="#FFFFFF" stroke-opacity="0.24"/>
+  <rect x="84" y="90" width="300" height="18" rx="9" fill="#FFFFFF" fill-opacity="0.75"/>
+  <rect x="84" y="126" width="244" height="12" rx="6" fill="#FFFFFF" fill-opacity="0.45"/>
+  <rect x="84" y="200" width="730" height="90" rx="14" fill="#0A0F2C" fill-opacity="0.5"/>
+  <rect x="84" y="316" width="730" height="90" rx="14" fill="#0A0F2C" fill-opacity="0.5"/>
+  <rect x="84" y="432" width="730" height="90" rx="14" fill="#0A0F2C" fill-opacity="0.5"/>
+  <circle cx="126" cy="245" r="18" fill="#FF4081"/>
+  <circle cx="126" cy="361" r="18" fill="#1A73E8"/>
+  <circle cx="126" cy="477" r="18" fill="#6FD1FF"/>
+  <rect x="170" y="230" width="260" height="16" rx="8" fill="#FFFFFF" fill-opacity="0.9"/>
+  <rect x="170" y="346" width="220" height="16" rx="8" fill="#FFFFFF" fill-opacity="0.8"/>
+  <rect x="170" y="462" width="300" height="16" rx="8" fill="#FFFFFF" fill-opacity="0.8"/>
+  <rect x="682" y="230" width="110" height="30" rx="15" fill="#1A73E8"/>
+  <rect x="682" y="346" width="110" height="30" rx="15" fill="#1A73E8"/>
+  <rect x="682" y="462" width="110" height="30" rx="15" fill="#1A73E8"/>
+</svg>
