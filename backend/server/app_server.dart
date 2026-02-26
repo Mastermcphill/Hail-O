@@ -4,8 +4,11 @@ import 'package:shelf/shelf.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../infra/postgres_provider.dart';
+import '../infra/redis_client.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
+import '../jobs/job_processor.dart';
+import '../jobs/job_registry.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/phone_auth_store.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
@@ -57,6 +60,9 @@ class AppServer {
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
     this.environmentMap = const <String, String>{},
+    this.redisClient,
+    this.queueJobRegistry,
+    this.queueJobProcessor,
   });
 
   final Database? db;
@@ -92,6 +98,9 @@ class AppServer {
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
   final Map<String, String> environmentMap;
+  final RedisQueueClient? redisClient;
+  final QueueJobRegistry? queueJobRegistry;
+  final QueueJobProcessor? queueJobProcessor;
 
   Handler buildHandler() {
     final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
@@ -116,6 +125,9 @@ class AppServer {
       enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
       postgresProvider: postgresProvider,
       environmentMap: environmentMap,
+      redisClient: redisClient,
+      queueJobRegistry: queueJobRegistry,
+      queueJobProcessor: queueJobProcessor,
     );
     final authPublicPaths = <String>{
       'auth/register',
@@ -176,6 +188,8 @@ class AppServer {
                         maxAdminRequestsPerIp: maxAdminRequestsPerIp,
                         maxAdminRequestsPerUser: maxAdminRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
+                        redisClient: redisClient,
+                        warningSink: stderr.writeln,
                       ),
                     )
                     .addHandler(router)

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -28,6 +30,13 @@ class MarketplaceReceiptScreen extends StatefulWidget {
 
 class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
   static final DateFormat _createdAtFormat = DateFormat('MMM d, y HH:mm');
+  static const Duration _pollInterval = Duration(seconds: 3);
+  static const Duration _pollTimeout = Duration(seconds: 45);
+
+  Timer? _pollTimer;
+  DateTime? _pollStartedAtUtc;
+  bool _pollingInFlight = false;
+  String? _paymentStateMessage;
 
   @override
   void initState() {
@@ -43,6 +52,12 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
   }
 
   @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer<MarketplaceController>(
       builder: (context, controller, child) {
@@ -51,6 +66,14 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
         final showPaymentIntent =
             paymentIntent != null &&
             paymentIntent.purchaseId == widget.purchaseId;
+        if (receipt != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) {
+              return;
+            }
+            _syncPaymentPolling(controller: controller, receipt: receipt);
+          });
+        }
 
         if (controller.loadingReceipt && receipt == null) {
           return const Center(child: CircularProgressIndicator());
@@ -145,6 +168,16 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
                 ),
               ),
             ],
+            if (_paymentStateMessage != null &&
+                _paymentStateMessage!.trim().isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(_paymentStateMessage!),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             FilledButton(
               key: const Key('marketplace_receipt_timeline_button'),
@@ -185,6 +218,130 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
         );
       },
     );
+  }
+
+  void _syncPaymentPolling({
+    required MarketplaceController controller,
+    required PurchaseReceipt receipt,
+  }) {
+    final normalizedStatus = _normalizeStatus(receipt.status);
+    final isSuccess = _isSuccessfulStatus(normalizedStatus);
+    final isFailure = _isFailedStatus(normalizedStatus);
+    final shouldPoll = _isPendingStatus(normalizedStatus);
+
+    if (isSuccess) {
+      _stopPolling(message: 'Payment successful.');
+      return;
+    }
+    if (isFailure) {
+      _stopPolling(message: 'Payment failed. Please try again.');
+      return;
+    }
+    if (!shouldPoll) {
+      _stopPolling(clearMessage: true);
+      return;
+    }
+    _startPolling(controller);
+  }
+
+  void _startPolling(MarketplaceController controller) {
+    if (_pollTimer != null) {
+      return;
+    }
+    setState(() {
+      _paymentStateMessage = 'Processing payment...';
+      _pollStartedAtUtc = DateTime.now().toUtc();
+    });
+    _pollTimer = Timer.periodic(_pollInterval, (_) {
+      _pollPurchaseStatus(controller);
+    });
+    _pollPurchaseStatus(controller);
+  }
+
+  Future<void> _pollPurchaseStatus(MarketplaceController controller) async {
+    final startedAt = _pollStartedAtUtc;
+    if (_pollingInFlight || startedAt == null) {
+      return;
+    }
+    final elapsed = DateTime.now().toUtc().difference(startedAt);
+    if (elapsed >= _pollTimeout) {
+      _stopPolling(
+        message: 'Payment is still processing. Pull to refresh shortly.',
+      );
+      return;
+    }
+    _pollingInFlight = true;
+    try {
+      final refreshed = await controller.refreshPurchaseStatus(
+        widget.purchaseId,
+      );
+      if (!mounted || refreshed == null) {
+        return;
+      }
+      final status = _normalizeStatus(refreshed.status);
+      if (_isSuccessfulStatus(status)) {
+        _stopPolling(message: 'Payment successful.');
+        return;
+      }
+      if (_isFailedStatus(status)) {
+        _stopPolling(message: 'Payment failed. Please try again.');
+        return;
+      }
+      if (_isPendingStatus(status)) {
+        if (mounted && _paymentStateMessage != 'Processing payment...') {
+          setState(() {
+            _paymentStateMessage = 'Processing payment...';
+          });
+        }
+      } else {
+        _stopPolling(clearMessage: true);
+      }
+    } finally {
+      _pollingInFlight = false;
+    }
+  }
+
+  void _stopPolling({String? message, bool clearMessage = false}) {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _pollStartedAtUtc = null;
+    if (!mounted) {
+      return;
+    }
+    final nextMessage = clearMessage ? null : message;
+    if (_paymentStateMessage == nextMessage) {
+      return;
+    }
+    setState(() {
+      _paymentStateMessage = nextMessage;
+    });
+  }
+
+  String _normalizeStatus(String value) {
+    return value.trim().toLowerCase();
+  }
+
+  bool _isPendingStatus(String status) {
+    return status == 'pending' ||
+        status == 'pending_payment' ||
+        status == 'processing' ||
+        status == 'requires_action' ||
+        status == 'awaiting_payment';
+  }
+
+  bool _isSuccessfulStatus(String status) {
+    return status == 'paid' ||
+        status == 'succeeded' ||
+        status == 'successful' ||
+        status == 'completed';
+  }
+
+  bool _isFailedStatus(String status) {
+    return status == 'failed' ||
+        status == 'canceled' ||
+        status == 'cancelled' ||
+        status == 'expired' ||
+        status == 'declined';
   }
 
   PurchaseReceipt? _resolveReceipt(PurchaseReceipt? activeReceipt) {

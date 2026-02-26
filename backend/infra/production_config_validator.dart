@@ -31,6 +31,7 @@ void validateProductionConfig({
   final otpDevBypass = _parseBool(envMap['OTP_DEV_BYPASS']);
   final termiiApiKey = _getOptionalTrimmed(envMap, 'TERMII_API_KEY');
   final termiiSenderId = _getOptionalTrimmed(envMap, 'TERMII_SENDER_ID');
+  final redisUrl = _getOptionalTrimmed(envMap, 'REDIS_URL');
   final otpProviderSupported =
       otpProvider.isEmpty ||
       otpProvider == 'termii' ||
@@ -43,6 +44,9 @@ void validateProductionConfig({
       otpProvider == 'termii' && termiiApiKey != null && termiiSenderId != null;
 
   if (isProductionEnv) {
+    if (redisUrl == null) {
+      missing.add('REDIS_URL');
+    }
     if (sentryEnabled && sentryDsn == null) {
       missing.add('SENTRY_DSN');
     } else if (!sentryEnabled && sentryDsn == null) {

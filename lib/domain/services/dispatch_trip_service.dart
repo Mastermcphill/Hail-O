@@ -203,10 +203,11 @@ class DispatchTripService {
       );
     }
 
-    return <String, Object?>{
-      'trips': trips,
-      if (nextCursor != null) 'next_cursor': nextCursor,
-    };
+    final response = <String, Object?>{'trips': trips};
+    if (nextCursor case final value?) {
+      response['next_cursor'] = value;
+    }
+    return response;
   }
 
   Future<Map<String, Object?>> transitionStatus({

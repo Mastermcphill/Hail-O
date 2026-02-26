@@ -5,6 +5,7 @@ import '../../../lib/domain/models/user.dart';
 import '../../../lib/domain/services/auth_service.dart';
 import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_logger.dart';
+import '../../infra/redis_client.dart';
 import '../../infra/request_context.dart';
 import '../../infra/token_service.dart';
 import '../../server/http_utils.dart';
@@ -24,6 +25,8 @@ class _OtpRateLimiter {
     required this.requestLimitPerPhone,
     required this.verifyLimitPerIp,
     required this.verifyLimitPerPhone,
+    this.redisClient,
+    this.warningSink,
     DateTime Function()? nowUtc,
   }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
 
@@ -32,6 +35,8 @@ class _OtpRateLimiter {
   final int requestLimitPerPhone;
   final int verifyLimitPerIp;
   final int verifyLimitPerPhone;
+  final RedisQueueClient? redisClient;
+  final void Function(String line)? warningSink;
   final DateTime Function() _nowUtc;
 
   final Map<String, _OtpRateLimitBucket> _requestIpBuckets =
@@ -43,27 +48,67 @@ class _OtpRateLimiter {
   final Map<String, _OtpRateLimitBucket> _verifyPhoneBuckets =
       <String, _OtpRateLimitBucket>{};
 
-  bool allowOtpRequest({required String clientIp, required String phoneE164}) {
+  Future<bool> allowOtpRequest({
+    required String clientIp,
+    required String phoneE164,
+  }) async {
     final now = _nowUtc();
     final ipKey = clientIp.trim().isEmpty ? 'unknown' : clientIp.trim();
     final phoneKey = _normalizePhoneKey(phoneE164);
-    if (!_consume(_requestIpBuckets, ipKey, now, requestLimitPerIp)) {
+    final ipAllowed = await _consumeRedis(
+      key: 'ratelimit:otp:request:ip:$ipKey',
+      limit: requestLimitPerIp,
+    );
+    if (ipAllowed == false ||
+        (ipAllowed == null &&
+            !_consume(_requestIpBuckets, ipKey, now, requestLimitPerIp))) {
       return false;
     }
-    if (!_consume(_requestPhoneBuckets, phoneKey, now, requestLimitPerPhone)) {
+    final phoneAllowed = await _consumeRedis(
+      key: 'ratelimit:otp:request:phone:$phoneKey',
+      limit: requestLimitPerPhone,
+    );
+    if (phoneAllowed == false ||
+        (phoneAllowed == null &&
+            !_consume(
+              _requestPhoneBuckets,
+              phoneKey,
+              now,
+              requestLimitPerPhone,
+            ))) {
       return false;
     }
     return true;
   }
 
-  bool allowOtpVerify({required String clientIp, required String phoneE164}) {
+  Future<bool> allowOtpVerify({
+    required String clientIp,
+    required String phoneE164,
+  }) async {
     final now = _nowUtc();
     final ipKey = clientIp.trim().isEmpty ? 'unknown' : clientIp.trim();
     final phoneKey = _normalizePhoneKey(phoneE164);
-    if (!_consume(_verifyIpBuckets, ipKey, now, verifyLimitPerIp)) {
+    final ipAllowed = await _consumeRedis(
+      key: 'ratelimit:otp:verify:ip:$ipKey',
+      limit: verifyLimitPerIp,
+    );
+    if (ipAllowed == false ||
+        (ipAllowed == null &&
+            !_consume(_verifyIpBuckets, ipKey, now, verifyLimitPerIp))) {
       return false;
     }
-    if (!_consume(_verifyPhoneBuckets, phoneKey, now, verifyLimitPerPhone)) {
+    final phoneAllowed = await _consumeRedis(
+      key: 'ratelimit:otp:verify:phone:$phoneKey',
+      limit: verifyLimitPerPhone,
+    );
+    if (phoneAllowed == false ||
+        (phoneAllowed == null &&
+            !_consume(
+              _verifyPhoneBuckets,
+              phoneKey,
+              now,
+              verifyLimitPerPhone,
+            ))) {
       return false;
     }
     return true;
@@ -100,6 +145,20 @@ class _OtpRateLimiter {
     }
     return normalized;
   }
+
+  Future<bool?> _consumeRedis({required String key, required int limit}) async {
+    final client = redisClient;
+    if (client == null || limit <= 0) {
+      return null;
+    }
+    try {
+      final count = await client.incrementWithWindow(key, window: window);
+      return count <= limit;
+    } catch (error) {
+      warningSink?.call('WARN: otp redis rate limit unavailable: $error');
+      return null;
+    }
+  }
 }
 
 class AuthController {
@@ -114,6 +173,8 @@ class AuthController {
     int otpRequestLimitPerPhone = 4,
     int otpVerifyLimitPerIp = 12,
     int otpVerifyLimitPerPhone = 8,
+    RedisQueueClient? redisClient,
+    void Function(String line)? warningSink,
     DateTime Function()? nowUtc,
   }) : _authService = authService,
        _tokenService = tokenService,
@@ -128,6 +189,8 @@ class AuthController {
                requestLimitPerPhone: otpRequestLimitPerPhone,
                verifyLimitPerIp: otpVerifyLimitPerIp,
                verifyLimitPerPhone: otpVerifyLimitPerPhone,
+               redisClient: redisClient,
+               warningSink: warningSink,
                nowUtc: nowUtc,
              );
 
@@ -288,7 +351,7 @@ class AuthController {
     final phoneE164 = (body['phone_e164'] as String?)?.trim() ?? '';
     final limiter = _otpRateLimiter;
     if (limiter != null &&
-        !limiter.allowOtpRequest(
+        !await limiter.allowOtpRequest(
           clientIp: _extractClientIp(request),
           phoneE164: phoneE164,
         )) {
@@ -351,7 +414,7 @@ class AuthController {
     final code = (body['code'] as String?)?.trim() ?? '';
     final limiter = _otpRateLimiter;
     if (limiter != null &&
-        !limiter.allowOtpVerify(
+        !await limiter.allowOtpVerify(
           clientIp: _extractClientIp(request),
           phoneE164: phoneE164,
         )) {

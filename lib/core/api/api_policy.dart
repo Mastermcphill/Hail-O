@@ -7,10 +7,10 @@ class ApiPolicy {
   ApiPolicy({
     required this.method,
     required this.hasIdempotencyKey,
-    this.requestTimeout = const Duration(seconds: 25),
-    this.maxRetryAttempts = 1,
-    this.baseBackoff = const Duration(milliseconds: 400),
-    this.maxBackoff = const Duration(seconds: 2),
+    this.requestTimeout = const Duration(seconds: 12),
+    this.maxRetryAttempts = 2,
+    this.baseBackoff = const Duration(milliseconds: 350),
+    this.maxBackoff = const Duration(seconds: 3),
     this.maxJitterMs = 250,
   });
 
@@ -40,9 +40,14 @@ class ApiPolicy {
     if (!canRetry(attempt)) {
       return false;
     }
+    if (error.statusCode == 400 ||
+        error.statusCode == 401 ||
+        error.statusCode == 403) {
+      return false;
+    }
     if (_isMethodRetryableForApiStatus(method, hasIdempotencyKey)) {
       final status = error.statusCode;
-      return status == 502 || status == 503 || status == 504;
+      return status == 502 || status == 503;
     }
     return false;
   }
@@ -67,7 +72,12 @@ class ApiPolicy {
 }
 
 bool _isMethodRetryableForApiStatus(String method, bool hasIdempotencyKey) {
-  if (method == 'GET' || method == 'HEAD') {
+  if (method == 'GET' ||
+      method == 'HEAD' ||
+      method == 'PUT' ||
+      method == 'PATCH' ||
+      method == 'DELETE' ||
+      method == 'OPTIONS') {
     return true;
   }
   if (method == 'POST') {

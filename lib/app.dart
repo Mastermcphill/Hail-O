@@ -36,6 +36,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
       tokenStorage: _tokenStorage,
       apiClient: _apiClient,
     );
+    _apiClient.setAuthFailureHandler(() => _authSession.logout());
     _authSession.init();
     _serverWarmupNotifier = ServerWarmupNotifier();
     _connectivityNotifier = ConnectivityNotifier();
@@ -70,6 +71,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
       ],
       child: MaterialApp.router(
         title: 'Hail-O Core',
+        debugShowCheckedModeBanner: false,
         theme: BrandTheme.light(),
         localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
           GlobalMaterialLocalizations.delegate,

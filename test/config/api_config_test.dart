@@ -4,6 +4,15 @@ import 'package:hailo_core/config/api_config.dart';
 
 void main() {
   group('ApiConfig.resolveEnvironmentFor', () {
+    test('prefers ENV dart-define over legacy variables', () {
+      final env = ApiConfig.resolveEnvironmentFor(
+        envDefine: 'production',
+        explicitEnvironment: 'staging',
+        flavor: 'dev',
+      );
+      expect(env, HailoEnvironment.prod);
+    });
+
     test('prefers explicit HAILO_ENV', () {
       final env = ApiConfig.resolveEnvironmentFor(
         explicitEnvironment: 'staging',

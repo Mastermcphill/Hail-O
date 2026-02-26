@@ -67,6 +67,18 @@ See `docs/ops/ENV_KEYS.md` for full inventory. At minimum, release gate expects:
 4. Run production release gate.
 5. Monitor logs, metrics, webhook backlog, and audit trails during soak.
 
+## Flutter Build Isolation
+Use `ENV` to isolate app runtime targets:
+
+- Staging run:
+  - `flutter run --dart-define=ENV=staging`
+- Production build:
+  - `flutter build apk --dart-define=ENV=production --obfuscate --split-debug-info=build/debug-info`
+
+Notes:
+- Do not ship production builds with staging base URLs.
+- Keep test/smoke toggles disabled in production builds.
+
 ## Rollback
 1. Route traffic to previous stable deploy.
 2. If schema changes are irreversible, apply a forward-fix migration.

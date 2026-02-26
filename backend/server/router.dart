@@ -16,10 +16,14 @@ import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
 import '../infra/analytics_event_store.dart';
 import '../infra/audit_log_store.dart';
+import '../infra/redis_client.dart';
 import '../infra/request_context.dart';
 import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
+import '../jobs/job.dart';
+import '../jobs/job_processor.dart';
+import '../jobs/job_registry.dart';
 import '../modules/admin/admin_controller.dart';
 import '../modules/admin/admin_users_controller.dart';
 import '../modules/auth/auth_credentials_store.dart';
@@ -66,6 +70,9 @@ Handler buildApiRouter({
   PhoneAuthStore? phoneAuthStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
+  RedisQueueClient? redisClient,
+  QueueJobRegistry? queueJobRegistry,
+  QueueJobProcessor? queueJobProcessor,
 }) {
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
   final runtimeEnvironment = (env['ENV'] ?? env['FLIPTRYBE_ENV'] ?? 'unknown')
@@ -74,6 +81,7 @@ Handler buildApiRouter({
   final strictEnvironment = _isStrictEnvironment(normalizedRuntimeEnvironment);
   final essentialEnvReady =
       !strictEnvironment || (env['JWT_SECRET'] ?? '').trim().isNotEmpty;
+  final redisConfigured = (env['REDIS_URL'] ?? '').trim().isNotEmpty;
   final auditLogStore = AuditLogStore(
     sqliteDb: db,
     postgresProvider: postgresProvider,
@@ -142,6 +150,8 @@ Handler buildApiRouter({
             'OTP_VERIFY_LIMIT_PER_PHONE',
             defaultValue: 8,
           ),
+          redisClient: redisClient,
+          warningSink: stderr.writeln,
         );
   final ridesController = db == null
       ? null
@@ -209,12 +219,30 @@ Handler buildApiRouter({
     auditLogStore: auditLogStore,
     analyticsEventStore: analyticsEventStore,
   );
+  queueJobRegistry?.register(QueueJobTypes.processWebhookEvent, (job) async {
+    final provider = (job.payload['provider'] as String?)?.trim() ?? '';
+    final providerEventId =
+        (job.payload['provider_event_id'] as String?)?.trim() ?? '';
+    if (provider.isEmpty || providerEventId.isEmpty) {
+      throw const FormatException(
+        'process_webhook_event requires provider and provider_event_id',
+      );
+    }
+    await paymentService.processStoredWebhookEvent(
+      provider: provider,
+      providerEventId: providerEventId,
+    );
+  });
+  queueJobRegistry?.register(QueueJobTypes.reconcilePayment, (_) async {
+    await paymentService.retryPendingWebhooks(limit: 1);
+  });
   final paymentsController = PaymentsController(
     paymentService: paymentService,
     environment: runtimeEnvironment,
     webhookSecret: (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim(),
     paystackWebhookSecret: (env['PAYSTACK_WEBHOOK_SECRET'] ?? '').trim(),
     analyticsEventStore: analyticsEventStore,
+    jobProcessor: queueJobProcessor,
   );
   final paymentsReady = _paymentsConfigReady(
     runtimeEnvironment: runtimeEnvironment,
@@ -263,6 +291,7 @@ Handler buildApiRouter({
     paystackSecretKey: (env['PAYSTACK_SECRET_KEY'] ?? '').trim(),
     paystackApiBaseUrl: (env['PAYSTACK_API_BASE_URL'] ?? '').trim(),
     analyticsEventStore: analyticsEventStore,
+    queueJobProcessor: queueJobProcessor,
   );
   final adminUsersController = authService == null
       ? null
@@ -326,6 +355,8 @@ Handler buildApiRouter({
         essentialEnvReady: essentialEnvReady,
         paymentsReady: paymentsReady,
         otpReady: otpReady,
+        redisClient: redisClient,
+        redisConfigured: redisConfigured,
       ),
     )
     ..get(
@@ -341,6 +372,8 @@ Handler buildApiRouter({
         essentialEnvReady: essentialEnvReady,
         paymentsReady: paymentsReady,
         otpReady: otpReady,
+        redisClient: redisClient,
+        redisConfigured: redisConfigured,
       ),
     )
     ..get('/version', (request) => _versionHandler(buildInfo))
@@ -406,6 +439,8 @@ Future<Response> _readyHandler(
   required bool essentialEnvReady,
   required bool paymentsReady,
   required bool otpReady,
+  required RedisQueueClient? redisClient,
+  required bool redisConfigured,
 }) async {
   bool dbOk;
   try {
@@ -433,8 +468,16 @@ Future<Response> _readyHandler(
   }
 
   final migrationsOk = migrationsMatch ?? true;
+  final redisOk = !redisConfigured
+      ? true
+      : redisClient != null && await redisClient.ping();
   final isReady =
-      dbOk && migrationsOk && essentialEnvReady && paymentsReady && otpReady;
+      dbOk &&
+      migrationsOk &&
+      essentialEnvReady &&
+      paymentsReady &&
+      otpReady &&
+      redisOk;
   final payload = <String, Object?>{
     'ok': isReady,
     'service': 'hail-o-backend',
@@ -445,6 +488,8 @@ Future<Response> _readyHandler(
     'essential_env_ready': essentialEnvReady,
     'payments_ready': paymentsReady,
     'otp_ready': otpReady,
+    'redis': redisOk,
+    'redis_ready': redisOk,
     'ready': isReady,
     if (expectedMigrationHead != null)
       'expected_migration_head': expectedMigrationHead,

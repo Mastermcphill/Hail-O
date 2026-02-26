@@ -202,6 +202,7 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
   @override
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 120));
     final purchase = _purchaseById[purchaseId];

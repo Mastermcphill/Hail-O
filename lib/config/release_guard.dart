@@ -123,6 +123,16 @@ class ReleaseGuard {
           ),
         );
       }
+
+      if (environment == HailoEnvironment.prod.name &&
+          parsed.host.toLowerCase().contains('staging')) {
+        issues.add(
+          const ReleaseGuardIssue(
+            code: 'base_url_staging_forbidden',
+            message: 'Production releases must not target staging base URLs.',
+          ),
+        );
+      }
     }
 
     if ((environment == HailoEnvironment.staging.name ||

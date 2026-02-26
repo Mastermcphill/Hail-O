@@ -7,6 +7,8 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../infra/analytics_event_store.dart';
+import '../../jobs/job.dart';
+import '../../jobs/job_processor.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 import 'payment_intent_repository.dart';
@@ -21,13 +23,15 @@ class PaymentsController {
     void Function(String line)? warningSink,
     Uuid? uuid,
     AnalyticsEventStore? analyticsEventStore,
+    QueueJobProcessor? jobProcessor,
   }) : _paymentService = paymentService,
        _environment = environment,
        _webhookSecret = webhookSecret,
        _paystackWebhookSecret = paystackWebhookSecret,
        _warningSink = warningSink ?? stderr.writeln,
        _uuid = uuid ?? const Uuid(),
-       _analyticsEventStore = analyticsEventStore;
+       _analyticsEventStore = analyticsEventStore,
+       _jobProcessor = jobProcessor;
 
   final PaymentService _paymentService;
   final String _environment;
@@ -36,6 +40,7 @@ class PaymentsController {
   final void Function(String line) _warningSink;
   final Uuid _uuid;
   final AnalyticsEventStore? _analyticsEventStore;
+  final QueueJobProcessor? _jobProcessor;
   bool _missingSecretWarningLogged = false;
   bool _missingPaystackSecretWarningLogged = false;
 
@@ -62,10 +67,25 @@ class PaymentsController {
       return secretPolicyResponse;
     }
     try {
-      final result = await _paymentService.handleWebhook(
+      final jobProcessor = _jobProcessor;
+      final processImmediately = jobProcessor == null;
+      final result = await _paymentService.acceptWebhook(
         headers: request.headers,
         rawBody: rawBody,
+        processImmediately: processImmediately,
       );
+      if (!processImmediately &&
+          result.action == 'webhook_enqueued' &&
+          !result.duplicate) {
+        await jobProcessor.enqueueJob(
+          QueueJobTypes.processWebhookEvent,
+          payload: <String, Object?>{
+            'provider': result.provider,
+            'provider_event_id': result.providerEventId,
+          },
+          maxAttempts: 5,
+        );
+      }
       return _ok(
         request,
         data: <String, Object?>{

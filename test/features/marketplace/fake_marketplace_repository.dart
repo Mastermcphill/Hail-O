@@ -209,6 +209,7 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
   @override
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) async {
     final snapshot = purchases[purchaseId];
     if (snapshot == null) {

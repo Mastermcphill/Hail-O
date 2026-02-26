@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
 import '../../lib/data/sqlite/hailo_database.dart';
+import '../infra/redis_client.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/sqlite_auth_credentials_store.dart';
@@ -244,6 +245,71 @@ void main() {
   });
 
   test(
+    '/ready returns 503 when REDIS_URL is set but redis is unavailable',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      await db.execute('DROP TABLE IF EXISTS schema_migrations');
+      await db.execute(
+        'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+      );
+      await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+      final handler = _buildHandler(
+        db: db,
+        dbHealthCheck: () async => true,
+        buildInfo: const <String, Object?>{
+          'commit': 'ready-test',
+          'migration_head': 25,
+        },
+        environmentMap: const <String, String>{
+          'REDIS_URL': 'redis://localhost:6379/0',
+        },
+      );
+
+      final response = await _request(handler, '/ready');
+      expect(response.statusCode, 503);
+      final body = await _decodeBody(response);
+      expect(body['ready'], isFalse);
+      expect(body['redis'], isFalse);
+      expect(body['redis_ready'], isFalse);
+    },
+  );
+
+  test(
+    '/ready returns 200 when REDIS_URL is set and redis health is good',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      await db.execute('DROP TABLE IF EXISTS schema_migrations');
+      await db.execute(
+        'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+      );
+      await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+      final handler = _buildHandler(
+        db: db,
+        dbHealthCheck: () async => true,
+        buildInfo: const <String, Object?>{
+          'commit': 'ready-test',
+          'migration_head': 25,
+        },
+        environmentMap: const <String, String>{
+          'REDIS_URL': 'redis://localhost:6379/0',
+        },
+        redisClient: InMemoryRedisClient(),
+      );
+
+      final response = await _request(handler, '/ready');
+      expect(response.statusCode, 200);
+      final body = await _decodeBody(response);
+      expect(body['ready'], isTrue);
+      expect(body['redis'], isTrue);
+      expect(body['redis_ready'], isTrue);
+    },
+  );
+
+  test(
     '/ready returns 503 when paystack is enabled but webhook secret is missing',
     () async {
       final db = await HailODatabase().openInMemory();
@@ -288,6 +354,7 @@ Handler _buildHandler({
   required Future<bool> Function() dbHealthCheck,
   required Map<String, Object?> buildInfo,
   Map<String, String> environmentMap = const <String, String>{},
+  RedisQueueClient? redisClient,
 }) {
   return AppServer(
     db: db,
@@ -301,6 +368,7 @@ Handler _buildHandler({
     rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
     operationalRecordStore: const SqliteOperationalRecordStore(),
     environmentMap: environmentMap,
+    redisClient: redisClient,
   ).buildHandler();
 }
 

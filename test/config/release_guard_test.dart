@@ -68,4 +68,21 @@ void main() {
       isTrue,
     );
   });
+
+  test('release guard blocks staging hosts in prod releases', () {
+    final result = ReleaseGuard.evaluate(
+      environmentName: 'prod',
+      baseUrl: 'https://staging-api.hailo.example',
+      release: '1.2.0+3',
+      sentryDsn: 'https://examplePublicKey@o0.ingest.sentry.io/0',
+      allowReleaseDev: false,
+      allowInsecureBaseUrl: false,
+    );
+
+    expect(result.isValid, isFalse);
+    expect(
+      result.issues.any((issue) => issue.code == 'base_url_staging_forbidden'),
+      isTrue,
+    );
+  });
 }

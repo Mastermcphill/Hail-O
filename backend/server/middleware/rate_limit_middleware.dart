@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 
+import '../../infra/redis_client.dart';
 import '../../infra/request_context.dart';
 import '../http_utils.dart';
 
@@ -30,6 +31,8 @@ Middleware rateLimitMiddleware({
   int maxAdminRequestsPerUser = 60,
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'healthz', 'ready'},
+  RedisQueueClient? redisClient,
+  void Function(String line)? warningSink,
   NowProvider? nowProvider,
 }) {
   final ipBuckets = <String, _CounterBucket>{};
@@ -38,7 +41,7 @@ Middleware rateLimitMiddleware({
   final webhookRequestsPerUser =
       maxWebhookRequestsPerUser ?? maxRequestsPerUser;
 
-  bool consume(
+  bool consumeInMemory(
     Map<String, _CounterBucket> buckets,
     String key,
     DateTime currentUtc,
@@ -59,8 +62,22 @@ Middleware rateLimitMiddleware({
     return true;
   }
 
+  Future<bool> consumeRedis(String key, int maxRequests) async {
+    final client = redisClient;
+    if (client == null || maxRequests <= 0) {
+      return true;
+    }
+    try {
+      final count = await client.incrementWithWindow(key, window: window);
+      return count <= maxRequests;
+    } catch (error) {
+      warningSink?.call('WARN: redis rate limit counter unavailable: $error');
+      return true;
+    }
+  }
+
   return (Handler innerHandler) {
-    return (Request request) {
+    return (Request request) async {
       final path = _canonicalPath(request.url.path);
       if (exemptPaths.contains(path)) {
         return innerHandler(request);
@@ -110,10 +127,12 @@ Middleware rateLimitMiddleware({
         userLimit = isAuthPath ? maxAuthRequestsPerUser : maxRequestsPerUser;
         bucketScope = isAuthPath ? 'auth' : 'general';
       }
-      final ipBucketKey = '$bucketScope::$ipKey';
-      final userBucketKey = '$bucketScope::$userId';
-
-      if (!consume(ipBuckets, ipBucketKey, currentUtc, ipLimit)) {
+      final ipBucketKey = 'ratelimit:$bucketScope:ip:$ipKey';
+      final userBucketKey = 'ratelimit:$bucketScope:user:$userId';
+      final ipAllowed = redisClient == null
+          ? consumeInMemory(ipBuckets, ipBucketKey, currentUtc, ipLimit)
+          : await consumeRedis(ipBucketKey, ipLimit);
+      if (!ipAllowed) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,
@@ -127,7 +146,14 @@ Middleware rateLimitMiddleware({
 
       if (userLimit > 0 &&
           userId.isNotEmpty &&
-          !consume(userBuckets, userBucketKey, currentUtc, userLimit)) {
+          !(redisClient == null
+              ? consumeInMemory(
+                  userBuckets,
+                  userBucketKey,
+                  currentUtc,
+                  userLimit,
+                )
+              : await consumeRedis(userBucketKey, userLimit))) {
         return Future<Response>.value(
           jsonErrorResponse(
             request,

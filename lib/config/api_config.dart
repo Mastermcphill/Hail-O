@@ -15,6 +15,10 @@ class ApiConfig {
     defaultValue: false,
   );
 
+  static const String _envDartDefine = String.fromEnvironment(
+    'ENV',
+    defaultValue: '',
+  );
   static const String _explicitEnvironment = String.fromEnvironment(
     'HAILO_ENV',
     defaultValue: '',
@@ -32,6 +36,9 @@ class ApiConfig {
   static String get environmentName => environment.name;
 
   static bool get mockMode {
+    if (environment == HailoEnvironment.prod) {
+      return false;
+    }
     final override = _mockModeOverride.trim().toLowerCase();
     if (override == 'true') {
       return true;
@@ -43,7 +50,11 @@ class ApiConfig {
   }
 
   static String get baseUrl {
+    const baseOverride = String.fromEnvironment('BASE_URL', defaultValue: '');
     const override = String.fromEnvironment('HAILO_BASE_URL', defaultValue: '');
+    if (baseOverride.trim().isNotEmpty) {
+      return _normalize(baseOverride);
+    }
     if (override.trim().isNotEmpty) {
       return _normalize(override);
     }
@@ -57,6 +68,7 @@ class ApiConfig {
 
   static HailoEnvironment _resolveEnvironment() {
     return resolveEnvironmentFor(
+      envDefine: _envDartDefine,
       explicitEnvironment: _explicitEnvironment,
       flavor: _flutterFlavor,
       useProductionFallback: useProduction,
@@ -81,10 +93,16 @@ class ApiConfig {
 
   @visibleForTesting
   static HailoEnvironment resolveEnvironmentFor({
+    String envDefine = '',
     String explicitEnvironment = '',
     String flavor = '',
     bool useProductionFallback = false,
   }) {
+    final fromEnv = _parseEnvironment(envDefine);
+    if (fromEnv != null) {
+      return fromEnv;
+    }
+
     final fromExplicit = _parseEnvironment(explicitEnvironment);
     if (fromExplicit != null) {
       return fromExplicit;

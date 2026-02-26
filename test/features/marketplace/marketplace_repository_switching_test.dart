@@ -201,6 +201,7 @@ class _FakeRepository implements MarketplaceRepository {
   @override
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) async {
     return MarketplacePaymentIntent(
       id: 'pi_1',

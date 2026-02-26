@@ -928,6 +928,34 @@ class MarketplaceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<PurchaseReceipt?> refreshPurchaseStatus(String purchaseId) async {
+    try {
+      final receipt = await _repository.fetchPurchaseReceipt(purchaseId);
+      if (receipt == null) {
+        return null;
+      }
+      _activeReceipt = receipt;
+      if (_activePaymentIntent != null &&
+          _activePaymentIntent!.purchaseId != receipt.purchaseId) {
+        _activePaymentIntent = null;
+      }
+      _seatCount = _clampSeatCount(receipt.seatCount);
+      _assignments = receipt.assignments.isEmpty
+          ? <SeatAssignment>[
+              const SeatAssignment(seatNumber: 1, name: '', email: ''),
+            ]
+          : receipt.assignments;
+      _syncAssignmentsToSeatCount();
+      _purchase = _snapshotFromReceipt(receipt);
+      await _localStore.cachePurchase(_purchase!);
+      _offlineMode = false;
+      notifyListeners();
+      return receipt;
+    } catch (_) {
+      return null;
+    }
+  }
+
   void updateCouponDraft(String value) {
     _couponDraft = value.trim();
     notifyListeners();
@@ -1242,6 +1270,7 @@ class MarketplaceController extends ChangeNotifier {
     try {
       final intent = await _repository.createPaymentIntent(
         purchaseId: purchaseId,
+        idempotencyKey: newIdempotencyKey(),
       );
       if (intent == null) {
         return;

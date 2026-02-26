@@ -181,11 +181,13 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
   @override
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) async {
     try {
       final response = await _apiClient.post(
         MarketplaceEndpoints.paymentIntents,
         body: <String, dynamic>{'purchase_id': purchaseId},
+        idempotencyKey: idempotencyKey,
       );
       final payload = _toMap(extractEnvelopeData(response));
       if (payload.isEmpty) {

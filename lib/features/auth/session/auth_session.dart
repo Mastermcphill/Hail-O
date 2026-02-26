@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/observability/app_observability.dart';
 import '../../../core/routing/role_routes.dart';
 import '../../../core/storage/token_storage.dart';
 import '../data/auth_api.dart';
+import 'auth_storage.dart';
 
 enum AuthStatus { loading, anonymous, authenticated }
 
@@ -13,10 +15,12 @@ class AuthSession extends ChangeNotifier {
   AuthSession({
     required TokenStorage tokenStorage,
     required ApiClient apiClient,
-  }) : _tokenStorage = tokenStorage,
+    AuthStorage? authStorage,
+  }) : _authStorage =
+           authStorage ?? SecureAuthStorage(tokenStorage: tokenStorage),
        _authApi = AuthApi(apiClient: apiClient);
 
-  final TokenStorage _tokenStorage;
+  final AuthStorage _authStorage;
   final AuthApi _authApi;
 
   bool _initialized = false;
@@ -46,18 +50,20 @@ class AuthSession extends ChangeNotifier {
     _status = AuthStatus.loading;
     notifyListeners();
     try {
-      final storedToken = await _tokenStorage.readToken();
-      final storedRole = await _tokenStorage.readRole();
-      final storedRefreshToken = await _tokenStorage.readRefreshToken();
-      if (storedToken != null && storedToken.trim().isNotEmpty) {
-        final normalizedToken = storedToken.trim();
+      final stored = await _authStorage.loadTokens();
+      final storedToken = stored?.accessToken ?? '';
+      final storedRole = stored?.role;
+      final storedRefreshToken = stored?.refreshToken;
+      if (storedToken.isNotEmpty) {
+        final normalizedToken = storedToken;
         if (_isTokenInvalidOrExpired(normalizedToken)) {
           final refreshed = await _refreshUsingStoredToken(
             refreshToken: storedRefreshToken,
             role: storedRole,
           );
           if (!refreshed) {
-            await _tokenStorage.clearAuth();
+            await _authStorage.clearTokens();
+            await AppObservability.clearAuthenticatedUser();
             _token = null;
             _role = null;
             _status = AuthStatus.anonymous;
@@ -66,14 +72,20 @@ class AuthSession extends ChangeNotifier {
           _token = normalizedToken;
           _role = normalizeRole(storedRole);
           _status = AuthStatus.authenticated;
+          await _attachUserToObservability(
+            token: normalizedToken,
+            role: _role ?? 'rider',
+          );
         }
       } else {
         _token = null;
         _role = null;
         _status = AuthStatus.anonymous;
+        await AppObservability.clearAuthenticatedUser();
       }
     } catch (_) {
-      await _tokenStorage.clearAuth();
+      await _authStorage.clearTokens();
+      await AppObservability.clearAuthenticatedUser();
       _token = null;
       _role = null;
       _status = AuthStatus.anonymous;
@@ -96,14 +108,18 @@ class AuthSession extends ChangeNotifier {
         refreshToken: normalizedRefreshToken,
       );
       final normalizedRole = normalizeRole(role);
-      await _tokenStorage.saveAuth(
-        token: refreshedAccessToken,
+      await _authStorage.saveTokens(
+        accessToken: refreshedAccessToken,
         role: normalizedRole,
         refreshToken: normalizedRefreshToken,
       );
       _token = refreshedAccessToken;
       _role = normalizedRole;
       _status = AuthStatus.authenticated;
+      await _attachUserToObservability(
+        token: refreshedAccessToken,
+        role: normalizedRole,
+      );
       return true;
     } catch (_) {
       return false;
@@ -149,7 +165,8 @@ class AuthSession extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    await _tokenStorage.clearAuth();
+    await _authStorage.clearTokens();
+    await AppObservability.clearAuthenticatedUser();
     _token = null;
     _role = null;
     _status = AuthStatus.anonymous;
@@ -168,18 +185,37 @@ class AuthSession extends ChangeNotifier {
     required String role,
     String? refreshToken,
   }) async {
-    await _tokenStorage.saveAuth(
-      token: token,
+    await _authStorage.saveTokens(
+      accessToken: token,
       role: role,
       refreshToken: refreshToken,
     );
     _token = token;
     _role = normalizeRole(role);
     _status = AuthStatus.authenticated;
+    await _attachUserToObservability(token: token, role: _role ?? 'rider');
     if (!_initialized) {
       _initialized = true;
     }
     notifyListeners();
+  }
+
+  Future<void> _attachUserToObservability({
+    required String token,
+    required String role,
+  }) {
+    final parts = token.split('.');
+    if (parts.length != 3) {
+      return AppObservability.setAuthenticatedUser(role: role);
+    }
+    final payloadMap = _decodeJwtPayload(parts[1]);
+    final userId = _firstNonEmptyString(<Object?>[
+      payloadMap?['user_id'],
+      payloadMap?['sub'],
+      payloadMap?['uid'],
+      payloadMap?['id'],
+    ]);
+    return AppObservability.setAuthenticatedUser(userId: userId, role: role);
   }
 
   bool _isTokenInvalidOrExpired(String token) {
@@ -235,6 +271,18 @@ class AuthSession extends ChangeNotifier {
     }
     if (value is String) {
       return int.tryParse(value.trim());
+    }
+    return null;
+  }
+
+  String? _firstNonEmptyString(List<Object?> values) {
+    for (final value in values) {
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+      if (value is num) {
+        return value.toString();
+      }
     }
     return null;
   }

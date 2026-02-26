@@ -29,6 +29,7 @@ dependencies:
   uuid: ^4.5.1
   hailo_shared:
     path: ../packages/hailo_shared
+  redis: 3.1.0
 
 dev_dependencies:
   lints: ^6.0.0

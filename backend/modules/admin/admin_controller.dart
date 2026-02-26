@@ -14,6 +14,8 @@ import '../../infra/audit_log_store.dart';
 import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../../infra/sentry_observability.dart';
+import '../../jobs/job.dart';
+import '../../jobs/job_processor.dart';
 import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
@@ -39,6 +41,7 @@ class AdminController {
     http.Client? httpClient,
     Duration paystackVerifyTimeout = const Duration(seconds: 8),
     AnalyticsEventStore? analyticsEventStore,
+    QueueJobProcessor? queueJobProcessor,
   }) : _db = db,
        _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
@@ -55,7 +58,8 @@ class AdminController {
        _paystackApiBaseUrl = _normalizeApiBaseUrl(paystackApiBaseUrl),
        _httpClient = httpClient ?? http.Client(),
        _paystackVerifyTimeout = paystackVerifyTimeout,
-       _analyticsEventStore = analyticsEventStore;
+       _analyticsEventStore = analyticsEventStore,
+       _queueJobProcessor = queueJobProcessor;
 
   final Database? _db;
   final WalletReversalService? _walletReversalService;
@@ -72,6 +76,7 @@ class AdminController {
   final http.Client _httpClient;
   final Duration _paystackVerifyTimeout;
   final AnalyticsEventStore? _analyticsEventStore;
+  final QueueJobProcessor? _queueJobProcessor;
 
   static const Set<String> _tripStatuses = <String>{
     'created',
@@ -643,6 +648,46 @@ class AdminController {
     final bodyLimit = payload == null ? null : payload['limit'];
     final resolvedLimitRaw = bodyLimit?.toString() ?? queryLimit;
     final limit = _parseLimit(resolvedLimitRaw);
+
+    final queueProcessor = _queueJobProcessor;
+    if (queueProcessor != null) {
+      final events = await paymentService.listRetryableWebhookEvents(
+        limit: limit,
+      );
+      var enqueued = 0;
+      for (final event in events) {
+        await queueProcessor.enqueueJob(
+          QueueJobTypes.processWebhookEvent,
+          payload: <String, Object?>{
+            'provider': event.provider,
+            'provider_event_id': event.eventId,
+          },
+          maxAttempts: 5,
+        );
+        enqueued += 1;
+      }
+      await _auditLogStore.recordFromRequest(
+        request,
+        action: 'admin.payments.webhooks.retry',
+        resourceType: 'admin_endpoint',
+        resourceId: _auditResourceId(request),
+        metadata: <String, Object?>{
+          'limit': limit,
+          'scanned': events.length,
+          'enqueued': enqueued,
+          'mode': 'queue',
+        },
+      );
+      return jsonResponse(200, <String, Object?>{
+        'ok': true,
+        'trace_id': request.requestContext.traceId,
+        'data': <String, Object?>{
+          'scanned': events.length,
+          'enqueued': enqueued,
+          'mode': 'queue',
+        },
+      });
+    }
 
     final result = await paymentService.retryPendingWebhooks(limit: limit);
     await _auditLogStore.recordFromRequest(

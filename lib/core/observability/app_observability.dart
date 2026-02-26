@@ -15,10 +15,15 @@ class AppObservability {
   );
   static final ValueNotifier<String?> _lastRequestIdNotifier =
       ValueNotifier<String?>(null);
+  static final ValueNotifier<String?> _lastTraceIdNotifier =
+      ValueNotifier<String?>(null);
 
   static ValueListenable<String?> get lastRequestIdListenable =>
       _lastRequestIdNotifier;
   static String? get lastRequestId => _lastRequestIdNotifier.value;
+  static ValueListenable<String?> get lastTraceIdListenable =>
+      _lastTraceIdNotifier;
+  static String? get lastTraceId => _lastTraceIdNotifier.value;
 
   static Future<void> recordHttpRequest({
     required String requestId,
@@ -27,8 +32,8 @@ class AppObservability {
     required int attempt,
   }) async {
     _lastRequestIdNotifier.value = requestId;
-    await Sentry.configureScope((scope) {
-      scope.setTag('request_id', requestId);
+    await Sentry.configureScope((scope) async {
+      await scope.setTag('request_id', requestId);
     });
     await Sentry.addBreadcrumb(
       Breadcrumb(
@@ -44,6 +49,102 @@ class AppObservability {
         level: SentryLevel.info,
       ),
     );
+  }
+
+  static Future<void> recordHttpResponse({
+    required String requestId,
+    String? traceId,
+    int? statusCode,
+  }) async {
+    final normalizedTraceId = (traceId ?? '').trim();
+    if (normalizedTraceId.isNotEmpty) {
+      _lastTraceIdNotifier.value = normalizedTraceId;
+    }
+    await Sentry.configureScope((scope) async {
+      await scope.setTag('request_id', requestId);
+      if (normalizedTraceId.isNotEmpty) {
+        await scope.setTag('trace_id', normalizedTraceId);
+      }
+      if (statusCode != null) {
+        scope.setContexts('http', <String, dynamic>{'status': statusCode});
+      }
+    });
+  }
+
+  static Future<void> recordHttpFailure({
+    required String requestId,
+    required String method,
+    required Uri uri,
+    required int statusCode,
+    String? traceId,
+    String? code,
+  }) async {
+    final normalizedTraceId = (traceId ?? '').trim();
+    if (normalizedTraceId.isNotEmpty) {
+      _lastTraceIdNotifier.value = normalizedTraceId;
+    }
+    await Sentry.configureScope((scope) async {
+      await scope.setTag('request_id', requestId);
+      if (normalizedTraceId.isNotEmpty) {
+        await scope.setTag('trace_id', normalizedTraceId);
+      }
+    });
+    await Sentry.addBreadcrumb(
+      Breadcrumb(
+        type: 'http',
+        category: 'http.error',
+        message: 'HTTP ${method.toUpperCase()} ${uri.path} failed',
+        data: <String, dynamic>{
+          'request_id': requestId,
+          'trace_id': normalizedTraceId,
+          'status_code': statusCode,
+          'code': code ?? '',
+        },
+        level: SentryLevel.warning,
+      ),
+    );
+  }
+
+  static Future<void> setRuntimeContext({
+    required String environment,
+    required String appVersion,
+    required String buildNumber,
+    required String platform,
+  }) async {
+    await Sentry.configureScope((scope) async {
+      await scope.setTag('environment', environment);
+      await scope.setTag('app_version', appVersion);
+      await scope.setTag('build_number', buildNumber);
+      await scope.setTag('platform', platform);
+      scope.setContexts('runtime', <String, dynamic>{'is_web': kIsWeb});
+    });
+  }
+
+  static Future<void> setAuthenticatedUser({
+    String? userId,
+    String? role,
+  }) async {
+    final normalizedUserId = (userId ?? '').trim();
+    final normalizedRole = (role ?? '').trim();
+    await Sentry.configureScope((scope) async {
+      if (normalizedUserId.isEmpty) {
+        await scope.setUser(null);
+      } else {
+        await scope.setUser(SentryUser(id: scrubText(normalizedUserId)));
+      }
+      if (normalizedRole.isNotEmpty) {
+        await scope.setTag('role', scrubText(normalizedRole));
+      } else {
+        await scope.removeTag('role');
+      }
+    });
+  }
+
+  static Future<void> clearAuthenticatedUser() async {
+    await Sentry.configureScope((scope) async {
+      await scope.setUser(null);
+      await scope.removeTag('role');
+    });
   }
 
   static FutureOr<SentryEvent?> beforeSend(SentryEvent event, Hint hint) {

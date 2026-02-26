@@ -52,6 +52,7 @@ abstract class MarketplaceRepository {
 
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) async {
     return null;
   }
@@ -263,12 +264,17 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
   @override
   Future<MarketplacePaymentIntent?> createPaymentIntent({
     required String purchaseId,
+    String? idempotencyKey,
   }) {
     return _execute(
-      httpCall: () =>
-          _httpRepository.createPaymentIntent(purchaseId: purchaseId),
-      mockCall: () =>
-          _mockRepository.createPaymentIntent(purchaseId: purchaseId),
+      httpCall: () => _httpRepository.createPaymentIntent(
+        purchaseId: purchaseId,
+        idempotencyKey: idempotencyKey,
+      ),
+      mockCall: () => _mockRepository.createPaymentIntent(
+        purchaseId: purchaseId,
+        idempotencyKey: idempotencyKey,
+      ),
     );
   }
 

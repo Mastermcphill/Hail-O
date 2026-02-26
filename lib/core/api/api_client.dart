@@ -10,10 +10,12 @@ import '../util/ids.dart';
 import 'api_config.dart';
 import 'api_error.dart';
 import 'api_errors.dart';
+import 'api_paths.dart';
 import 'api_policy.dart';
 import 'mock_backend_store.dart';
 
 const String _mockNextOfKinKey = 'rider_next_of_kin_local';
+const String _authorizationHeader = 'Authorization';
 
 class ApiClient {
   ApiClient({required TokenStorage tokenStorage, http.Client? httpClient})
@@ -23,6 +25,12 @@ class ApiClient {
   final TokenStorage _tokenStorage;
   final http.Client _httpClient;
   final _ApiCircuitBreaker _circuitBreaker = _ApiCircuitBreaker();
+  Future<void> Function()? _authFailureHandler;
+  Future<bool>? _refreshTokenFuture;
+
+  void setAuthFailureHandler(Future<void> Function() handler) {
+    _authFailureHandler = handler;
+  }
 
   Future<Map<String, dynamic>> get(String path) async {
     final normalizedPath = _normalizePath(path);
@@ -33,8 +41,9 @@ class ApiClient {
     final policy = ApiPolicy.forRequest(method: 'GET');
     final requestId = newRequestId();
     _ensureCircuitClosed(requestId: requestId);
-    final headers = await _buildHeaders(requestId: requestId);
+    var headers = await _buildHeaders(requestId: requestId);
     final uri = _buildUri(normalizedPath);
+    var attemptedRefresh = false;
     for (var attempt = 0; ; attempt++) {
       _logRequest(
         requestId: requestId,
@@ -47,10 +56,31 @@ class ApiClient {
         final response = await _httpClient
             .get(uri, headers: headers)
             .timeout(policy.requestTimeout);
-        final decoded = _decodeResponse(response);
+        final decoded = _decodeResponse(response, requestId: requestId);
         _recordRequestSuccess();
         return decoded;
       } on ApiException catch (error) {
+        var authFailureHandled = false;
+        if (_shouldAttemptRefresh(
+          error: error,
+          path: normalizedPath,
+          headers: headers,
+          alreadyAttempted: attemptedRefresh,
+        )) {
+          attemptedRefresh = true;
+          final refreshed = await _attemptTokenRefresh(requestId: requestId);
+          if (refreshed) {
+            headers = await _buildHeaders(requestId: requestId);
+            continue;
+          }
+          await _handleAuthRefreshFailure();
+          authFailureHandled = true;
+        }
+        if (error.statusCode == 401 &&
+            attemptedRefresh &&
+            !authFailureHandled) {
+          await _handleAuthRefreshFailure();
+        }
         if (_shouldFallbackToMock(error, normalizedPath)) {
           final fallback = await _mockResponse(
             method: 'GET',
@@ -63,7 +93,12 @@ class ApiClient {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        _recordRequestFailure(error);
+        _recordRequestFailure(
+          error,
+          requestId: requestId,
+          method: 'GET',
+          uri: uri,
+        );
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
@@ -76,7 +111,12 @@ class ApiClient {
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'GET',
+          uri: uri,
+        );
         throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -89,7 +129,12 @@ class ApiClient {
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'GET',
+          uri: uri,
+        );
         throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -102,7 +147,12 @@ class ApiClient {
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'GET',
+          uri: uri,
+        );
         throw wrapped;
       }
     }
@@ -125,21 +175,22 @@ class ApiClient {
 
     final callerProvidedIdempotencyKey =
         idempotencyKey != null && idempotencyKey.trim().isNotEmpty;
-    final policy = ApiPolicy.forRequest(
-      method: 'POST',
-      hasIdempotencyKey: callerProvidedIdempotencyKey,
-    );
-    final requestId = newRequestId();
-    _ensureCircuitClosed(requestId: requestId);
     final resolvedIdempotencyKey = callerProvidedIdempotencyKey
         ? idempotencyKey.trim()
         : newIdempotencyKey();
-    final headers = await _buildHeaders(
+    final policy = ApiPolicy.forRequest(
+      method: 'POST',
+      hasIdempotencyKey: true,
+    );
+    final requestId = newRequestId();
+    _ensureCircuitClosed(requestId: requestId);
+    var headers = await _buildHeaders(
       requestId: requestId,
       idempotencyKey: resolvedIdempotencyKey,
       includeJsonContentType: true,
     );
     final uri = _buildUri(normalizedPath);
+    var attemptedRefresh = false;
     for (var attempt = 0; ; attempt++) {
       _logRequest(
         requestId: requestId,
@@ -152,10 +203,35 @@ class ApiClient {
         final response = await _httpClient
             .post(uri, headers: headers, body: jsonEncode(requestBody))
             .timeout(policy.requestTimeout);
-        final decoded = _decodeResponse(response);
+        final decoded = _decodeResponse(response, requestId: requestId);
         _recordRequestSuccess();
         return decoded;
       } on ApiException catch (error) {
+        var authFailureHandled = false;
+        if (_shouldAttemptRefresh(
+          error: error,
+          path: normalizedPath,
+          headers: headers,
+          alreadyAttempted: attemptedRefresh,
+        )) {
+          attemptedRefresh = true;
+          final refreshed = await _attemptTokenRefresh(requestId: requestId);
+          if (refreshed) {
+            headers = await _buildHeaders(
+              requestId: requestId,
+              idempotencyKey: resolvedIdempotencyKey,
+              includeJsonContentType: true,
+            );
+            continue;
+          }
+          await _handleAuthRefreshFailure();
+          authFailureHandled = true;
+        }
+        if (error.statusCode == 401 &&
+            attemptedRefresh &&
+            !authFailureHandled) {
+          await _handleAuthRefreshFailure();
+        }
         if (_shouldFallbackToMock(error, normalizedPath)) {
           final fallback = await _mockResponse(
             method: 'POST',
@@ -169,7 +245,12 @@ class ApiClient {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        _recordRequestFailure(error);
+        _recordRequestFailure(
+          error,
+          requestId: requestId,
+          method: 'POST',
+          uri: uri,
+        );
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
@@ -182,7 +263,12 @@ class ApiClient {
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'POST',
+          uri: uri,
+        );
         throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -195,7 +281,12 @@ class ApiClient {
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'POST',
+          uri: uri,
+        );
         throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -208,7 +299,12 @@ class ApiClient {
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'POST',
+          uri: uri,
+        );
         throw wrapped;
       }
     }
@@ -236,12 +332,13 @@ class ApiClient {
     );
     final requestId = newRequestId();
     _ensureCircuitClosed(requestId: requestId);
-    final headers = await _buildHeaders(
+    var headers = await _buildHeaders(
       requestId: requestId,
       idempotencyKey: idempotencyKey,
       includeJsonContentType: true,
     );
     final uri = _buildUri(normalizedPath);
+    var attemptedRefresh = false;
     for (var attempt = 0; ; attempt++) {
       _logRequest(
         requestId: requestId,
@@ -254,10 +351,35 @@ class ApiClient {
         final response = await _httpClient
             .patch(uri, headers: headers, body: jsonEncode(requestBody))
             .timeout(policy.requestTimeout);
-        final decoded = _decodeResponse(response);
+        final decoded = _decodeResponse(response, requestId: requestId);
         _recordRequestSuccess();
         return decoded;
       } on ApiException catch (error) {
+        var authFailureHandled = false;
+        if (_shouldAttemptRefresh(
+          error: error,
+          path: normalizedPath,
+          headers: headers,
+          alreadyAttempted: attemptedRefresh,
+        )) {
+          attemptedRefresh = true;
+          final refreshed = await _attemptTokenRefresh(requestId: requestId);
+          if (refreshed) {
+            headers = await _buildHeaders(
+              requestId: requestId,
+              idempotencyKey: idempotencyKey,
+              includeJsonContentType: true,
+            );
+            continue;
+          }
+          await _handleAuthRefreshFailure();
+          authFailureHandled = true;
+        }
+        if (error.statusCode == 401 &&
+            attemptedRefresh &&
+            !authFailureHandled) {
+          await _handleAuthRefreshFailure();
+        }
         if (_shouldFallbackToMock(error, normalizedPath)) {
           final fallback = await _mockResponse(
             method: 'PATCH',
@@ -271,7 +393,12 @@ class ApiClient {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        _recordRequestFailure(error);
+        _recordRequestFailure(
+          error,
+          requestId: requestId,
+          method: 'PATCH',
+          uri: uri,
+        );
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
@@ -284,7 +411,12 @@ class ApiClient {
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'PATCH',
+          uri: uri,
+        );
         throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -297,7 +429,12 @@ class ApiClient {
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'PATCH',
+          uri: uri,
+        );
         throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -310,7 +447,12 @@ class ApiClient {
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'PATCH',
+          uri: uri,
+        );
         throw wrapped;
       }
     }
@@ -339,12 +481,13 @@ class ApiClient {
     final requestId = newRequestId();
     _ensureCircuitClosed(requestId: requestId);
     final includeJsonContentType = requestBody.isNotEmpty;
-    final headers = await _buildHeaders(
+    var headers = await _buildHeaders(
       requestId: requestId,
       idempotencyKey: idempotencyKey,
       includeJsonContentType: includeJsonContentType,
     );
     final uri = _buildUri(normalizedPath);
+    var attemptedRefresh = false;
     for (var attempt = 0; ; attempt++) {
       _logRequest(
         requestId: requestId,
@@ -368,10 +511,35 @@ class ApiClient {
               .timeout(policy.requestTimeout);
           response = await http.Response.fromStream(streamed);
         }
-        final decoded = _decodeResponse(response);
+        final decoded = _decodeResponse(response, requestId: requestId);
         _recordRequestSuccess();
         return decoded;
       } on ApiException catch (error) {
+        var authFailureHandled = false;
+        if (_shouldAttemptRefresh(
+          error: error,
+          path: normalizedPath,
+          headers: headers,
+          alreadyAttempted: attemptedRefresh,
+        )) {
+          attemptedRefresh = true;
+          final refreshed = await _attemptTokenRefresh(requestId: requestId);
+          if (refreshed) {
+            headers = await _buildHeaders(
+              requestId: requestId,
+              idempotencyKey: idempotencyKey,
+              includeJsonContentType: includeJsonContentType,
+            );
+            continue;
+          }
+          await _handleAuthRefreshFailure();
+          authFailureHandled = true;
+        }
+        if (error.statusCode == 401 &&
+            attemptedRefresh &&
+            !authFailureHandled) {
+          await _handleAuthRefreshFailure();
+        }
         if (_shouldFallbackToMock(error, normalizedPath)) {
           final fallback = await _mockResponse(
             method: 'DELETE',
@@ -385,7 +553,12 @@ class ApiClient {
           await Future<void>.delayed(policy.retryDelay(attempt));
           continue;
         }
-        _recordRequestFailure(error);
+        _recordRequestFailure(
+          error,
+          requestId: requestId,
+          method: 'DELETE',
+          uri: uri,
+        );
         rethrow;
       } on TimeoutException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.timeout, attempt)) {
@@ -398,7 +571,12 @@ class ApiClient {
           message: 'Request timed out.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'DELETE',
+          uri: uri,
+        );
         throw wrapped;
       } on SocketException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -411,7 +589,12 @@ class ApiClient {
           message: 'Network request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'DELETE',
+          uri: uri,
+        );
         throw wrapped;
       } on http.ClientException catch (error) {
         if (policy.shouldRetryTransportError(ApiErrorKind.network, attempt)) {
@@ -424,7 +607,12 @@ class ApiClient {
           message: 'HTTP client request failed.',
           rawBody: error.toString(),
         );
-        _recordRequestFailure(wrapped);
+        _recordRequestFailure(
+          wrapped,
+          requestId: requestId,
+          method: 'DELETE',
+          uri: uri,
+        );
         throw wrapped;
       }
     }
@@ -461,8 +649,8 @@ class ApiClient {
       headers['Idempotency-Key'] = idempotencyKey;
     }
     final token = await _tokenStorage.readToken();
-    if (token != null && token.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $token';
+    if (token != null && token.trim().isNotEmpty) {
+      headers[_authorizationHeader] = 'Bearer ${token.trim()}';
     }
     return headers;
   }
@@ -512,6 +700,117 @@ class ApiClient {
     }());
   }
 
+  bool _shouldAttemptRefresh({
+    required ApiException error,
+    required String path,
+    required Map<String, String> headers,
+    required bool alreadyAttempted,
+  }) {
+    if (alreadyAttempted) {
+      return false;
+    }
+    if (error.statusCode != 401) {
+      return false;
+    }
+    if (!headers.containsKey(_authorizationHeader)) {
+      return false;
+    }
+    return !_isRefreshEndpoint(path);
+  }
+
+  bool _isRefreshEndpoint(String normalizedPath) {
+    return normalizedPath == ApiPaths.authTokenRefresh ||
+        normalizedPath.startsWith('${ApiPaths.authTokenRefresh}?');
+  }
+
+  Future<bool> _attemptTokenRefresh({required String requestId}) {
+    final inFlight = _refreshTokenFuture;
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final refreshFuture = _performTokenRefresh(requestId: requestId);
+    _refreshTokenFuture = refreshFuture;
+    return refreshFuture.whenComplete(() {
+      if (identical(_refreshTokenFuture, refreshFuture)) {
+        _refreshTokenFuture = null;
+      }
+    });
+  }
+
+  Future<bool> _performTokenRefresh({required String requestId}) async {
+    final refreshToken = (await _tokenStorage.readRefreshToken() ?? '').trim();
+    if (refreshToken.isEmpty) {
+      return false;
+    }
+    final uri = _buildUri(ApiPaths.authTokenRefresh);
+    final refreshRequestId = '$requestId.refresh';
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'X-Request-ID': refreshRequestId,
+      'X-Trace-ID': refreshRequestId,
+    };
+    try {
+      _logRequest(
+        requestId: refreshRequestId,
+        method: 'POST',
+        uri: uri,
+        headers: headers,
+        attempt: 0,
+      );
+      final response = await _httpClient
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode(<String, dynamic>{'refresh_token': refreshToken}),
+          )
+          .timeout(const Duration(seconds: 12));
+      final rawBody = response.body;
+      final parsed = _tryParseJson(rawBody);
+      final payload = parsed == null
+          ? <String, dynamic>{}
+          : _mapFromDynamic(parsed);
+      final nestedData = payload['data'] is Map
+          ? _mapFromDynamic(payload['data'])
+          : <String, dynamic>{};
+      final traceId = _extractTraceId(payload, response.headers);
+      unawaited(
+        AppObservability.recordHttpResponse(
+          requestId: refreshRequestId,
+          traceId: traceId,
+          statusCode: response.statusCode,
+        ),
+      );
+      if (response.statusCode >= 400) {
+        return false;
+      }
+      final accessToken =
+          _stringOrNull(payload['access_token']) ??
+          _stringOrNull(nestedData['access_token']);
+      if (accessToken == null || accessToken.isEmpty) {
+        return false;
+      }
+      await _tokenStorage.saveToken(accessToken);
+      final rotatedRefreshToken =
+          _stringOrNull(payload['refresh_token']) ??
+          _stringOrNull(nestedData['refresh_token']);
+      if (rotatedRefreshToken != null && rotatedRefreshToken.isNotEmpty) {
+        await _tokenStorage.saveRefreshToken(rotatedRefreshToken);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _handleAuthRefreshFailure() async {
+    await _tokenStorage.clearAuth();
+    final handler = _authFailureHandler;
+    if (handler != null) {
+      await handler();
+    }
+  }
+
   bool _shouldUseMockByConfig(String path) {
     return ApiConfig.mockMode && _isNewEndpointPath(path);
   }
@@ -532,7 +831,22 @@ class ApiClient {
     _circuitBreaker.recordSuccess();
   }
 
-  void _recordRequestFailure(ApiException error) {
+  void _recordRequestFailure(
+    ApiException error, {
+    required String requestId,
+    required String method,
+    required Uri uri,
+  }) {
+    unawaited(
+      AppObservability.recordHttpFailure(
+        requestId: requestId,
+        method: method,
+        uri: uri,
+        statusCode: error.statusCode,
+        traceId: error.traceId,
+        code: error.code,
+      ),
+    );
     if (!_isFailureForCircuit(error)) {
       return;
     }
@@ -798,16 +1112,21 @@ class ApiClient {
     ];
   }
 
-  Map<String, dynamic> _decodeResponse(http.Response response) {
+  Map<String, dynamic> _decodeResponse(
+    http.Response response, {
+    required String requestId,
+  }) {
     final rawBody = response.body;
     final decodedBody = _tryParseJson(rawBody);
     final payload = decodedBody != null ? _mapFromDynamic(decodedBody) : null;
+    final traceId = _extractTraceId(payload, response.headers);
 
     if (response.statusCode >= 400) {
       throw _buildException(
         statusCode: response.statusCode,
         payload: payload,
         rawBody: rawBody,
+        traceId: traceId,
       );
     }
 
@@ -816,8 +1135,17 @@ class ApiClient {
         statusCode: response.statusCode,
         payload: payload,
         rawBody: rawBody,
+        traceId: traceId,
       );
     }
+
+    unawaited(
+      AppObservability.recordHttpResponse(
+        requestId: requestId,
+        traceId: traceId,
+        statusCode: response.statusCode,
+      ),
+    );
 
     if (payload != null) {
       return payload;
@@ -833,11 +1161,15 @@ class ApiClient {
     required int statusCode,
     required Map<String, dynamic>? payload,
     required String rawBody,
+    String? traceId,
   }) {
     final code =
         _stringOrNull(payload?['error_code']) ??
         _stringOrNull(payload?['code']);
-    final traceId = _stringOrNull(payload?['trace_id']);
+    final resolvedTraceId =
+        _stringOrNull(payload?['trace_id']) ??
+        _stringOrNull(payload?['traceId']) ??
+        traceId;
     final rawMessage = rawBody.trim();
     final message =
         _stringOrNull(payload?['message']) ??
@@ -851,7 +1183,7 @@ class ApiClient {
       statusCode: statusCode,
       code: code,
       message: message,
-      traceId: traceId,
+      traceId: resolvedTraceId,
       rawBody: rawBody,
       envelope: payload,
     );
@@ -883,6 +1215,31 @@ class ApiClient {
   String? _stringOrNull(Object? value) {
     if (value is String && value.trim().isNotEmpty) {
       return value.trim();
+    }
+    return null;
+  }
+
+  String? _extractTraceId(
+    Map<String, dynamic>? payload,
+    Map<String, String> headers,
+  ) {
+    final fromPayload =
+        _stringOrNull(payload?['trace_id']) ??
+        _stringOrNull(payload?['traceId']);
+    if (fromPayload != null) {
+      return fromPayload;
+    }
+    for (final entry in headers.entries) {
+      final key = entry.key.trim().toLowerCase();
+      if (key == 'x-trace-id' ||
+          key == 'trace-id' ||
+          key == 'x-request-id' ||
+          key == 'request-id') {
+        final value = entry.value.trim();
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
     }
     return null;
   }

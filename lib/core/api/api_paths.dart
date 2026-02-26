@@ -2,6 +2,7 @@ class ApiPaths {
   static const health = '/health';
   static const authLogin = '/auth/login';
   static const authRegister = '/auth/register';
+  static const authTokenRefresh = '/auth/token/refresh';
   static const meNextOfKin = '/me/next-of-kin';
   static const meDocuments = '/me/documents';
   static const nextOfKin = meNextOfKin;

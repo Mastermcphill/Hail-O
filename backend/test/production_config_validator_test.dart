@@ -90,6 +90,7 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
+          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       returnsNormally,
@@ -108,6 +109,7 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
+          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       returnsNormally,
@@ -123,6 +125,7 @@ void main() {
           'JWT_SECRET': 'super-secret',
           'ALLOWED_ORIGINS': 'https://app.hailo.dev',
           'SENTRY_DSN': 'https://public@sentry.io/1',
+          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       throwsA(
@@ -148,6 +151,7 @@ void main() {
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
           'OTP_DEV_BYPASS': 'true',
+          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       throwsA(
@@ -155,6 +159,29 @@ void main() {
           (error) => error.toString(),
           'message',
           contains('OTP_DEV_BYPASS'),
+        ),
+      ),
+    );
+  });
+
+  test('requires redis url in production', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
+        },
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.toString(),
+          'message',
+          contains('REDIS_URL'),
         ),
       ),
     );
@@ -173,6 +200,7 @@ void main() {
           'OTP_PROVIDER': 'termii',
           'TERMII_API_KEY': 'termii-key',
           'TERMII_SENDER_ID': 'HAILO',
+          'REDIS_URL': 'redis://localhost:6379/0',
         },
       ),
       returnsNormally,
