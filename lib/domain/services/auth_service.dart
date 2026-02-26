@@ -263,6 +263,9 @@ class AuthService {
         if (user != null && user.isBlocked) {
           throw const UnauthorizedActionError(code: 'user_blocked');
         }
+        if (user != null && await _isUserDisabled(user.id)) {
+          throw const UnauthorizedActionError(code: 'user_disabled');
+        }
         return <String, Object?>{
           'ok': true,
           'user_id': external.userId,
@@ -285,6 +288,9 @@ class AuthService {
     }
     if (user.isBlocked) {
       throw const UnauthorizedActionError(code: 'user_blocked');
+    }
+    if (await _isUserDisabled(user.id)) {
+      throw const UnauthorizedActionError(code: 'user_disabled');
     }
 
     return <String, Object?>{
@@ -339,5 +345,34 @@ class AuthService {
         'role': scaffoldRole,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
+  }
+
+  Future<bool> _isUserDisabled(String userId) async {
+    if (!await _columnExists('users', 'disabled_at')) {
+      return false;
+    }
+    final rows = await db.query(
+      'users',
+      columns: <String>['disabled_at'],
+      where: 'id = ?',
+      whereArgs: <Object>[userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return false;
+    }
+    final disabledAt = (rows.first['disabled_at'] as String?)?.trim() ?? '';
+    return disabledAt.isNotEmpty;
+  }
+
+  Future<bool> _columnExists(String tableName, String columnName) async {
+    final rows = await db.rawQuery('PRAGMA table_info($tableName)');
+    for (final row in rows) {
+      final name = (row['name'] as String?)?.trim().toLowerCase() ?? '';
+      if (name == columnName.trim().toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

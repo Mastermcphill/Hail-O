@@ -286,6 +286,7 @@ class PhoneAuthService {
     );
 
     final user = await _resolveOrCreateUser(phone, now);
+    await _ensureUserEnabled(user.id);
     final accessToken = _tokenService.issueToken(
       userId: user.id,
       role: user.role,
@@ -352,6 +353,7 @@ class PhoneAuthService {
         message: 'Refresh token is invalid',
       );
     }
+    await _ensureUserEnabled(user.id);
     final accessToken = _tokenService.issueToken(
       userId: user.id,
       role: user.role,
@@ -393,6 +395,17 @@ class PhoneAuthService {
       phoneE164: phoneE164,
       createdAt: now,
     );
+  }
+
+  Future<void> _ensureUserEnabled(String userId) async {
+    final isDisabled = await _store.isUserDisabled(userId);
+    if (isDisabled) {
+      throw const PhoneAuthFailure(
+        statusCode: 403,
+        code: 'user_disabled',
+        message: 'User account is disabled',
+      );
+    }
   }
 
   String _normalizePhone(String input) {

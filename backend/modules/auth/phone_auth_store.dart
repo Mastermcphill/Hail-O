@@ -70,6 +70,8 @@ abstract class PhoneAuthStore {
 
   Future<PhoneAuthUserRecord?> findUserById(String userId);
 
+  Future<bool> isUserDisabled(String userId);
+
   Future<PhoneAuthUserRecord> createUser({
     required String userId,
     required String phoneE164,

@@ -165,6 +165,29 @@ class PostgresPhoneAuthStore extends PhoneAuthStore {
   }
 
   @override
+  Future<bool> isUserDisabled(String userId) async {
+    try {
+      final rows = await _postgresProvider.withConnection(
+        (connection) => connection.query(
+          '''
+          SELECT disabled_at
+          FROM users
+          WHERE id = CAST(@id AS UUID)
+          LIMIT 1
+          ''',
+          substitutionValues: <String, Object?>{'id': userId},
+        ),
+      );
+      if (rows.isEmpty) {
+        return false;
+      }
+      return rows.first[0] is DateTime;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<PhoneAuthUserRecord> createUser({
     required String userId,
     required String phoneE164,

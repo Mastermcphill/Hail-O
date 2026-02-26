@@ -38,6 +38,8 @@ void main() {
     final dispatchAssignmentsSql =
         sqlByName['022_dispatch_trip_assignments.sql'] ?? '';
     final auditLogsSql = sqlByName['023_audit_logs.sql'] ?? '';
+    final adminModerationMetricsSql =
+        sqlByName['024_admin_moderation_metrics.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -376,6 +378,20 @@ void main() {
       ),
       isTrue,
       reason: 'audit logs resource index must exist',
+    );
+    expect(
+      adminModerationMetricsSql.contains(
+        'ADD COLUMN IF NOT EXISTS disabled_at',
+      ),
+      isTrue,
+      reason: 'users disabled_at column must be added',
+    );
+    expect(
+      adminModerationMetricsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_users_disabled_at',
+      ),
+      isTrue,
+      reason: 'users disabled_at index must exist',
     );
   });
 }

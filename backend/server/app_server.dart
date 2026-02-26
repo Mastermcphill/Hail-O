@@ -16,6 +16,7 @@ import 'middleware/error_middleware.dart';
 import 'middleware/idempotency_middleware.dart';
 import 'middleware/observability_middleware.dart';
 import 'middleware/rate_limit_middleware.dart';
+import 'middleware/disabled_user_middleware.dart';
 import 'middleware/request_size_middleware.dart';
 import 'middleware/security_headers_middleware.dart';
 import 'middleware/trace_middleware.dart';
@@ -138,6 +139,9 @@ class AppServer {
         .addMiddleware(adminEmergencyAccessMiddleware(adminToken: adminToken))
         .addMiddleware(
           authMiddleware(tokenService, publicPaths: authPublicPaths),
+        )
+        .addMiddleware(
+          disabledUserMiddleware(db: db, postgresProvider: postgresProvider),
         )
         .addHandler(
           rateLimitEnabled

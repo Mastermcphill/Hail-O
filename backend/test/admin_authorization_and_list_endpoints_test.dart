@@ -156,6 +156,134 @@ void main() {
     final body = await _decodeBody(response);
     expect(body['ok'], isTrue);
   });
+
+  test(
+    'disabled user is denied protected routes and enable restores access',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      final handler = _buildHandler(db);
+      final rider = await _registerAndLoginSession(
+        handler,
+        email: 'admin.moderation.rider@example.com',
+        role: 'rider',
+        registerKey: 'admin-moderation-rider-register',
+      );
+      final adminJwt = TokenService(
+        secret: _kTestTokenSecret,
+      ).issueToken(userId: 'admin-user-1', role: 'admin');
+
+      final meBefore = await _request(
+        handler,
+        method: 'GET',
+        path: '/me',
+        token: rider.token,
+      );
+      expect(meBefore.statusCode, 200);
+
+      final disable = await _request(
+        handler,
+        method: 'POST',
+        path: '/admin/users/${rider.userId}/disable',
+        token: adminJwt,
+      );
+      expect(disable.statusCode, 200);
+      final disableBody = await _decodeBody(disable);
+      expect(disableBody['disabled'], isTrue);
+      await _waitForAuditAction(
+        db,
+        action: 'admin.disable_user',
+        targetUserId: rider.userId,
+      );
+
+      final meWhileDisabled = await _request(
+        handler,
+        method: 'GET',
+        path: '/me',
+        token: rider.token,
+      );
+      expect(meWhileDisabled.statusCode, 403);
+      final disabledBody = await _decodeBody(meWhileDisabled);
+      expect(disabledBody['error_code'], 'USER_DISABLED');
+
+      final enable = await _request(
+        handler,
+        method: 'POST',
+        path: '/admin/users/${rider.userId}/enable',
+        token: adminJwt,
+      );
+      expect(enable.statusCode, 200);
+      final enableBody = await _decodeBody(enable);
+      expect(enableBody['disabled'], isFalse);
+      await _waitForAuditAction(
+        db,
+        action: 'admin.enable_user',
+        targetUserId: rider.userId,
+      );
+
+      final meAfter = await _request(
+        handler,
+        method: 'GET',
+        path: '/me',
+        token: rider.token,
+      );
+      expect(meAfter.statusCode, 200);
+    },
+  );
+
+  test('/admin/metrics returns expected counters shape', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final rider = await _registerAndLoginSession(
+      handler,
+      email: 'admin.metrics.rider@example.com',
+      role: 'rider',
+      registerKey: 'admin-metrics-rider-register',
+    );
+    final createTrip = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips',
+      token: rider.token,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
+        'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
+      },
+    );
+    expect(createTrip.statusCode, 201);
+
+    final adminJwt = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'admin-user-1', role: 'admin');
+    final response = await _request(
+      handler,
+      method: 'GET',
+      path: '/admin/metrics',
+      token: adminJwt,
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+    final counters = Map<String, Object?>.from(body['counters'] as Map);
+    expect(counters.containsKey('users'), isTrue);
+    expect(counters.containsKey('trips_by_status'), isTrue);
+    expect(counters.containsKey('purchases_by_status'), isTrue);
+    expect(counters.containsKey('payment_intents_by_status'), isTrue);
+
+    final users = Map<String, Object?>.from(counters['users'] as Map);
+    expect((users['total'] as num?)?.toInt() ?? 0, greaterThanOrEqualTo(1));
+    expect(users.containsKey('disabled'), isTrue);
+    expect(users.containsKey('active'), isTrue);
+
+    final tripsByStatus = Map<String, Object?>.from(
+      counters['trips_by_status'] as Map,
+    );
+    expect(
+      (tripsByStatus['created'] as num?)?.toInt() ?? 0,
+      greaterThanOrEqualTo(1),
+    );
+  });
 }
 
 Handler _buildHandler(
@@ -274,4 +402,34 @@ class _AuthSession {
 
   final String userId;
   final String token;
+}
+
+Future<void> _waitForAuditAction(
+  Database db, {
+  required String action,
+  required String targetUserId,
+}) async {
+  for (var attempt = 0; attempt < 20; attempt++) {
+    final rows = await db.query(
+      'audit_logs',
+      where: 'action = ?',
+      whereArgs: <Object>[action],
+      orderBy: 'created_at DESC',
+      limit: 5,
+    );
+    for (final row in rows) {
+      final metadataRaw = (row['metadata'] as String?)?.trim() ?? '';
+      if (metadataRaw.isEmpty) {
+        continue;
+      }
+      final metadata = Map<String, Object?>.from(
+        jsonDecode(metadataRaw) as Map<String, dynamic>,
+      );
+      if ((metadata['target_id'] as String?)?.trim() == targetUserId) {
+        return;
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('Audit action $action for user $targetUserId was not written');
 }

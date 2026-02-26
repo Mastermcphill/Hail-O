@@ -66,7 +66,10 @@ class AdminController {
   Router get router {
     final router = Router();
     router.get('/health', _adminHealth);
+    router.get('/metrics', _adminMetrics);
     router.get('/users', _listUsers);
+    router.post('/users/<userId>/disable', _disableUser);
+    router.post('/users/<userId>/enable', _enableUser);
     router.get('/trips', _listTrips);
     router.get('/config', _runtimeConfig);
     router.get('/contract', _contract);
@@ -173,6 +176,182 @@ class AdminController {
     return jsonResponse(dbOk ? 200 : 503, payload);
   }
 
+  Future<Response> _adminMetrics(Request request) async {
+    _requireAdmin(request);
+    await _auditLogStore.recordFromRequest(
+      request,
+      action: 'admin.metrics',
+      resourceType: 'admin_endpoint',
+      resourceId: _auditResourceId(request),
+    );
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Admin metrics are unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+
+    final usersTotal = await _countRows(db, 'users');
+    final usersDisabled = await _columnExists(db, 'users', 'disabled_at')
+        ? await _countRowsWhere(
+            db,
+            'users',
+            where: 'disabled_at IS NOT NULL',
+            whereArgs: const <Object>[],
+          )
+        : 0;
+
+    final tripsByStatus = await _statusCounts(db, table: 'trips');
+    for (final status in _tripStatuses) {
+      tripsByStatus.putIfAbsent(status, () => 0);
+    }
+
+    final purchasesByStatus = await _statusCounts(
+      db,
+      table: 'marketplace_purchases',
+    );
+    final paymentIntentsByStatus = await _statusCounts(
+      db,
+      table: 'payment_intents',
+    );
+
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'counters': <String, Object?>{
+        'users': <String, Object?>{
+          'total': usersTotal,
+          'disabled': usersDisabled,
+          'active': usersTotal - usersDisabled,
+        },
+        'trips_by_status': tripsByStatus,
+        'purchases_by_status': purchasesByStatus,
+        'payment_intents_by_status': paymentIntentsByStatus,
+      },
+      'trace_id': request.requestContext.traceId,
+    });
+  }
+
+  Future<Response> _disableUser(Request request, String userId) async {
+    _requireAdmin(request);
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Admin moderation is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'user id is required',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final disabledAtIso = DateTime.now().toUtc().toIso8601String();
+    final updated = await db.update(
+      'users',
+      <String, Object?>{
+        'disabled_at': disabledAtIso,
+        'updated_at': disabledAtIso,
+      },
+      where: 'id = ?',
+      whereArgs: <Object>[normalizedUserId],
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+    if (updated <= 0) {
+      _logAdminAction(
+        request: request,
+        action: 'disable_user',
+        success: false,
+        targetId: normalizedUserId,
+        reasonCode: 'not_found',
+      );
+      return jsonResponse(404, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_FOUND',
+        'message': 'User not found',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    _logAdminAction(
+      request: request,
+      action: 'disable_user',
+      success: true,
+      targetId: normalizedUserId,
+    );
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'user_id': normalizedUserId,
+      'disabled_at': disabledAtIso,
+      'disabled': true,
+      'trace_id': request.requestContext.traceId,
+    });
+  }
+
+  Future<Response> _enableUser(Request request, String userId) async {
+    _requireAdmin(request);
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Admin moderation is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'user id is required',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updated = await db.update(
+      'users',
+      <String, Object?>{'disabled_at': null, 'updated_at': nowIso},
+      where: 'id = ?',
+      whereArgs: <Object>[normalizedUserId],
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+    if (updated <= 0) {
+      _logAdminAction(
+        request: request,
+        action: 'enable_user',
+        success: false,
+        targetId: normalizedUserId,
+        reasonCode: 'not_found',
+      );
+      return jsonResponse(404, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_FOUND',
+        'message': 'User not found',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    _logAdminAction(
+      request: request,
+      action: 'enable_user',
+      success: true,
+      targetId: normalizedUserId,
+    );
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'user_id': normalizedUserId,
+      'disabled': false,
+      'trace_id': request.requestContext.traceId,
+    });
+  }
+
   Future<Response> _listUsers(Request request) async {
     _requireAdmin(request);
     await _auditLogStore.recordFromRequest(
@@ -210,6 +389,7 @@ class AdminController {
         'email',
         'display_name',
         'phone_e164',
+        'disabled_at',
         'created_at',
         'updated_at',
       ],
@@ -232,6 +412,7 @@ class AdminController {
             'email': (mapped['email'] as String?)?.trim(),
             'display_name': (mapped['display_name'] as String?)?.trim(),
             'phone_e164': (mapped['phone_e164'] as String?)?.trim(),
+            'disabled_at': (mapped['disabled_at'] as String?)?.trim(),
             'roles': roles,
             'created_at': (mapped['created_at'] as String?)?.trim(),
             'updated_at': (mapped['updated_at'] as String?)?.trim(),
@@ -1021,6 +1202,52 @@ class AdminController {
       return 0;
     }
     return (rows.first['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<Map<String, int>> _statusCounts(
+    Database db, {
+    required String table,
+    String statusColumn = 'status',
+  }) async {
+    if (!await _tableExists(db, table) ||
+        !await _columnExists(db, table, statusColumn)) {
+      return <String, int>{};
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT $statusColumn AS status_key, COUNT(*) AS count
+      FROM $table
+      WHERE $statusColumn IS NOT NULL
+      GROUP BY $statusColumn
+      ORDER BY $statusColumn ASC
+      ''');
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final key = (row['status_key'] as String?)?.trim().toLowerCase() ?? '';
+      if (key.isEmpty) {
+        continue;
+      }
+      counts[key] = (row['count'] as num?)?.toInt() ?? 0;
+    }
+    return counts;
+  }
+
+  Future<bool> _columnExists(
+    Database db,
+    String tableName,
+    String columnName,
+  ) async {
+    if (!await _tableExists(db, tableName)) {
+      return false;
+    }
+    final rows = await db.rawQuery('PRAGMA table_info($tableName)');
+    for (final row in rows) {
+      final name = (row['name'] as String?)?.trim().toLowerCase() ?? '';
+      if (name == columnName.trim().toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   Future<bool> _tableExists(Database db, String tableName) async {

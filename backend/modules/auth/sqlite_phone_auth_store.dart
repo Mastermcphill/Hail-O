@@ -99,6 +99,26 @@ class SqlitePhoneAuthStore extends PhoneAuthStore {
   }
 
   @override
+  Future<bool> isUserDisabled(String userId) async {
+    try {
+      final rows = await db.query(
+        'users',
+        columns: <String>['disabled_at'],
+        where: 'id = ?',
+        whereArgs: <Object>[userId],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        return false;
+      }
+      final disabledAt = (rows.first['disabled_at'] as String?)?.trim() ?? '';
+      return disabledAt.isNotEmpty;
+    } on DatabaseException {
+      return false;
+    }
+  }
+
+  @override
   Future<PhoneAuthUserRecord> createUser({
     required String userId,
     required String phoneE164,
