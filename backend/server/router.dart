@@ -6,6 +6,7 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../../lib/domain/services/auth_service.dart';
+import '../../lib/domain/services/dispatch_trip_service.dart';
 import '../../lib/domain/services/dispute_service.dart';
 import '../../lib/domain/services/escrow_service.dart';
 import '../../lib/domain/services/ride_api_flow_service.dart';
@@ -23,6 +24,7 @@ import '../modules/auth/auth_controller.dart';
 import '../modules/auth/phone_auth_service.dart';
 import '../modules/auth/phone_auth_store.dart';
 import '../modules/auth/sqlite_phone_auth_store.dart';
+import '../modules/dispatch/dispatch_controller.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/marketplace/billing_ledger_repository.dart';
 import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
@@ -107,6 +109,9 @@ Handler buildApiRouter({
         );
   final routesController = db == null ? null : RoutesController(db);
   final meController = db == null ? null : MeController(db);
+  final dispatchController = db == null
+      ? null
+      : DispatchController(dispatchTripService: DispatchTripService(db));
   final settlementController = db == null
       ? null
       : SettlementController(
@@ -255,6 +260,10 @@ Handler buildApiRouter({
   if (meController != null) {
     router.mount('/me/', meController.router.call);
     router.mount('/me', meController.router.call);
+  }
+  if (dispatchController != null) {
+    router.mount('/dispatch/', dispatchController.router.call);
+    router.mount('/dispatch', dispatchController.router.call);
   }
   if (routesController != null) {
     router.mount('/routes/', routesController.router.call);

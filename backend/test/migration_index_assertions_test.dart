@@ -34,6 +34,7 @@ void main() {
     final webhookEventsSql = sqlByName['018_webhook_events.sql'] ?? '';
     final phoneAuthSql = sqlByName['019_auth_phone_otp.sql'] ?? '';
     final profileRolesSql = sqlByName['020_user_profile_roles.sql'] ?? '';
+    final dispatchSql = sqlByName['021_dispatch_trips.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -296,6 +297,37 @@ void main() {
       profileRolesSql.contains('UNIQUE(user_id, role)'),
       isTrue,
       reason: 'user role uniqueness must exist',
+    );
+    expect(
+      dispatchSql.contains('CREATE TABLE IF NOT EXISTS trips'),
+      isTrue,
+      reason: 'dispatch trips table must exist',
+    );
+    expect(
+      dispatchSql.contains('CREATE TABLE IF NOT EXISTS trip_events'),
+      isTrue,
+      reason: 'dispatch trip events table must exist',
+    );
+    expect(
+      dispatchSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_trips_user_created_desc',
+      ),
+      isTrue,
+      reason: 'dispatch trips user timeline index must exist',
+    );
+    expect(
+      dispatchSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_trips_status_created_desc',
+      ),
+      isTrue,
+      reason: 'dispatch trips status timeline index must exist',
+    );
+    expect(
+      dispatchSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_trip_events_trip_created',
+      ),
+      isTrue,
+      reason: 'dispatch trip events timeline index must exist',
     );
   });
 }
