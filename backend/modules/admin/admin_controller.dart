@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/wallet_reversal_service.dart';
@@ -16,6 +19,7 @@ import '../../server/http_utils.dart';
 
 class AdminController {
   AdminController({
+    Database? db,
     WalletReversalService? walletReversalService,
     required Map<String, Object?> runtimeConfigSnapshot,
     required Map<String, Object?> buildInfo,
@@ -23,7 +27,8 @@ class AdminController {
     MarketplaceReconciliationService? reconciliationService,
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
-  }) : _walletReversalService = walletReversalService,
+  }) : _db = db,
+       _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
          runtimeConfigSnapshot,
        ),
@@ -33,6 +38,7 @@ class AdminController {
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger();
 
+  final Database? _db;
   final WalletReversalService? _walletReversalService;
   final Map<String, Object?> _runtimeConfigSnapshot;
   final Map<String, Object?> _buildInfo;
@@ -41,8 +47,22 @@ class AdminController {
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
 
+  static const Set<String> _tripStatuses = <String>{
+    'created',
+    'searching',
+    'assigned',
+    'enroute_pickup',
+    'picked_up',
+    'enroute_dropoff',
+    'delivered',
+    'canceled',
+  };
+
   Router get router {
     final router = Router();
+    router.get('/health', _adminHealth);
+    router.get('/users', _listUsers);
+    router.get('/trips', _listTrips);
     router.get('/config', _runtimeConfig);
     router.get('/contract', _contract);
     router.post('/reversal', _reverseTransaction);
@@ -73,6 +93,248 @@ class AdminController {
     return jsonResponse(200, <String, Object?>{
       'ok': true,
       'config': _runtimeConfigSnapshot,
+    });
+  }
+
+  Future<Response> _adminHealth(Request request) async {
+    _requireAdmin(request);
+    final db = _db;
+    var dbOk = db != null;
+    final counts = <String, Object?>{
+      'users': 0,
+      'trips': 0,
+      'trip_assignments': 0,
+      'trip_events': 0,
+    };
+    final queueDepth = <String, Object?>{
+      'dispatch_searching': 0,
+      'dispatch_assigned': 0,
+      'webhook_events_pending': 0,
+    };
+
+    if (db != null) {
+      try {
+        counts['users'] = await _countRows(db, 'users');
+        counts['trips'] = await _countRows(db, 'trips');
+        counts['trip_assignments'] = await _countRows(db, 'trip_assignments');
+        counts['trip_events'] = await _countRows(db, 'trip_events');
+        queueDepth['dispatch_searching'] = await _countRowsWhere(
+          db,
+          'trips',
+          where: 'status = ?',
+          whereArgs: const <Object>['searching'],
+        );
+        queueDepth['dispatch_assigned'] = await _countRowsWhere(
+          db,
+          'trip_assignments',
+          where: 'status = ?',
+          whereArgs: const <Object>['assigned'],
+        );
+        queueDepth['webhook_events_pending'] = await _countRowsWhere(
+          db,
+          'webhook_events',
+          where: 'processed = ?',
+          whereArgs: const <Object>[0],
+        );
+      } catch (_) {
+        dbOk = false;
+      }
+    }
+
+    final environment = (_runtimeConfigSnapshot['environment'] ?? 'unknown')
+        .toString()
+        .trim();
+    final dbMode = (_runtimeConfigSnapshot['db_mode'] ?? 'unknown')
+        .toString()
+        .trim();
+    final commit = (_buildInfo['commit'] ?? 'unknown').toString().trim();
+    final runtime = (_buildInfo['runtime'] ?? '').toString().trim();
+    final payload = <String, Object?>{
+      'ok': dbOk,
+      'service': 'hail-o-backend',
+      'env': environment.isEmpty ? 'unknown' : environment,
+      'db_mode': dbMode.isEmpty ? 'unknown' : dbMode,
+      'db_ok': dbOk,
+      'build': <String, Object?>{
+        'commit': commit.isEmpty ? 'unknown' : commit,
+        if (runtime.isNotEmpty) 'runtime': runtime,
+      },
+      'diagnostics': <String, Object?>{
+        'counts': counts,
+        'queue_depth': queueDepth,
+      },
+      'trace_id': request.requestContext.traceId,
+    };
+    return jsonResponse(dbOk ? 200 : 503, payload);
+  }
+
+  Future<Response> _listUsers(Request request) async {
+    _requireAdmin(request);
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Admin user listing is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+
+    final limit = _parseLimit(request.url.queryParameters['limit']);
+    final cursor = _decodeCursor(request.url.queryParameters['cursor']);
+    final whereParts = <String>[];
+    final whereArgs = <Object>[];
+    if (cursor != null) {
+      whereParts.add('(created_at < ? OR (created_at = ? AND id < ?))');
+      whereArgs.add(cursor.createdAtIso);
+      whereArgs.add(cursor.createdAtIso);
+      whereArgs.add(cursor.entityId);
+    }
+
+    final rows = await db.query(
+      'users',
+      columns: const <String>[
+        'id',
+        'role',
+        'email',
+        'display_name',
+        'phone_e164',
+        'created_at',
+        'updated_at',
+      ],
+      where: whereParts.isEmpty ? null : whereParts.join(' AND '),
+      whereArgs: whereArgs.isEmpty ? null : whereArgs,
+      orderBy: 'created_at DESC, id DESC',
+      limit: limit + 1,
+    );
+    final hasMore = rows.length > limit;
+    final pageRows = hasMore ? rows.take(limit).toList(growable: false) : rows;
+    final roleByUserId = await _resolveRolesByUser(db, pageRows);
+
+    final users = pageRows
+        .map((row) {
+          final mapped = Map<String, Object?>.from(row);
+          final userId = (mapped['id'] as String?) ?? '';
+          final roles = roleByUserId[userId] ?? _fallbackRoles(mapped['role']);
+          return <String, Object?>{
+            'id': userId,
+            'email': (mapped['email'] as String?)?.trim(),
+            'display_name': (mapped['display_name'] as String?)?.trim(),
+            'phone_e164': (mapped['phone_e164'] as String?)?.trim(),
+            'roles': roles,
+            'created_at': (mapped['created_at'] as String?)?.trim(),
+            'updated_at': (mapped['updated_at'] as String?)?.trim(),
+          };
+        })
+        .toList(growable: false);
+
+    String? nextCursor;
+    if (hasMore && pageRows.isNotEmpty) {
+      final last = pageRows.last;
+      nextCursor = _encodeCursor(
+        (last['created_at'] as String?) ?? '',
+        (last['id'] as String?) ?? '',
+      );
+    }
+
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'users': users,
+      if (nextCursor != null) 'next_cursor': nextCursor,
+    });
+  }
+
+  Future<Response> _listTrips(Request request) async {
+    _requireAdmin(request);
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Admin trip listing is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final limit = _parseLimit(request.url.queryParameters['limit']);
+    final statusFilter = _normalizeTripStatus(
+      request.url.queryParameters['status'],
+    );
+    final cursor = _decodeCursor(request.url.queryParameters['cursor']);
+    final whereParts = <String>[];
+    final whereArgs = <Object>[];
+    if (statusFilter != null) {
+      whereParts.add('status = ?');
+      whereArgs.add(statusFilter);
+    }
+    if (cursor != null) {
+      whereParts.add('(created_at < ? OR (created_at = ? AND id < ?))');
+      whereArgs.add(cursor.createdAtIso);
+      whereArgs.add(cursor.createdAtIso);
+      whereArgs.add(cursor.entityId);
+    }
+
+    final rows = await db.query(
+      'trips',
+      columns: const <String>[
+        'id',
+        'user_id',
+        'status',
+        'pickup_lat',
+        'pickup_lng',
+        'pickup_address',
+        'dropoff_lat',
+        'dropoff_lng',
+        'dropoff_address',
+        'notes',
+        'scheduled_at',
+        'created_at',
+        'updated_at',
+      ],
+      where: whereParts.isEmpty ? null : whereParts.join(' AND '),
+      whereArgs: whereArgs.isEmpty ? null : whereArgs,
+      orderBy: 'created_at DESC, id DESC',
+      limit: limit + 1,
+    );
+    final hasMore = rows.length > limit;
+    final pageRows = hasMore ? rows.take(limit).toList(growable: false) : rows;
+    final trips = pageRows
+        .map((row) {
+          final mapped = Map<String, Object?>.from(row);
+          return <String, Object?>{
+            'id': mapped['id'],
+            'user_id': mapped['user_id'],
+            'status': mapped['status'],
+            'pickup': <String, Object?>{
+              'lat': (mapped['pickup_lat'] as num?)?.toDouble() ?? 0,
+              'lng': (mapped['pickup_lng'] as num?)?.toDouble() ?? 0,
+              'address': (mapped['pickup_address'] as String?)?.trim(),
+            },
+            'dropoff': <String, Object?>{
+              'lat': (mapped['dropoff_lat'] as num?)?.toDouble() ?? 0,
+              'lng': (mapped['dropoff_lng'] as num?)?.toDouble() ?? 0,
+              'address': (mapped['dropoff_address'] as String?)?.trim(),
+            },
+            'notes': (mapped['notes'] as String?)?.trim(),
+            'scheduled_at': (mapped['scheduled_at'] as String?)?.trim(),
+            'created_at': (mapped['created_at'] as String?)?.trim(),
+            'updated_at': (mapped['updated_at'] as String?)?.trim(),
+          };
+        })
+        .toList(growable: false);
+
+    String? nextCursor;
+    if (hasMore && pageRows.isNotEmpty) {
+      final last = pageRows.last;
+      nextCursor = _encodeCursor(
+        (last['created_at'] as String?) ?? '',
+        (last['id'] as String?) ?? '',
+      );
+    }
+
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trips': trips,
+      if (nextCursor != null) 'next_cursor': nextCursor,
     });
   }
 
@@ -590,6 +852,174 @@ class AdminController {
     };
   }
 
+  Future<Map<String, List<String>>> _resolveRolesByUser(
+    Database db,
+    List<Map<String, Object?>> userRows,
+  ) async {
+    final userIds = userRows
+        .map((row) => (row['id'] as String?)?.trim() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+    if (userIds.isEmpty || !await _tableExists(db, 'user_roles')) {
+      return <String, List<String>>{};
+    }
+    final placeholders = List<String>.filled(userIds.length, '?').join(', ');
+    final rows = await db.rawQuery('''
+      SELECT user_id, role
+      FROM user_roles
+      WHERE user_id IN ($placeholders)
+      ORDER BY role ASC
+      ''', userIds);
+    final byUser = <String, Set<String>>{};
+    for (final row in rows) {
+      final userId = (row['user_id'] as String?)?.trim() ?? '';
+      final role = _mapRole(
+        (row['role'] as String?)?.trim().toLowerCase() ?? '',
+      );
+      if (userId.isEmpty || role.isEmpty) {
+        continue;
+      }
+      byUser.putIfAbsent(userId, () => <String>{}).add(role);
+    }
+    return byUser.map(
+      (userId, roles) =>
+          MapEntry<String, List<String>>(userId, roles.toList(growable: false)),
+    );
+  }
+
+  List<String> _fallbackRoles(Object? rawRole) {
+    final mapped = _mapRole((rawRole as String?)?.trim().toLowerCase() ?? '');
+    if (mapped.isEmpty) {
+      return const <String>['user'];
+    }
+    if (mapped == 'user') {
+      return const <String>['user'];
+    }
+    return <String>['user', mapped];
+  }
+
+  String _mapRole(String role) {
+    switch (role) {
+      case 'admin':
+        return 'admin';
+      case 'driver':
+        return 'driver';
+      case 'inspector':
+        return 'inspector';
+      case 'merchant':
+      case 'fleet_owner':
+        return 'merchant';
+      case 'rider':
+      case 'user':
+      default:
+        return 'user';
+    }
+  }
+
+  int _parseLimit(String? rawLimit) {
+    final normalized = rawLimit?.trim() ?? '';
+    if (normalized.isEmpty) {
+      return 20;
+    }
+    final parsed = int.tryParse(normalized);
+    if (parsed == null || parsed <= 0) {
+      throw const DomainInvariantError(code: 'invalid_limit');
+    }
+    return parsed > 100 ? 100 : parsed;
+  }
+
+  String? _normalizeTripStatus(String? rawStatus) {
+    final normalized = rawStatus?.trim().toLowerCase() ?? '';
+    if (normalized.isEmpty) {
+      return null;
+    }
+    if (!_tripStatuses.contains(normalized)) {
+      throw const DomainInvariantError(code: 'invalid_trip_status');
+    }
+    return normalized;
+  }
+
+  _AdminCursor? _decodeCursor(String? rawCursor) {
+    final cursor = rawCursor?.trim() ?? '';
+    if (cursor.isEmpty) {
+      return null;
+    }
+    try {
+      final normalized = _normalizeCursorBase64(cursor);
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final separator = decoded.indexOf('|');
+      if (separator <= 0 || separator >= decoded.length - 1) {
+        throw const FormatException('invalid_cursor');
+      }
+      final createdAtIso = decoded.substring(0, separator).trim();
+      final entityId = decoded.substring(separator + 1).trim();
+      final createdAt = DateTime.tryParse(createdAtIso)?.toUtc();
+      if (createdAt == null || entityId.isEmpty) {
+        throw const FormatException('invalid_cursor');
+      }
+      return _AdminCursor(
+        createdAtIso: createdAt.toIso8601String(),
+        entityId: entityId,
+      );
+    } catch (_) {
+      throw const DomainInvariantError(code: 'invalid_pagination_cursor');
+    }
+  }
+
+  String _encodeCursor(String createdAtIso, String entityId) {
+    final payload = '$createdAtIso|$entityId';
+    final encoded = base64UrlEncode(utf8.encode(payload));
+    return encoded.replaceAll('=', '');
+  }
+
+  String _normalizeCursorBase64(String rawCursor) {
+    final cursor = rawCursor.trim();
+    final remainder = cursor.length % 4;
+    if (remainder == 0) {
+      return cursor;
+    }
+    final padding = List<String>.filled(4 - remainder, '=').join();
+    return '$cursor$padding';
+  }
+
+  Future<int> _countRows(Database db, String tableName) async {
+    if (!await _tableExists(db, tableName)) {
+      return 0;
+    }
+    final rows = await db.rawQuery('SELECT COUNT(*) AS count FROM $tableName');
+    if (rows.isEmpty) {
+      return 0;
+    }
+    return (rows.first['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int> _countRowsWhere(
+    Database db,
+    String tableName, {
+    required String where,
+    required List<Object> whereArgs,
+  }) async {
+    if (!await _tableExists(db, tableName)) {
+      return 0;
+    }
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM $tableName WHERE $where',
+      whereArgs,
+    );
+    if (rows.isEmpty) {
+      return 0;
+    }
+    return (rows.first['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<bool> _tableExists(Database db, String tableName) async {
+    final rows = await db.rawQuery(
+      'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1',
+      <Object>['table', tableName],
+    );
+    return rows.isNotEmpty;
+  }
+
   void _requireAdmin(Request request) {
     final role = (request.requestContext.role ?? '').trim().toLowerCase();
     if (role != 'admin') {
@@ -613,4 +1043,11 @@ class AdminController {
       reasonCode: reasonCode,
     );
   }
+}
+
+class _AdminCursor {
+  const _AdminCursor({required this.createdAtIso, required this.entityId});
+
+  final String createdAtIso;
+  final String entityId;
 }

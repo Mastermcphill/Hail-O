@@ -191,6 +191,7 @@ Handler buildApiRouter({
           entitlementService: entitlementService,
         );
   final adminController = AdminController(
+    db: db,
     walletReversalService: db == null ? null : WalletReversalService(db),
     runtimeConfigSnapshot: runtimeConfigSnapshot,
     buildInfo: buildInfo,

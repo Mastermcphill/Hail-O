@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:shelf/shelf.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
@@ -8,6 +10,7 @@ import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/phone_auth_store.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import 'middleware/auth_middleware.dart';
+import 'middleware/admin_emergency_access_middleware.dart';
 import 'middleware/cors_policy_middleware.dart';
 import 'middleware/error_middleware.dart';
 import 'middleware/idempotency_middleware.dart';
@@ -86,6 +89,8 @@ class AppServer {
   final Map<String, String> environmentMap;
 
   Handler buildHandler() {
+    final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
+    final adminToken = (env['ADMIN_TOKEN'] ?? '').trim();
     final router = buildApiRouter(
       db: db,
       tokenService: tokenService,
@@ -130,6 +135,7 @@ class AppServer {
         .addMiddleware(corsPolicyMiddleware(allowedOrigins: allowedOrigins))
         .addMiddleware(requestSizeMiddleware(maxBytes: maxRequestBodyBytes))
         .addMiddleware(idempotencyMiddleware())
+        .addMiddleware(adminEmergencyAccessMiddleware(adminToken: adminToken))
         .addMiddleware(
           authMiddleware(tokenService, publicPaths: authPublicPaths),
         )
