@@ -16,6 +16,7 @@ Middleware authMiddleware(
   Set<String> publicPrefixes = const <String>{'marketplace/offers/'},
   Set<String> protectedPrefixes = const <String>{
     'rides/',
+    'me',
     'me/',
     'routes/',
     'drivers/',

@@ -139,6 +139,24 @@ void main() {
       ),
       true,
     );
+    expect(
+      await _hasIndex(
+        db,
+        table: 'user_profiles',
+        columns: const <String>['user_id'],
+        requireUnique: true,
+      ),
+      true,
+    );
+    expect(
+      await _hasIndex(
+        db,
+        table: 'user_roles',
+        columns: const <String>['user_id', 'role'],
+        requireUnique: true,
+      ),
+      true,
+    );
   });
 }
 

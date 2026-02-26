@@ -22,11 +22,167 @@ class MeController {
 
   Router get router {
     final router = Router();
+    router.get('/', _getProfile);
+    router.patch('/', _patchProfile);
+    router.get('/roles', _getRoles);
     router.get('/next-of-kin', _getNextOfKin);
     router.post('/next-of-kin', _upsertNextOfKin);
     router.get('/documents', _getDocuments);
     router.post('/documents', _upsertDocument);
     return router;
+  }
+
+  Future<Response> _getProfile(Request request) async {
+    final userId = _requireUserId(request);
+    final profile = await _loadProfile(userId);
+    return jsonResponse(200, <String, Object?>{'ok': true, 'profile': profile});
+  }
+
+  Future<Response> _patchProfile(Request request) async {
+    final userId = _requireUserId(request);
+    final payload = await readJsonBody(request);
+    final hasName =
+        payload.containsKey('name') || payload.containsKey('display_name');
+    final hasEmail = payload.containsKey('email');
+    final hasAvatar = payload.containsKey('avatar_url');
+    if (!hasName && !hasEmail && !hasAvatar) {
+      throw const DomainInvariantError(code: 'profile_update_fields_required');
+    }
+
+    final existing = await _loadProfile(userId);
+    var displayName = _normalizeStoredNullable(existing['display_name']);
+    var email = _normalizeStoredNullable(existing['email']);
+    var avatarUrl = _normalizeStoredNullable(existing['avatar_url']);
+
+    if (hasName) {
+      displayName = _normalizeProfileField(
+        payload.containsKey('name') ? payload['name'] : payload['display_name'],
+        errorCode: 'invalid_profile_name',
+      );
+    }
+    if (hasEmail) {
+      email = _normalizeProfileField(
+        payload['email'],
+        errorCode: 'invalid_profile_email',
+      );
+      if (email != null && !email.contains('@')) {
+        throw const DomainInvariantError(code: 'invalid_profile_email');
+      }
+    }
+    if (hasAvatar) {
+      avatarUrl = _normalizeProfileField(
+        payload['avatar_url'],
+        errorCode: 'invalid_avatar_url',
+      );
+    }
+
+    final nowIso = _nowUtc().toUtc().toIso8601String();
+    final profileRow = <String, Object?>{
+      'user_id': userId,
+      'display_name': displayName,
+      'email': email,
+      'avatar_url': avatarUrl,
+      'updated_at': nowIso,
+    };
+
+    final existingProfileRows = await db.query(
+      'user_profiles',
+      where: 'user_id = ?',
+      whereArgs: <Object>[userId],
+      limit: 1,
+    );
+    if (existingProfileRows.isEmpty) {
+      await db.insert(
+        'user_profiles',
+        profileRow,
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+    } else {
+      await db.update(
+        'user_profiles',
+        profileRow,
+        where: 'user_id = ?',
+        whereArgs: <Object>[userId],
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+    }
+
+    if (hasName || hasEmail) {
+      final usersUpdate = <String, Object?>{'updated_at': nowIso};
+      if (hasName) {
+        usersUpdate['display_name'] = displayName;
+      }
+      if (hasEmail) {
+        usersUpdate['email'] = email;
+      }
+      await db.update(
+        'users',
+        usersUpdate,
+        where: 'id = ?',
+        whereArgs: <Object>[userId],
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+    }
+
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'profile': profileRow,
+    });
+  }
+
+  Future<Response> _getRoles(Request request) async {
+    final userId = _requireUserId(request);
+    final roles = <String>{};
+
+    final roleRows = await db.query(
+      'user_roles',
+      columns: <String>['role'],
+      where: 'user_id = ?',
+      whereArgs: <Object>[userId],
+      orderBy: 'role ASC',
+    );
+    for (final row in roleRows) {
+      final mapped = _mapRole(
+        (row['role'] as String?)?.trim().toLowerCase() ?? '',
+      );
+      if (_isSupportedRole(mapped)) {
+        roles.add(mapped);
+      }
+    }
+
+    final userRows = await db.query(
+      'users',
+      columns: <String>['role'],
+      where: 'id = ?',
+      whereArgs: <Object>[userId],
+      limit: 1,
+    );
+    if (userRows.isNotEmpty) {
+      final mapped = _mapRole(
+        (userRows.first['role'] as String?)?.trim().toLowerCase() ?? '',
+      );
+      if (_isSupportedRole(mapped)) {
+        roles.add(mapped);
+      }
+    }
+
+    final requestRole = _mapRole(
+      request.requestContext.role?.trim().toLowerCase() ?? '',
+    );
+    if (_isSupportedRole(requestRole)) {
+      roles.add(requestRole);
+    }
+    roles.add('user');
+
+    final sorted = roles.toList(growable: false)..sort();
+    for (final role in sorted) {
+      await db.insert('user_roles', <String, Object?>{
+        'user_id': userId,
+        'role': role,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+
+    return jsonResponse(200, <String, Object?>{'ok': true, 'roles': sorted});
   }
 
   Future<Response> _getNextOfKin(Request request) async {
@@ -133,6 +289,98 @@ class MeController {
       'ok': true,
       'document': record.toMap(),
     });
+  }
+
+  Future<Map<String, Object?>> _loadProfile(String userId) async {
+    final profileRows = await db.query(
+      'user_profiles',
+      where: 'user_id = ?',
+      whereArgs: <Object>[userId],
+      limit: 1,
+    );
+    if (profileRows.isNotEmpty) {
+      final row = profileRows.first;
+      return <String, Object?>{
+        'user_id': userId,
+        'display_name': _normalizeStoredNullable(row['display_name']),
+        'email': _normalizeStoredNullable(row['email']),
+        'avatar_url': _normalizeStoredNullable(row['avatar_url']),
+        'updated_at':
+            (_normalizeStoredNullable(row['updated_at']) ??
+            _nowUtc().toUtc().toIso8601String()),
+      };
+    }
+
+    final userRows = await db.query(
+      'users',
+      columns: <String>['display_name', 'email', 'updated_at'],
+      where: 'id = ?',
+      whereArgs: <Object>[userId],
+      limit: 1,
+    );
+    if (userRows.isEmpty) {
+      throw const DomainInvariantError(code: 'user_not_found');
+    }
+    final user = userRows.first;
+    return <String, Object?>{
+      'user_id': userId,
+      'display_name': _normalizeStoredNullable(user['display_name']),
+      'email': _normalizeStoredNullable(user['email']),
+      'avatar_url': null,
+      'updated_at':
+          (_normalizeStoredNullable(user['updated_at']) ??
+          _nowUtc().toUtc().toIso8601String()),
+    };
+  }
+
+  String _mapRole(String role) {
+    switch (role) {
+      case 'admin':
+        return 'admin';
+      case 'driver':
+        return 'driver';
+      case 'inspector':
+        return 'inspector';
+      case 'merchant':
+      case 'fleet_owner':
+        return 'merchant';
+      case 'user':
+      case 'rider':
+      default:
+        return 'user';
+    }
+  }
+
+  bool _isSupportedRole(String role) {
+    return const <String>{
+      'user',
+      'admin',
+      'merchant',
+      'driver',
+      'inspector',
+    }.contains(role);
+  }
+
+  String? _normalizeStoredNullable(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    final normalized = value.toString().trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String? _normalizeProfileField(Object? value, {required String errorCode}) {
+    if (value == null) {
+      return null;
+    }
+    if (value is! String) {
+      throw DomainInvariantError(code: errorCode);
+    }
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    return normalized;
   }
 
   String _requireUserId(Request request) {

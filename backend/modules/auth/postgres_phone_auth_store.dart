@@ -186,20 +186,24 @@ class PostgresPhoneAuthStore extends PhoneAuthStore {
         },
       ),
     );
+    late final PhoneAuthUserRecord user;
     if (inserted.isNotEmpty) {
       final row = inserted.first;
-      return PhoneAuthUserRecord(
+      user = PhoneAuthUserRecord(
         id: row[0] as String,
         phoneE164: row[1] as String,
         createdAt: (row[2] as DateTime).toUtc(),
         role: 'rider',
       );
+    } else {
+      final existing = await findUserByPhone(phoneE164);
+      if (existing == null) {
+        throw StateError('phone_auth_user_create_failed');
+      }
+      user = existing;
     }
-    final existing = await findUserByPhone(phoneE164);
-    if (existing == null) {
-      throw StateError('phone_auth_user_create_failed');
-    }
-    return existing;
+    await _ensureDefaultUserScaffold(userId: user.id, createdAt: createdAt);
+    return user;
   }
 
   @override
@@ -279,6 +283,38 @@ class PostgresPhoneAuthStore extends PhoneAuthStore {
         substitutionValues: <String, Object?>{
           'id': tokenId,
           'revoked_at': revokedAt.toUtc(),
+        },
+      );
+    });
+  }
+
+  Future<void> _ensureDefaultUserScaffold({
+    required String userId,
+    required DateTime createdAt,
+  }) async {
+    await _postgresProvider.withConnection((connection) async {
+      await connection.execute(
+        '''
+        INSERT INTO user_profiles(user_id, display_name, email, avatar_url, updated_at)
+        VALUES(CAST(@user_id AS UUID), NULL, NULL, NULL, @updated_at)
+        ON CONFLICT (user_id)
+        DO NOTHING
+        ''',
+        substitutionValues: <String, Object?>{
+          'user_id': userId,
+          'updated_at': createdAt.toUtc(),
+        },
+      );
+      await connection.execute(
+        '''
+        INSERT INTO user_roles(user_id, role)
+        VALUES(CAST(@user_id AS UUID), @role)
+        ON CONFLICT (user_id, role)
+        DO NOTHING
+        ''',
+        substitutionValues: <String, Object?>{
+          'user_id': userId,
+          'role': 'user',
         },
       );
     });

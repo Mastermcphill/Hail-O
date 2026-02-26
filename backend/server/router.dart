@@ -254,6 +254,7 @@ Handler buildApiRouter({
   }
   if (meController != null) {
     router.mount('/me/', meController.router.call);
+    router.mount('/me', meController.router.call);
   }
   if (routesController != null) {
     router.mount('/routes/', routesController.router.call);

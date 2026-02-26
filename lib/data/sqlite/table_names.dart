@@ -1,6 +1,8 @@
 class TableNames {
   static const String schemaMigrations = 'schema_migrations';
   static const String users = 'users';
+  static const String userProfiles = 'user_profiles';
+  static const String userRoles = 'user_roles';
   static const String authCredentials = 'auth_credentials';
   static const String driverProfiles = 'driver_profiles';
   static const String vehicles = 'vehicles';

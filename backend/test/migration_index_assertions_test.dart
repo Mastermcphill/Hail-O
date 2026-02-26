@@ -33,6 +33,7 @@ void main() {
     final paymentIntentsSql = sqlByName['017_payment_intents.sql'] ?? '';
     final webhookEventsSql = sqlByName['018_webhook_events.sql'] ?? '';
     final phoneAuthSql = sqlByName['019_auth_phone_otp.sql'] ?? '';
+    final profileRolesSql = sqlByName['020_user_profile_roles.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -280,6 +281,21 @@ void main() {
       ),
       isTrue,
       reason: 'refresh token hash uniqueness must exist',
+    );
+    expect(
+      profileRolesSql.contains('CREATE TABLE IF NOT EXISTS user_profiles'),
+      isTrue,
+      reason: 'user profiles table must exist',
+    );
+    expect(
+      profileRolesSql.contains('CREATE TABLE IF NOT EXISTS user_roles'),
+      isTrue,
+      reason: 'user roles table must exist',
+    );
+    expect(
+      profileRolesSql.contains('UNIQUE(user_id, role)'),
+      isTrue,
+      reason: 'user role uniqueness must exist',
     );
   });
 }

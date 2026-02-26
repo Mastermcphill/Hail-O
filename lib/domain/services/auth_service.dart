@@ -149,6 +149,14 @@ class AuthService {
           updatedAt: now,
         );
         await UsersDao(txn).insert(user);
+        await _seedUserProfile(
+          txn,
+          userId: userId,
+          displayName: displayName,
+          email: normalizedEmail,
+          nowUtc: now,
+        );
+        await _seedUserRoles(txn, userId: userId, role: role);
         await credentialsDao.insert(
           AuthCredential(
             userId: userId,
@@ -285,5 +293,51 @@ class AuthService {
       'role': user.role.dbValue,
       'email': user.email,
     };
+  }
+
+  Future<void> _seedUserProfile(
+    DatabaseExecutor txn, {
+    required String userId,
+    required String? displayName,
+    required String email,
+    required DateTime nowUtc,
+  }) async {
+    await txn.insert('user_profiles', <String, Object?>{
+      'user_id': userId,
+      'display_name': displayName?.trim().isEmpty == true
+          ? null
+          : displayName?.trim(),
+      'email': email,
+      'avatar_url': null,
+      'updated_at': nowUtc.toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> _seedUserRoles(
+    DatabaseExecutor txn, {
+    required String userId,
+    required UserRole role,
+  }) async {
+    final roles = <String>{'user'};
+    switch (role) {
+      case UserRole.admin:
+        roles.add('admin');
+        break;
+      case UserRole.driver:
+        roles.add('driver');
+        break;
+      case UserRole.fleetOwner:
+        roles.add('merchant');
+        break;
+      case UserRole.rider:
+        break;
+    }
+
+    for (final scaffoldRole in roles) {
+      await txn.insert('user_roles', <String, Object?>{
+        'user_id': userId,
+        'role': scaffoldRole,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
   }
 }

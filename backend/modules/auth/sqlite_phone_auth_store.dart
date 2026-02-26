@@ -105,6 +105,7 @@ class SqlitePhoneAuthStore extends PhoneAuthStore {
     required DateTime createdAt,
   }) async {
     final nowIso = createdAt.toUtc().toIso8601String();
+    late final PhoneAuthUserRecord user;
     try {
       await db.insert('users', <String, Object?>{
         'id': userId,
@@ -113,19 +114,23 @@ class SqlitePhoneAuthStore extends PhoneAuthStore {
         'created_at': nowIso,
         'updated_at': nowIso,
       }, conflictAlgorithm: ConflictAlgorithm.abort);
+      user = PhoneAuthUserRecord(
+        id: userId,
+        phoneE164: phoneE164,
+        createdAt: createdAt.toUtc(),
+        role: 'rider',
+      );
     } on DatabaseException {
       final existing = await findUserByPhone(phoneE164);
       if (existing != null) {
-        return existing;
+        user = existing;
+      } else {
+        rethrow;
       }
-      rethrow;
     }
-    return PhoneAuthUserRecord(
-      id: userId,
-      phoneE164: phoneE164,
-      createdAt: createdAt.toUtc(),
-      role: 'rider',
-    );
+    await _ensureProfile(user.id, nowIso);
+    await _ensureRole(user.id, 'user');
+    return user;
   }
 
   @override
@@ -212,5 +217,22 @@ class SqlitePhoneAuthStore extends PhoneAuthStore {
       return null;
     }
     return DateTime.parse(raw).toUtc();
+  }
+
+  Future<void> _ensureProfile(String userId, String nowIso) {
+    return db.insert('user_profiles', <String, Object?>{
+      'user_id': userId,
+      'display_name': null,
+      'email': null,
+      'avatar_url': null,
+      'updated_at': nowIso,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> _ensureRole(String userId, String role) {
+    return db.insert('user_roles', <String, Object?>{
+      'user_id': userId,
+      'role': role,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 }
