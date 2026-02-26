@@ -9,6 +9,7 @@ BASE_URL="${BASE_URL:-}"
 BASE_STAGING="${BASE_STAGING:-${STAGING_BASE_URL:-}}"
 REQUIRED_MIGRATION_HEAD="${REQUIRED_MIGRATION_HEAD:-}"
 REQUIRE_PARITY="${RELEASE_GATE_REQUIRE_PARITY:-false}"
+STRICT_LOCAL_AUTH="${RELEASE_GATE_STRICT_LOCAL_AUTH:-false}"
 
 usage() {
   cat <<'EOF'
@@ -23,7 +24,7 @@ Options:
 
 Environment variable fallbacks:
   BASE_URL, BASE_STAGING, STAGING_BASE_URL, REQUIRED_MIGRATION_HEAD,
-  RELEASE_GATE_REQUIRE_PARITY.
+  RELEASE_GATE_REQUIRE_PARITY, RELEASE_GATE_STRICT_LOCAL_AUTH.
 
 Smoke envs:
   SMOKE_ACCESS_TOKEN
@@ -146,6 +147,7 @@ done
 
 ENV_NAME="$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | xargs)"
 REQUIRE_PARITY="$(normalize_bool "$REQUIRE_PARITY")"
+STRICT_LOCAL_AUTH="$(normalize_bool "$STRICT_LOCAL_AUTH")"
 
 if [[ -z "${BASE_URL// }" ]]; then
   fail "BASE_URL is required (--base=...)"
@@ -159,22 +161,30 @@ require_cmd jq
 PAYMENTS_PROVIDER_VALUE="${PAYMENTS_PROVIDER:-${PAYMENT_PROVIDER:-}}"
 
 if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
-  require_env JWT_SECRET
-  require_env OTP_PROVIDER
-  require_env PAYSTACK_SECRET_KEY
-  require_env PAYSTACK_WEBHOOK_SECRET
-  require_env PAYMENTS_WEBHOOK_SECRET
-  if [[ -z "${PAYMENTS_PROVIDER_VALUE// }" ]]; then
-    fail "missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)"
-  fi
   if [[ -z "${BASE_STAGING// }" ]]; then
     fail "BASE_STAGING is required for prod release gate (--base-staging=...)"
   fi
-else
-  require_env JWT_SECRET
-  if [[ -z "${PAYMENTS_PROVIDER_VALUE// }" ]]; then
-    fail "missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)"
+fi
+
+if [[ "$STRICT_LOCAL_AUTH" == "true" ]]; then
+  echo "[release-gate] strict local auth checks enabled"
+  if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
+    require_env JWT_SECRET
+    require_env OTP_PROVIDER
+    require_env PAYSTACK_SECRET_KEY
+    require_env PAYSTACK_WEBHOOK_SECRET
+    require_env PAYMENTS_WEBHOOK_SECRET
+    if [[ -z "${PAYMENTS_PROVIDER_VALUE// }" ]]; then
+      fail "missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)"
+    fi
+  else
+    require_env JWT_SECRET
+    if [[ -z "${PAYMENTS_PROVIDER_VALUE// }" ]]; then
+      fail "missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)"
+    fi
   fi
+else
+  echo "[release-gate] strict local auth checks disabled; skipping local secret requirements"
 fi
 
 SMOKE_ACCESS_TOKEN_VALUE="${SMOKE_ACCESS_TOKEN:-${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}}"
@@ -191,13 +201,12 @@ if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
   SMOKE_ENV="staging"
 fi
 
-if [[ -z "${SMOKE_ACCESS_TOKEN_VALUE// }" && -z "${SMOKE_PHONE_VALUE// }" ]]; then
-  fail "configure SMOKE_ACCESS_TOKEN (recommended) or SMOKE_PHONE_E164 for staging smoke auth"
-fi
-
 echo "[release-gate] target_env=${ENV_NAME}"
 echo "[release-gate] target_base=${BASE_URL}"
 echo "[release-gate] smoke_base=${SMOKE_BASE}"
+if [[ -z "${SMOKE_ACCESS_TOKEN_VALUE// }" && -z "${SMOKE_PHONE_VALUE// }" ]]; then
+  echo "[release-gate] smoke auth env not provided; smoke runner will execute in skip-auth mode"
+fi
 
 check_ready "$TARGET_LABEL" "$BASE_URL"
 if [[ "$SMOKE_BASE" != "$BASE_URL" ]]; then

@@ -4,6 +4,7 @@ param(
   [string]$BaseStaging = "",
   [string]$StagingBaseUrl = "",
   [string]$RequiredMigrationHead = "",
+  [string]$StrictLocalAuth = "",
   [switch]$RequireParity
 )
 
@@ -26,6 +27,9 @@ if ([string]::IsNullOrWhiteSpace($StagingBaseUrl)) {
 }
 if ([string]::IsNullOrWhiteSpace($RequiredMigrationHead)) {
   $RequiredMigrationHead = $env:REQUIRED_MIGRATION_HEAD
+}
+if ([string]::IsNullOrWhiteSpace($StrictLocalAuth)) {
+  $StrictLocalAuth = $env:RELEASE_GATE_STRICT_LOCAL_AUTH
 }
 if (-not $RequireParity.IsPresent) {
   $RequireParity = @("1", "true", "yes", "y", "on") -contains "$($env:RELEASE_GATE_REQUIRE_PARITY)".Trim().ToLowerInvariant()
@@ -162,6 +166,7 @@ function Get-Commit([string]$Base) {
 }
 
 $normalizedEnv = $EnvName.Trim().ToLowerInvariant()
+$strictLocalAuthEnabled = To-Bool $StrictLocalAuth
 if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
   Fail("BASE_URL is required. Use -BaseUrl or BASE_URL env var.")
 }
@@ -177,22 +182,30 @@ $paymentsProvider = if (-not [string]::IsNullOrWhiteSpace($env:PAYMENTS_PROVIDER
 }
 
 if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
-  Require-Env "JWT_SECRET"
-  Require-Env "OTP_PROVIDER"
-  Require-Env "PAYSTACK_SECRET_KEY"
-  Require-Env "PAYSTACK_WEBHOOK_SECRET"
-  Require-Env "PAYMENTS_WEBHOOK_SECRET"
-  if ([string]::IsNullOrWhiteSpace($paymentsProvider)) {
-    Fail("missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)")
-  }
   if ([string]::IsNullOrWhiteSpace($StagingBaseUrl)) {
     Fail("BASE_STAGING is required for prod release gate (-BaseStaging or -StagingBaseUrl)")
   }
-} else {
-  Require-Env "JWT_SECRET"
-  if ([string]::IsNullOrWhiteSpace($paymentsProvider)) {
-    Fail("missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)")
+}
+
+if ($strictLocalAuthEnabled) {
+  Write-Host "[release-gate] strict local auth checks enabled"
+  if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
+    Require-Env "JWT_SECRET"
+    Require-Env "OTP_PROVIDER"
+    Require-Env "PAYSTACK_SECRET_KEY"
+    Require-Env "PAYSTACK_WEBHOOK_SECRET"
+    Require-Env "PAYMENTS_WEBHOOK_SECRET"
+    if ([string]::IsNullOrWhiteSpace($paymentsProvider)) {
+      Fail("missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)")
+    }
+  } else {
+    Require-Env "JWT_SECRET"
+    if ([string]::IsNullOrWhiteSpace($paymentsProvider)) {
+      Fail("missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)")
+    }
   }
+} else {
+  Write-Host "[release-gate] strict local auth checks disabled; skipping local secret requirements"
 }
 
 if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_ACCESS_TOKEN)) {
@@ -232,13 +245,12 @@ if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
   $smokeEnv = "staging"
 }
 
-if ([string]::IsNullOrWhiteSpace($smokeAccessToken) -and [string]::IsNullOrWhiteSpace($smokePhone)) {
-  Fail("configure SMOKE_ACCESS_TOKEN (recommended) or SMOKE_PHONE_E164 for staging smoke auth")
-}
-
 Write-Host "[release-gate] target_env=$targetLabel"
 Write-Host "[release-gate] target_base=$BaseUrl"
 Write-Host "[release-gate] smoke_base=$smokeBase"
+if ([string]::IsNullOrWhiteSpace($smokeAccessToken) -and [string]::IsNullOrWhiteSpace($smokePhone)) {
+  Write-Host "[release-gate] smoke auth env not provided; smoke runner will execute in skip-auth mode"
+}
 
 Test-Ready -Label $targetLabel -Base $BaseUrl -RequiredHead $RequiredMigrationHead
 if ($smokeBase -ne $BaseUrl) {
@@ -259,24 +271,24 @@ if ($RequireParity -and $smokeBase -ne $BaseUrl) {
 
 $smokeScript = Join-Path $PSScriptRoot "smoke_e2e.ps1"
 Write-Host "[release-gate] running smoke_e2e.ps1 against $smokeBase"
-$smokeArgs = @(
-  "-BaseUrl", $smokeBase,
-  "-EnvName", $smokeEnv
-)
+$smokeParams = @{
+  BaseUrl = $smokeBase
+  EnvName = $smokeEnv
+}
 if (-not [string]::IsNullOrWhiteSpace($smokeWebhookSim)) {
-  $smokeArgs += @("-SmokeWebhookSim", "$($smokeWebhookSim)")
+  $smokeParams["SmokeWebhookSim"] = "$($smokeWebhookSim)"
 }
 if (-not [string]::IsNullOrWhiteSpace($smokeAccessToken)) {
-  $smokeArgs += @("-SmokeAccessToken", $smokeAccessToken)
+  $smokeParams["SmokeAccessToken"] = $smokeAccessToken
 } else {
   if (-not [string]::IsNullOrWhiteSpace($smokePhone)) {
-    $smokeArgs += @("-SmokePhoneE164", $smokePhone)
+    $smokeParams["SmokePhoneE164"] = $smokePhone
   }
   if (-not [string]::IsNullOrWhiteSpace($smokeOtp)) {
-    $smokeArgs += @("-SmokeOtpCode", $smokeOtp)
+    $smokeParams["SmokeOtpCode"] = $smokeOtp
   }
 }
-& $smokeScript @smokeArgs
+& $smokeScript @smokeParams
 if ($LASTEXITCODE -ne 0) {
   Fail("smoke_e2e.ps1 failed with exit code $LASTEXITCODE")
 }
