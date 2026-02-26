@@ -36,6 +36,9 @@ String? roleFromPath(String path) {
   if (isSelectedPath(path, '/marketplace')) {
     return 'rider';
   }
+  if (isSelectedPath(path, '/dispatch')) {
+    return 'rider';
+  }
   if (isSelectedPath(path, '/driver')) {
     return 'driver';
   }

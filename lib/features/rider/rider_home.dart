@@ -60,6 +60,27 @@ class RiderHome extends StatelessWidget {
               const SizedBox(height: 10),
               FilledButton.tonal(
                 onPressed: () {
+                  context.go('/dispatch/trips/new');
+                },
+                child: const Text('Dispatch: Create Trip'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () async {
+                  final tripId = await _promptForTripId(
+                    context,
+                    title: 'Open Dispatch Trip',
+                  );
+                  if (tripId == null || tripId.isEmpty || !context.mounted) {
+                    return;
+                  }
+                  context.go('/dispatch/trips/${Uri.encodeComponent(tripId)}');
+                },
+                child: const Text('Dispatch: Open Trip (paste id)'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () {
                   context.go('/marketplace/offers');
                 },
                 child: const Text('Marketplace'),
@@ -185,6 +206,41 @@ Future<String?> _promptForRideId(
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'ride_id',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop(controller.text.trim());
+            },
+            child: const Text('Open'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<String?> _promptForTripId(
+  BuildContext context, {
+  required String title,
+}) async {
+  final controller = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'trip_id',
             border: OutlineInputBorder(),
           ),
         ),

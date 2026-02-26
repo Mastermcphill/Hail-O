@@ -58,4 +58,29 @@ class ApiPaths {
     }
     return '$base?${Uri(queryParameters: query).query}';
   }
+
+  static const dispatchQuote = '/dispatch/quote';
+  static const dispatchTrips = '/dispatch/trips';
+  static String dispatchTrip(String tripId) =>
+      '$dispatchTrips/${Uri.encodeComponent(tripId)}';
+  static String dispatchTripStatus(String tripId) =>
+      '${dispatchTrip(tripId)}/status';
+  static String dispatchTripAssign(String tripId) =>
+      '${dispatchTrip(tripId)}/assign';
+  static String dispatchNearbyDrivers({
+    required double lat,
+    required double lng,
+    double radiusKm = 5,
+    int limit = 20,
+  }) {
+    final query = Uri(
+      queryParameters: <String, String>{
+        'lat': lat.toString(),
+        'lng': lng.toString(),
+        'radius_km': radiusKm.toString(),
+        'limit': '$limit',
+      },
+    ).query;
+    return '/dispatch/drivers/nearby?$query';
+  }
 }

@@ -13,6 +13,9 @@ import '../../features/driver/driver_home.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
+import '../../features/dispatch/data/dispatch_repository.dart';
+import '../../features/dispatch/ui/dispatch_trip_create_screen.dart';
+import '../../features/dispatch/ui/dispatch_trip_detail_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/marketplace/marketplace_module.dart';
@@ -43,6 +46,7 @@ class AppRouter {
     : _apiClient = apiClient,
       _authSession = authSession {
     _marketplaceModule = MarketplaceModule(apiClient: _apiClient);
+    _dispatchRepository = DispatchRepository(apiClient: _apiClient);
     router = GoRouter(
       initialLocation: bootPath,
       refreshListenable: _authSession,
@@ -161,6 +165,18 @@ class AppRouter {
                 apiClient: _apiClient,
                 purchaseId: state.pathParameters['purchaseId'] ?? '',
                 rideId: state.uri.queryParameters['rideId'],
+              ),
+            ),
+            GoRoute(
+              path: '/dispatch/trips/new',
+              builder: (context, state) =>
+                  DispatchTripCreateScreen(repository: _dispatchRepository),
+            ),
+            GoRoute(
+              path: '/dispatch/trips/:tripId',
+              builder: (context, state) => DispatchTripDetailScreen(
+                repository: _dispatchRepository,
+                tripId: state.pathParameters['tripId'] ?? '',
               ),
             ),
             GoRoute(
@@ -308,6 +324,7 @@ class AppRouter {
   final ApiClient _apiClient;
   final AuthSession _authSession;
   late final MarketplaceModule _marketplaceModule;
+  late final DispatchRepository _dispatchRepository;
   late final GoRouter router;
 
   void dispose() {
@@ -512,6 +529,12 @@ String _titleForPath(String path) {
   }
   if (isSelectedPath(path, '/rider/timeline')) {
     return 'Timeline';
+  }
+  if (isSelectedPath(path, '/dispatch/trips/new')) {
+    return 'Dispatch Create';
+  }
+  if (isSelectedPath(path, '/dispatch/trips')) {
+    return 'Dispatch Trip';
   }
   if (isSelectedPath(path, '/driver/ride-ops')) {
     return 'Driver Ride Ops';
