@@ -172,6 +172,18 @@ Future<void> main() async {
             (env['RATE_LIMIT_WEBHOOK_MAX_REQUESTS_PER_USER'] ?? '').trim(),
           ) ??
           rateLimitMaxRequestsPerUser;
+      final rateLimitAdminPerIp =
+          int.tryParse((env['RATE_LIMIT_ADMIN_PER_IP'] ?? '').trim()) ??
+          int.tryParse(
+            (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_IP'] ?? '30').trim(),
+          ) ??
+          30;
+      final rateLimitAdminPerUser =
+          int.tryParse((env['RATE_LIMIT_ADMIN_PER_USER'] ?? '').trim()) ??
+          int.tryParse(
+            (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_USER'] ?? '60').trim(),
+          ) ??
+          60;
       final trustProxyHeaders =
           (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() !=
           'false';
@@ -256,6 +268,8 @@ Future<void> main() async {
             rateLimitMarketplaceWritePerUser,
         'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
         'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
+        'rate_limit_admin_per_ip': rateLimitAdminPerIp,
+        'rate_limit_admin_per_user': rateLimitAdminPerUser,
         'trust_proxy_headers': trustProxyHeaders,
         'metrics_public': metricsPublic,
         'metrics_protected': !metricsPublic,
@@ -287,6 +301,8 @@ Future<void> main() async {
         maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
         maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
         maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
+        maxAdminRequestsPerIp: rateLimitAdminPerIp,
+        maxAdminRequestsPerUser: rateLimitAdminPerUser,
         trustProxyHeaders: trustProxyHeaders,
         maxRequestBodyBytes: requestMaxBodyBytes,
         enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
@@ -308,7 +324,7 @@ Future<void> main() async {
         'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
       );
       stdout.writeln(
-        'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser trust_proxy_headers=$trustProxyHeaders',
+        'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser admin_ip=$rateLimitAdminPerIp admin_user=$rateLimitAdminPerUser trust_proxy_headers=$trustProxyHeaders',
       );
       late final HttpServer server;
       try {

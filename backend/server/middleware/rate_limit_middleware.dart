@@ -26,6 +26,8 @@ Middleware rateLimitMiddleware({
   int maxMarketplaceWriteRequestsPerUser = 80,
   int maxWebhookRequestsPerIp = 300,
   int? maxWebhookRequestsPerUser,
+  int maxAdminRequestsPerIp = 30,
+  int maxAdminRequestsPerUser = 60,
   bool trustProxyHeaders = true,
   Set<String> exemptPaths = const <String>{'health', 'healthz', 'ready'},
   NowProvider? nowProvider,
@@ -80,6 +82,7 @@ Middleware rateLimitMiddleware({
           (path == 'marketplace/offers' ||
               path.startsWith('marketplace/offers/'));
       final isWebhookPath = path.startsWith('webhooks/');
+      final isAdminPath = path == 'admin' || path.startsWith('admin/');
 
       int ipLimit;
       int userLimit;
@@ -88,6 +91,10 @@ Middleware rateLimitMiddleware({
         ipLimit = maxWebhookRequestsPerIp;
         userLimit = webhookRequestsPerUser;
         bucketScope = 'webhook';
+      } else if (isAdminPath) {
+        ipLimit = maxAdminRequestsPerIp;
+        userLimit = maxAdminRequestsPerUser;
+        bucketScope = 'admin';
       } else if (isMarketplacePath || isOrgPath) {
         ipLimit = isMarketplaceOfferRead
             ? maxMarketplaceReadRequestsPerIp

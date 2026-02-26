@@ -45,6 +45,8 @@ class AppServer {
     this.maxMarketplaceWriteRequestsPerUser = 80,
     this.maxWebhookRequestsPerIp = 300,
     this.maxWebhookRequestsPerUser = 120,
+    this.maxAdminRequestsPerIp = 30,
+    this.maxAdminRequestsPerUser = 60,
     this.trustProxyHeaders = true,
     this.maxRequestBodyBytes = 262144,
     this.enableSentrySmokeEndpoint = false,
@@ -78,6 +80,8 @@ class AppServer {
   final int maxMarketplaceWriteRequestsPerUser;
   final int maxWebhookRequestsPerIp;
   final int maxWebhookRequestsPerUser;
+  final int maxAdminRequestsPerIp;
+  final int maxAdminRequestsPerUser;
   final bool trustProxyHeaders;
   final int maxRequestBodyBytes;
   final bool enableSentrySmokeEndpoint;
@@ -165,6 +169,8 @@ class AppServer {
                             maxMarketplaceWriteRequestsPerUser,
                         maxWebhookRequestsPerIp: maxWebhookRequestsPerIp,
                         maxWebhookRequestsPerUser: maxWebhookRequestsPerUser,
+                        maxAdminRequestsPerIp: maxAdminRequestsPerIp,
+                        maxAdminRequestsPerUser: maxAdminRequestsPerUser,
                         trustProxyHeaders: trustProxyHeaders,
                       ),
                     )

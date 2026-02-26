@@ -248,6 +248,48 @@ void main() {
       expect(fourth.statusCode, 429);
     });
 
+    test('admin routes use dedicated admin bucket', () async {
+      final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
+      final handler = Pipeline()
+          .addMiddleware(
+            rateLimitMiddleware(
+              window: const Duration(minutes: 1),
+              maxRequestsPerIp: 10,
+              maxRequestsPerUser: 10,
+              maxAdminRequestsPerIp: 1,
+              maxAdminRequestsPerUser: 1,
+              nowProvider: () => fixedNow,
+            ),
+          )
+          .addHandler((request) async => Response.ok('ok'));
+
+      final firstAdmin = await handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/admin/health'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.1.1'},
+        ),
+      );
+      final secondAdmin = await handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/admin/users'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.1.1'},
+        ),
+      );
+      final general = await handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/rides/one'),
+          headers: const <String, String>{'x-forwarded-for': '10.0.1.2'},
+        ),
+      );
+
+      expect(firstAdmin.statusCode, 200);
+      expect(secondAdmin.statusCode, 429);
+      expect(general.statusCode, 200);
+    });
+
     test('trust proxy headers toggle controls X-Forwarded-For usage', () async {
       final fixedNow = DateTime.utc(2026, 2, 15, 12, 0, 0);
 
