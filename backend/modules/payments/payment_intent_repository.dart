@@ -61,6 +61,11 @@ abstract class PaymentIntentRepository {
     required String intentId,
     required String userId,
   });
+
+  Future<PaymentIntentRecord?> updateLatestByPurchaseId({
+    required String purchaseId,
+    required String status,
+  });
 }
 
 class InMemoryPaymentIntentRepository implements PaymentIntentRepository {
@@ -136,6 +141,36 @@ class InMemoryPaymentIntentRepository implements PaymentIntentRepository {
       return null;
     }
     return intent;
+  }
+
+  @override
+  Future<PaymentIntentRecord?> updateLatestByPurchaseId({
+    required String purchaseId,
+    required String status,
+  }) async {
+    final ids = _intentIdsByPurchase[purchaseId.trim()] ?? const <String>[];
+    if (ids.isEmpty) {
+      return null;
+    }
+    final latestId = ids.last;
+    final latest = _intentsById[latestId];
+    if (latest == null) {
+      return null;
+    }
+    final updated = PaymentIntentRecord(
+      id: latest.id,
+      purchaseId: latest.purchaseId,
+      userId: latest.userId,
+      provider: latest.provider,
+      status: status.trim().toLowerCase(),
+      amountMinor: latest.amountMinor,
+      currency: latest.currency,
+      providerRef: latest.providerRef,
+      clientSecret: latest.clientSecret,
+      createdAt: latest.createdAt,
+    );
+    _intentsById[latestId] = updated;
+    return updated;
   }
 
   String? _normalizeNullable(String? value) {
@@ -290,6 +325,50 @@ class PostgresPaymentIntentRepository implements PaymentIntentRepository {
       return null;
     }
     return _rowToRecord(rows.first, userId: rows.first[9] as String?);
+  }
+
+  @override
+  Future<PaymentIntentRecord?> updateLatestByPurchaseId({
+    required String purchaseId,
+    required String status,
+  }) async {
+    final rows = await _postgresProvider.withConnection(
+      (connection) => connection.query(
+        '''
+        WITH latest AS (
+          SELECT id
+          FROM payment_intents
+          WHERE purchase_id = CAST(@purchase_id AS UUID)
+          ORDER BY created_at DESC
+          LIMIT 1
+        )
+        UPDATE payment_intents
+        SET
+          status = @status,
+          updated_at = @updated_at
+        WHERE id = (SELECT id FROM latest)
+        RETURNING
+          id::text,
+          purchase_id::text,
+          provider,
+          status,
+          amount_minor,
+          currency,
+          provider_ref,
+          client_secret,
+          created_at
+        ''',
+        substitutionValues: <String, Object?>{
+          'purchase_id': purchaseId.trim(),
+          'status': status.trim().toLowerCase(),
+          'updated_at': _nowUtc(),
+        },
+      ),
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return _rowToRecord(rows.first);
   }
 
   PaymentIntentRecord _rowToRecord(List<Object?> row, {String? userId}) {

@@ -31,6 +31,7 @@ void main() {
         sqlByName['015_invoices_dunning_comms.sql'] ?? '';
     final riskSql = sqlByName['016_risk_engine.sql'] ?? '';
     final paymentIntentsSql = sqlByName['017_payment_intents.sql'] ?? '';
+    final webhookEventsSql = sqlByName['018_webhook_events.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -239,6 +240,18 @@ void main() {
       ),
       isTrue,
       reason: 'payment intents active uniqueness must exist',
+    );
+    expect(
+      webhookEventsSql.contains('CREATE TABLE IF NOT EXISTS webhook_events'),
+      isTrue,
+      reason: 'webhook events table must exist',
+    );
+    expect(
+      webhookEventsSql.contains(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_provider_event',
+      ),
+      isTrue,
+      reason: 'webhook events dedupe index must exist',
     );
   });
 }

@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
@@ -8,12 +12,24 @@ import 'payment_intent_repository.dart';
 import 'payment_service.dart';
 
 class PaymentsController {
-  PaymentsController({required PaymentService paymentService, Uuid? uuid})
-    : _paymentService = paymentService,
-      _uuid = uuid ?? const Uuid();
+  PaymentsController({
+    required PaymentService paymentService,
+    String environment = 'development',
+    String webhookSecret = '',
+    void Function(String line)? warningSink,
+    Uuid? uuid,
+  }) : _paymentService = paymentService,
+       _environment = environment,
+       _webhookSecret = webhookSecret,
+       _warningSink = warningSink ?? stderr.writeln,
+       _uuid = uuid ?? const Uuid();
 
   final PaymentService _paymentService;
+  final String _environment;
+  final String _webhookSecret;
+  final void Function(String line) _warningSink;
   final Uuid _uuid;
+  bool _missingSecretWarningLogged = false;
 
   Router get webhookRouter {
     final router = Router();
@@ -30,6 +46,13 @@ class PaymentsController {
 
   Future<Response> _handleWebhook(Request request) async {
     final rawBody = await request.readAsString();
+    final secretPolicyResponse = _validateWebhookSecretPolicy(
+      request: request,
+      rawBody: rawBody,
+    );
+    if (secretPolicyResponse != null) {
+      return secretPolicyResponse;
+    }
     try {
       final result = await _paymentService.handleWebhook(
         headers: request.headers,
@@ -75,6 +98,60 @@ class PaymentsController {
         message: 'Unable to process webhook',
       );
     }
+  }
+
+  Response? _validateWebhookSecretPolicy({
+    required Request request,
+    required String rawBody,
+  }) {
+    final secret = _webhookSecret.trim();
+    if (secret.isEmpty) {
+      if (_isProductionEnvironment()) {
+        return _error(
+          request,
+          503,
+          errorCode: 'WEBHOOK_CONFIG_ERROR',
+          message:
+              'PAYMENTS_WEBHOOK_SECRET is required in production for webhook verification',
+        );
+      }
+      if (!_missingSecretWarningLogged) {
+        _missingSecretWarningLogged = true;
+        _warningSink(
+          'WARN: PAYMENTS_WEBHOOK_SECRET not set; webhook signature checks are disabled outside production.',
+        );
+      }
+      return null;
+    }
+
+    final providedSignature = (request.headers['x-webhook-signature'] ?? '')
+        .trim();
+    if (providedSignature.isEmpty) {
+      return _error(
+        request,
+        401,
+        errorCode: 'INVALID_WEBHOOK_SIGNATURE',
+        message: 'Missing x-webhook-signature header',
+      );
+    }
+    final expectedSignature = Hmac(
+      sha256,
+      utf8.encode(secret),
+    ).convert(utf8.encode(rawBody)).toString();
+    if (expectedSignature.toLowerCase() != providedSignature.toLowerCase()) {
+      return _error(
+        request,
+        401,
+        errorCode: 'INVALID_WEBHOOK_SIGNATURE',
+        message: 'Webhook signature verification failed',
+      );
+    }
+    return null;
+  }
+
+  bool _isProductionEnvironment() {
+    final normalized = _environment.trim().toLowerCase();
+    return normalized == 'production' || normalized == 'prod';
   }
 
   Future<Response> _createIntent(Request request) async {

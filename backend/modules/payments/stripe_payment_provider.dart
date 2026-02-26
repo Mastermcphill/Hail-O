@@ -44,8 +44,8 @@ class StripePaymentProvider implements PaymentProvider {
       rawBody: rawBody,
       signatureHeader: signatureHeader,
     );
-    final eventType =
-        (payload['type'] as String?)?.trim() ?? 'payment_succeeded';
+    final rawEventType = (payload['type'] as String?)?.trim() ?? '';
+    final eventType = _normalizeEventType(rawEventType);
     final dataObject = (payload['data'] is Map)
         ? (payload['data'] as Map)['object']
         : null;
@@ -123,5 +123,19 @@ class StripePaymentProvider implements PaymentProvider {
       }
     }
     return null;
+  }
+
+  String _normalizeEventType(String rawEventType) {
+    final normalized = rawEventType.trim().toLowerCase();
+    switch (normalized) {
+      case 'payment_intent.succeeded':
+      case 'charge.succeeded':
+        return 'payment_succeeded';
+      case 'payment_intent.payment_failed':
+      case 'charge.failed':
+        return 'payment_failed';
+      default:
+        return normalized.isEmpty ? 'payment_succeeded' : normalized;
+    }
   }
 }

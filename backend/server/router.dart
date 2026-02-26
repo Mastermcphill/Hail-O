@@ -119,7 +119,11 @@ Handler buildApiRouter({
     stripeWebhookSecret: env['STRIPE_WEBHOOK_SECRET'],
     metrics: requestMetrics,
   );
-  final paymentsController = PaymentsController(paymentService: paymentService);
+  final paymentsController = PaymentsController(
+    paymentService: paymentService,
+    environment: runtimeEnvironment,
+    webhookSecret: (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim(),
+  );
   final revenueService = MarketplaceRevenueService(
     postgresProvider: postgresProvider,
     metrics: requestMetrics,

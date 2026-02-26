@@ -9,6 +9,7 @@ import '../marketplace/billing_ledger_repository.dart';
 import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import 'payment_intent_repository.dart';
+import 'payment_webhook_event_repository.dart';
 import 'manual_payment_provider.dart';
 import 'paystack_payment_provider.dart';
 import 'payment_provider.dart';
@@ -51,6 +52,7 @@ class PaymentService {
     BillingLedgerRepository? billingLedgerRepository,
     MarketplaceOfferRepository? offerRepository,
     PaymentIntentRepository? paymentIntentRepository,
+    PaymentWebhookEventRepository? paymentWebhookEventRepository,
     MarketplaceEntitlementService? entitlementService,
     RequestMetrics? metrics,
     void Function(String line)? logSink,
@@ -70,6 +72,15 @@ class PaymentService {
                    uuid: uuid,
                    nowUtc: nowUtc,
                  )),
+       _paymentWebhookEventRepository =
+           paymentWebhookEventRepository ??
+           (postgresProvider == null
+               ? InMemoryPaymentWebhookEventRepository()
+               : PostgresPaymentWebhookEventRepository(
+                   postgresProvider,
+                   uuid: uuid,
+                   nowUtc: nowUtc,
+                 )),
        _entitlementService = entitlementService,
        _metrics = metrics,
        _logSink = logSink ?? print,
@@ -81,6 +92,7 @@ class PaymentService {
     BillingLedgerRepository? billingLedgerRepository,
     MarketplaceOfferRepository? offerRepository,
     PaymentIntentRepository? paymentIntentRepository,
+    PaymentWebhookEventRepository? paymentWebhookEventRepository,
     MarketplaceEntitlementService? entitlementService,
     String? configuredProvider,
     String? paystackSecretKey,
@@ -109,6 +121,7 @@ class PaymentService {
       billingLedgerRepository: billingLedgerRepository,
       offerRepository: offerRepository,
       paymentIntentRepository: paymentIntentRepository,
+      paymentWebhookEventRepository: paymentWebhookEventRepository,
       entitlementService: entitlementService,
       metrics: metrics,
       logSink: logSink,
@@ -122,6 +135,7 @@ class PaymentService {
   final BillingLedgerRepository _billingLedgerRepository;
   final MarketplaceOfferRepository? _offerRepository;
   final PaymentIntentRepository _paymentIntentRepository;
+  final PaymentWebhookEventRepository _paymentWebhookEventRepository;
   final MarketplaceEntitlementService? _entitlementService;
   final RequestMetrics? _metrics;
   final void Function(String line) _logSink;
@@ -283,6 +297,30 @@ class PaymentService {
       throw const PaymentWebhookSignatureException();
     }
 
+    final canonicalRecorded = await _recordCanonicalWebhookEvent(
+      event: event,
+      rawBody: rawBody,
+    );
+    if (!canonicalRecorded) {
+      _metrics?.recordMarketplaceWebhookEvent(
+        provider: event.provider,
+        action: 'duplicate_ignored',
+      );
+      _logWebhookOutcome(
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        verified: true,
+        action: 'duplicate_ignored',
+      );
+      return PaymentWebhookProcessResult(
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        action: 'duplicate_ignored',
+        duplicate: true,
+        signatureValid: true,
+      );
+    }
+
     final duplicate = await _recordWebhook(event: event, rawBody: rawBody);
     if (duplicate) {
       _metrics?.recordMarketplaceWebhookEvent(
@@ -321,6 +359,18 @@ class PaymentService {
       action: action,
       duplicate: false,
       signatureValid: true,
+    );
+  }
+
+  Future<bool> _recordCanonicalWebhookEvent({
+    required PaymentWebhookEvent event,
+    required String rawBody,
+  }) {
+    return _paymentWebhookEventRepository.recordEvent(
+      provider: event.provider,
+      eventId: event.providerEventId,
+      payload: rawBody.trim().isEmpty ? jsonEncode(event.payload) : rawBody,
+      receivedAt: _nowUtc(),
     );
   }
 
@@ -452,25 +502,51 @@ class PaymentService {
       purchaseId: purchaseId,
       payload: event.payload,
     );
-    final mappedEntryType = _mapLedgerEntryType(eventType);
-    final mappedAmount = _mapLedgerAmount(
-      entryType: mappedEntryType,
-      amountMinor: financialContext.amountMinor,
-    );
-    await _billingLedgerRepository.appendEntry(
-      purchaseId: purchaseId,
-      userId: financialContext.userId,
-      entryType: mappedEntryType,
-      provider: event.provider,
-      providerRef: event.providerEventId,
-      amountMinor: mappedAmount,
-      currency: financialContext.currency,
-      metadata: <String, Object?>{
-        'event_type': event.eventType,
-        ...event.payload,
-      },
-      occurredAt: _nowUtc(),
-    );
+    final isPaymentSucceeded =
+        eventType == 'payment_succeeded' || eventType == 'invoice_paid';
+    final isPaymentFailed = eventType == 'payment_failed';
+
+    if (isPaymentSucceeded) {
+      await _appendEscrowTransferLedgerEntries(
+        event: event,
+        purchaseId: purchaseId,
+        financialContext: financialContext,
+      );
+    } else {
+      final mappedEntryType = _mapLedgerEntryType(eventType);
+      final mappedAmount = _mapLedgerAmount(
+        entryType: mappedEntryType,
+        amountMinor: financialContext.amountMinor,
+      );
+      await _billingLedgerRepository.appendEntry(
+        purchaseId: purchaseId,
+        userId: financialContext.userId,
+        entryType: mappedEntryType,
+        provider: event.provider,
+        providerRef: event.providerEventId,
+        amountMinor: mappedAmount,
+        currency: financialContext.currency,
+        metadata: <String, Object?>{
+          'event_type': event.eventType,
+          ...event.payload,
+        },
+        occurredAt: _nowUtc(),
+      );
+    }
+
+    if (purchaseId != null) {
+      if (isPaymentSucceeded) {
+        await _paymentIntentRepository.updateLatestByPurchaseId(
+          purchaseId: purchaseId,
+          status: 'succeeded',
+        );
+      } else if (isPaymentFailed) {
+        await _paymentIntentRepository.updateLatestByPurchaseId(
+          purchaseId: purchaseId,
+          status: 'failed',
+        );
+      }
+    }
 
     if (_postgresProvider == null || purchaseId == null) {
       return eventType.isEmpty ? 'webhook_recorded' : eventType;
@@ -481,17 +557,30 @@ class PaymentService {
       String timelineType;
       switch (eventType) {
         case 'payment_failed':
-          status = 'PAST_DUE';
+          status = 'pending_payment';
           timelineType = 'payment_failed';
           break;
         case 'subscription_canceled':
         case 'payment_canceled':
-          status = 'CANCELED';
+          status = 'canceled';
           timelineType = 'subscription_canceled';
+          break;
+        case 'chargeback':
+          status = 'refunded';
+          timelineType = 'chargeback';
+          break;
+        case 'refund':
+        case 'refund_succeeded':
+          status = 'refunded';
+          timelineType = 'refund_succeeded';
+          break;
+        case 'invoice_paid':
+          status = 'paid';
+          timelineType = 'invoice_paid';
           break;
         case 'payment_succeeded':
         default:
-          status = 'ACTIVE';
+          status = 'paid';
           timelineType = 'payment_succeeded';
           break;
       }
@@ -501,12 +590,14 @@ class PaymentService {
         UPDATE marketplace_purchases
         SET
           status = @status,
+          provider_payment_intent_id = COALESCE(provider_payment_intent_id, @provider_payment_intent_id),
           updated_at = @updated_at
         WHERE id = CAST(@purchase_id AS UUID)
         RETURNING id::text
         ''',
         substitutionValues: <String, Object?>{
           'status': status,
+          'provider_payment_intent_id': _resolveProviderPaymentIntentId(event),
           'updated_at': _nowUtc(),
           'purchase_id': purchaseId,
         },
@@ -547,10 +638,9 @@ class PaymentService {
           timelineAction == 'invoice_paid') {
         await entitlementService.syncByPurchaseId(
           purchaseId: purchaseId,
-          reason: 'payment_status_active',
+          reason: 'payment_status_paid',
         );
-      } else if (timelineAction == 'payment_failed' ||
-          timelineAction == 'subscription_canceled' ||
+      } else if (timelineAction == 'subscription_canceled' ||
           timelineAction == 'chargeback' ||
           timelineAction == 'refund_succeeded') {
         await entitlementService.revokeByPurchaseId(
@@ -560,6 +650,65 @@ class PaymentService {
       }
     }
     return timelineAction;
+  }
+
+  Future<void> _appendEscrowTransferLedgerEntries({
+    required PaymentWebhookEvent event,
+    required String? purchaseId,
+    required _FinancialContext financialContext,
+  }) async {
+    final amountMinor = financialContext.amountMinor.abs();
+    final metadata = <String, Object?>{
+      'event_type': event.eventType,
+      ...event.payload,
+    };
+    await _billingLedgerRepository.appendEntry(
+      purchaseId: purchaseId,
+      userId: financialContext.userId,
+      entryType: 'charge_captured',
+      provider: event.provider,
+      providerRef: '${event.providerEventId}:escrow_debit',
+      amountMinor: amountMinor,
+      currency: financialContext.currency,
+      metadata: <String, Object?>{
+        ...metadata,
+        'ledger_leg': 'user_escrow_debit',
+      },
+      occurredAt: _nowUtc(),
+    );
+    await _billingLedgerRepository.appendEntry(
+      purchaseId: purchaseId,
+      userId: financialContext.userId,
+      entryType: 'invoice_paid',
+      provider: event.provider,
+      providerRef: '${event.providerEventId}:escrow_credit',
+      amountMinor: amountMinor,
+      currency: financialContext.currency,
+      metadata: <String, Object?>{
+        ...metadata,
+        'ledger_leg': 'platform_escrow_credit',
+      },
+      occurredAt: _nowUtc(),
+    );
+  }
+
+  String _resolveProviderPaymentIntentId(PaymentWebhookEvent event) {
+    final payloadRef = event.payload['provider_payment_intent_id']
+        ?.toString()
+        .trim();
+    if (payloadRef != null && payloadRef.isNotEmpty) {
+      return payloadRef;
+    }
+    final nestedRef =
+        _nestedValue(event.payload, const <String>[
+          'data',
+          'id',
+        ])?.toString().trim() ??
+        '';
+    if (nestedRef.isNotEmpty) {
+      return nestedRef;
+    }
+    return event.providerEventId;
   }
 
   Future<_FinancialContext> _resolveFinancialContext({

@@ -44,8 +44,8 @@ class PaystackPaymentProvider implements PaymentProvider {
       rawBody: rawBody,
       signature: signature,
     );
-    final eventType =
-        (payload['event'] as String?)?.trim() ?? 'payment_succeeded';
+    final rawEventType = (payload['event'] as String?)?.trim() ?? '';
+    final eventType = _normalizeEventType(rawEventType);
     final data = payload['data'];
     final purchaseId = _extractPurchaseId(data);
     final headerEventId = (headers['x-paystack-event-id'] ?? '').trim();
@@ -114,5 +114,17 @@ class PaystackPaymentProvider implements PaymentProvider {
       return id;
     }
     return null;
+  }
+
+  String _normalizeEventType(String rawEventType) {
+    final normalized = rawEventType.trim().toLowerCase();
+    switch (normalized) {
+      case 'charge.success':
+        return 'payment_succeeded';
+      case 'charge.failed':
+        return 'payment_failed';
+      default:
+        return normalized.isEmpty ? 'payment_succeeded' : normalized;
+    }
   }
 }
