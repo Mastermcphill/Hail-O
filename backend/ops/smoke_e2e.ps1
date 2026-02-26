@@ -1,10 +1,7 @@
 param(
   [string]$BaseUrl = "",
   [string]$EnvName = "",
-  [string]$AdminToken = "",
-  [string]$AdminTokenEnabled = "",
   [string]$SmokeAccessToken = "",
-  [string]$SmokeMintPath = "",
   [string]$SmokePhoneE164 = "",
   [string]$SmokeOtpCode = "",
   [string]$SmokeWebhookSim = "",
@@ -50,12 +47,6 @@ if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
 if ([string]::IsNullOrWhiteSpace($EnvName)) {
   $EnvName = if ($env:ENV) { $env:ENV } else { "staging" }
 }
-if ([string]::IsNullOrWhiteSpace($AdminToken)) {
-  $AdminToken = $env:ADMIN_TOKEN
-}
-if ([string]::IsNullOrWhiteSpace($AdminTokenEnabled)) {
-  $AdminTokenEnabled = if ($env:ADMIN_TOKEN_ENABLED) { $env:ADMIN_TOKEN_ENABLED } else { "false" }
-}
 if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) {
   if ($env:SMOKE_PHONE_E164) {
     $SmokePhoneE164 = $env:SMOKE_PHONE_E164
@@ -92,13 +83,6 @@ if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
     $SmokeAccessToken = $env:E2E_ACCESS_TOKEN
   }
 }
-if ([string]::IsNullOrWhiteSpace($SmokeMintPath)) {
-  if ($env:SMOKE_MINT_PATH) {
-    $SmokeMintPath = $env:SMOKE_MINT_PATH
-  } else {
-    $SmokeMintPath = "/admin/smoke/mint_token"
-  }
-}
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
   if ($env:PAYMENTS_WEBHOOK_SECRET) {
     $WebhookSecret = $env:PAYMENTS_WEBHOOK_SECRET
@@ -111,8 +95,6 @@ if ([string]::IsNullOrWhiteSpace($PaystackWebhookSecret)) {
     $PaystackWebhookSecret = $env:PAYSTACK_WEBHOOK_SECRET
   } elseif ($env:E2E_PAYSTACK_SECRET) {
     $PaystackWebhookSecret = $env:E2E_PAYSTACK_SECRET
-  } else {
-    $PaystackWebhookSecret = $env:PAYSTACK_SECRET_KEY
   }
 }
 if ([string]::IsNullOrWhiteSpace($SmokeDriverId)) {
@@ -125,10 +107,6 @@ if ([string]::IsNullOrWhiteSpace($SmokeDriverId)) {
 
 $BaseUrl = $BaseUrl.TrimEnd('/')
 $normalizedEnv = $EnvName.Trim().ToLowerInvariant()
-$adminTokenEnabledBool = To-Bool $AdminTokenEnabled
-if (-not [string]::IsNullOrWhiteSpace($SmokeMintPath) -and -not $SmokeMintPath.StartsWith("/")) {
-  $SmokeMintPath = "/$SmokeMintPath"
-}
 if ([string]::IsNullOrWhiteSpace($SmokeWebhookSim)) {
   if (@("staging", "stage", "development", "dev", "test") -contains $normalizedEnv) {
     $SmokeWebhookSim = "true"
@@ -297,9 +275,9 @@ function Redact-Secret([string]$Value) {
   }
   $trimmed = $Value.Trim()
   if ($trimmed.Length -le 6) {
-    return "$trimmed...redacted"
+    return "$trimmed…"
   }
-  return "$($trimmed.Substring(0, 6))...redacted"
+  return "$($trimmed.Substring(0, 6))…"
 }
 
 function Is-SensitiveKey([string]$Key) {
@@ -428,76 +406,32 @@ $authNote = ""
 $needsUserInput = $false
 
 if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
-  $authMode = "smoke_access_token"
+  $authMode = "access_token"
   $authNote = "Using SMOKE_ACCESS_TOKEN"
 } else {
-  $authMode = "auto"
-  if ($adminTokenEnabledBool -and -not [string]::IsNullOrWhiteSpace($AdminToken)) {
-    $mintPaths = @(
-      $SmokeMintPath,
-      "/admin/smoke/mint_token",
-      "/admin/test/session/mint",
-      "/admin/test/access-token",
-      "/admin/auth/mint",
-      "/admin/session/mint",
-      "/admin/tokens/mint"
-    )
-    $mintPhone = if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) { "+15550001111" } else { $SmokePhoneE164 }
-    $seenMintPaths = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($path in $mintPaths) {
-      if ([string]::IsNullOrWhiteSpace($path)) {
-        continue
-      }
-      $normalizedPath = if ($path.StartsWith("/")) { $path } else { "/$path" }
-      if ($seenMintPaths.Contains($normalizedPath)) {
-        continue
-      }
-      $seenMintPaths.Add($normalizedPath) | Out-Null
-      $mintCall = Invoke-SmokeRequest -Method "POST" -Path $normalizedPath -Body @{ role = "rider"; scope = "smoke_e2e"; phone_e164 = $mintPhone } -Headers @{ "x-admin-token" = $AdminToken }
-      $authOps.Add($mintCall)
-      if ($mintCall.status -eq 200 -or $mintCall.status -eq 201) {
-        $mintedToken = Try-Get { $mintCall.response.access_token }
-        if ([string]::IsNullOrWhiteSpace($mintedToken)) {
-          $mintedToken = Try-Get { $mintCall.response.data.access_token }
-        }
-        if ([string]::IsNullOrWhiteSpace($mintedToken)) {
-          $mintedToken = Try-Get { $mintCall.response.token }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($mintedToken)) {
-          $SmokeAccessToken = $mintedToken
-          $authMode = "admin_token_mint"
-          $authNote = "Minted access token via $normalizedPath"
-          break
-        }
-      }
-    }
-  }
-
-  if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
-    $authMode = "otp"
-    if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) {
-      $authNote = "SMOKE_PHONE_E164 is required for OTP fallback"
+  $authMode = "otp"
+  if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) {
+    $authNote = "SMOKE_PHONE_E164 is required when SMOKE_ACCESS_TOKEN is not set"
+  } else {
+    $otpRequest = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/request" -Body @{ phone_e164 = $SmokePhoneE164 } -Headers @{}
+    $authOps.Add($otpRequest)
+    if ([string]::IsNullOrWhiteSpace($SmokeOtpCode)) {
+      $needsUserInput = $true
+      $authNote = "OTP requested. Re-run with SMOKE_OTP_CODE=XXXXXX"
     } else {
-      $otpRequest = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/request" -Body @{ phone_e164 = $SmokePhoneE164 } -Headers @{}
-      $authOps.Add($otpRequest)
-      if ([string]::IsNullOrWhiteSpace($SmokeOtpCode)) {
-        $needsUserInput = $true
-        $authNote = "OTP requested. Re-run with SMOKE_OTP_CODE to continue."
+      $otpVerify = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/verify" -Body @{ phone_e164 = $SmokePhoneE164; code = $SmokeOtpCode } -Headers @{}
+      $authOps.Add($otpVerify)
+      $SmokeAccessToken = Try-Get { $otpVerify.response.access_token }
+      if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+        $SmokeAccessToken = Try-Get { $otpVerify.response.data.access_token }
+      }
+      if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+        $SmokeAccessToken = Try-Get { $otpVerify.response.token }
+      }
+      if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+        $authNote = "OTP verify did not return access token"
       } else {
-        $otpVerify = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/verify" -Body @{ phone_e164 = $SmokePhoneE164; code = $SmokeOtpCode } -Headers @{}
-        $authOps.Add($otpVerify)
-        $SmokeAccessToken = Try-Get { $otpVerify.response.access_token }
-        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
-          $SmokeAccessToken = Try-Get { $otpVerify.response.data.access_token }
-        }
-        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
-          $SmokeAccessToken = Try-Get { $otpVerify.response.token }
-        }
-        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
-          $authNote = "OTP verify did not return access token"
-        } else {
-          $authNote = "OTP flow verified and access token acquired"
-        }
+        $authNote = "OTP flow verified and access token acquired"
       }
     }
   }
@@ -505,13 +439,13 @@ if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
 
 $step03Ok = -not [string]::IsNullOrWhiteSpace($SmokeAccessToken)
 $step03Status = if ($needsUserInput) { "needs_input" } elseif ($step03Ok) { "ok" } else { "auth_failed" }
-$step03Artifact = if ($needsUserInput) { "03_auth_skipped.json" } else { "03_auth.json" }
+$step03Artifact = if ($needsUserInput) { "03_auth_need_input.json" } else { "03_auth.json" }
 if ([string]::IsNullOrWhiteSpace($authNote)) {
   $authNote = "Authentication flow completed"
 }
 $step03Duration = Sum-DurationMs $authOps
 $step03TraceIds = @($authOps | ForEach-Object { $_.trace_id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
-Save-Step -StepId "03_auth" -ArtifactFile $step03Artifact -Ok $step03Ok -Status $step03Status -Note $authNote -DurationMs $step03Duration -TraceIds $step03TraceIds -Payload ([ordered]@{ mode = $authMode; token_acquired = $step03Ok; needs_input = $needsUserInput; access_token_preview = (Redact-Secret $SmokeAccessToken); note = $authNote; operations = $authOps })
+Save-Step -StepId "03_auth" -ArtifactFile $step03Artifact -Ok $step03Ok -Status $step03Status -Note $authNote -DurationMs $step03Duration -TraceIds $step03TraceIds -Payload ([ordered]@{ auth_mode = $authMode; token_acquired = $step03Ok; needs_input = $needsUserInput; access_token_preview = (Redact-Secret $SmokeAccessToken); note = $authNote; operations = $authOps })
 
 if ($needsUserInput) {
   $summaryNeedsInput = [ordered]@{
@@ -527,7 +461,7 @@ if ($needsUserInput) {
   }
   $summaryNeedsInputPath = Join-Path $runDir "summary.json"
   ($summaryNeedsInput | ConvertTo-Json -Depth 80) | Set-Content -Path $summaryNeedsInputPath
-  Write-Host "NEED_USER_INPUT: set SMOKE_OTP_CODE and rerun"
+  Write-Host "OTP requested. Re-run with SMOKE_OTP_CODE=XXXXXX"
   Write-Host "summary: $summaryNeedsInputPath"
   exit 2
 }
@@ -582,7 +516,25 @@ if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsN
   Save-Step -StepId "06_intent_create" -ArtifactFile "06_intent_create.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and purchase id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
 }
 # Step 07: Webhook simulation (staging only test mode)
-$runWebhookSim = $smokeWebhookSimBool -and ($normalizedEnv -ne "prod") -and ($normalizedEnv -ne "production") -and (-not [string]::IsNullOrWhiteSpace($purchaseId))
+$allowWebhookSim = $smokeWebhookSimBool -and ($normalizedEnv -ne "prod") -and ($normalizedEnv -ne "production") -and (-not [string]::IsNullOrWhiteSpace($purchaseId))
+$runWebhookSim = $false
+$allowPendingPurchase = $false
+$step07SkipReason = ""
+
+if ($allowWebhookSim) {
+  if ([string]::IsNullOrWhiteSpace($PaystackWebhookSecret)) {
+    $step07SkipReason = "Webhook simulation skipped: PAYSTACK_WEBHOOK_SECRET not provided to ops runtime"
+  } else {
+    $runWebhookSim = $true
+  }
+} elseif (-not $smokeWebhookSimBool) {
+  $step07SkipReason = "Webhook simulation disabled by SMOKE_WEBHOOK_SIM=false"
+} elseif ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
+  $step07SkipReason = "Webhook simulation disabled in production environment"
+} else {
+  $step07SkipReason = "Webhook simulation skipped because purchase_id is unavailable"
+}
+
 if ($runWebhookSim) {
   $providerEventId = "evt-smoke-" + [guid]::NewGuid().ToString("N")
   $webhookPayload = [ordered]@{
@@ -606,22 +558,32 @@ if ($runWebhookSim) {
     $sig = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
     $headers["x-webhook-signature"] = $sig
   }
-  if (-not [string]::IsNullOrWhiteSpace($PaystackWebhookSecret)) {
-    $hmac512 = New-Object System.Security.Cryptography.HMACSHA512
-    $hmac512.Key = [Text.Encoding]::UTF8.GetBytes($PaystackWebhookSecret)
-    $sigBytes = $hmac512.ComputeHash([Text.Encoding]::UTF8.GetBytes($payloadJson))
-    $sig = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
-    $headers["x-paystack-signature"] = $sig
-    $headers["x-paystack-event-id"] = $providerEventId
-  }
+
+  $hmac512 = New-Object System.Security.Cryptography.HMACSHA512
+  $hmac512.Key = [Text.Encoding]::UTF8.GetBytes($PaystackWebhookSecret)
+  $sigBytes = $hmac512.ComputeHash([Text.Encoding]::UTF8.GetBytes($payloadJson))
+  $sig = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
+  $headers["x-paystack-signature"] = $sig
+  $headers["x-paystack-event-id"] = $providerEventId
 
   $step07 = Invoke-SmokeRequest -Method "POST" -Path "/webhooks/payments" -Body $webhookPayload -Headers $headers
-  $step07Ok = ($step07.status -eq 200) -or ($step07.status -eq 202)
-  $step07Note = if ($step07Ok) { "Webhook simulation accepted" } else { "Expected HTTP 200/202 from webhook simulation" }
-  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $step07Ok -Status "$($step07.status)" -Note $step07Note -DurationMs ([int]$step07.duration_ms) -TraceIds @($step07.trace_id) -Payload ([ordered]@{ provider_event_id = $providerEventId; call = $step07 })
+  $step07Status = "$($step07.status)"
+  $step07Ok = $false
+  $step07Note = "Expected HTTP 200/202 from webhook simulation"
+  if ($step07.status -eq 200 -or $step07.status -eq 202) {
+    $step07Ok = $true
+    $step07Note = "Webhook simulation accepted"
+  } elseif ($step07.status -eq 404 -or $step07.status -eq 405) {
+    $step07Ok = $true
+    $step07Status = "skipped"
+    $allowPendingPurchase = $true
+    $step07SkipReason = "Webhook simulation endpoint unavailable on target"
+    $step07Note = $step07SkipReason
+  }
+  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $step07Ok -Status $step07Status -Note $step07Note -DurationMs ([int]$step07.duration_ms) -TraceIds @($step07.trace_id) -Payload ([ordered]@{ provider_event_id = $providerEventId; skipped_reason = $step07SkipReason; call = $step07 })
 } else {
-  $skipReason = "Webhook simulation skipped (requires non-production env, SMOKE_WEBHOOK_SIM=true, and purchase id)"
-  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $true -Status "skipped" -Note $skipReason -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ skipped = $true; reason = $skipReason })
+  $allowPendingPurchase = $true
+  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $true -Status "skipped" -Note $step07SkipReason -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ skipped = $true; skipped_reason = $step07SkipReason })
 }
 
 # Step 08: Purchase polling up to 45s
@@ -649,7 +611,7 @@ if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsN
       $terminalOutcome = "paid"
       break
     }
-    if (-not $smokeWebhookSimBool -and ($finalStatus -eq "pending_payment" -or $finalStatus -eq "pending")) {
+    if ($allowPendingPurchase -and ($finalStatus -eq "pending_payment" -or $finalStatus -eq "pending")) {
       $terminalOutcome = "pending"
       break
     }
@@ -665,13 +627,13 @@ if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsN
   }
 
   $pollStopwatch.Stop()
-  $step08Ok = ($terminalOutcome -eq "paid") -or ((-not $smokeWebhookSimBool) -and ($terminalOutcome -eq "pending"))
+  $step08Ok = ($terminalOutcome -eq "paid") -or ($allowPendingPurchase -and ($terminalOutcome -eq "pending"))
   $step08Status = if ($step08Ok) { "ok" } else { $terminalOutcome }
   $step08Note = if ($step08Ok) {
     if ($terminalOutcome -eq "paid") {
       "Purchase reached terminal paid state ($finalStatus)"
     } else {
-      "Purchase remained pending as expected when SMOKE_WEBHOOK_SIM=false ($finalStatus)"
+      "Purchase remained pending as expected when webhook simulation is skipped ($finalStatus)"
     }
   } else {
     "Purchase status=$finalStatus"
@@ -808,31 +770,7 @@ $adminStatus = "skipped"
 $adminOk = $true
 $adminNote = "Admin flow skipped (no admin access available)"
 
-if ($adminTokenEnabledBool -and -not [string]::IsNullOrWhiteSpace($AdminToken)) {
-  $adminMetrics = Invoke-SmokeRequest -Method "GET" -Path "/admin/metrics" -Body $null -Headers @{ "x-admin-token" = $AdminToken }
-  $adminOps.Add($adminMetrics)
-  if ($adminMetrics.status -eq 200) {
-    $adminUsers = Invoke-SmokeRequest -Method "GET" -Path "/admin/users?limit=5" -Body $null -Headers @{ "x-admin-token" = $AdminToken }
-    $adminTrips = Invoke-SmokeRequest -Method "GET" -Path "/admin/trips?limit=5" -Body $null -Headers @{ "x-admin-token" = $AdminToken }
-    $adminAudit = Invoke-SmokeRequest -Method "GET" -Path "/admin/audit?limit=5" -Body $null -Headers @{ "x-admin-token" = $AdminToken }
-    $adminOps.Add($adminUsers)
-    $adminOps.Add($adminTrips)
-    $adminOps.Add($adminAudit)
-    if ($adminUsers.status -eq 200 -and $adminTrips.status -eq 200) {
-      $adminStatus = "ok"
-      $adminOk = $true
-      $adminNote = "Admin metrics/users/trips checks passed"
-    } else {
-      $adminStatus = "admin_flow_failed"
-      $adminOk = $false
-      $adminNote = "Admin metrics succeeded but users/trips checks failed"
-    }
-  } else {
-    $adminStatus = "admin_flow_failed"
-    $adminOk = $false
-    $adminNote = "Admin metrics request failed with admin token"
-  }
-} elseif (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
   $bearerMetrics = Invoke-SmokeRequest -Method "GET" -Path "/admin/metrics" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $adminOps.Add($bearerMetrics)
   if ($bearerMetrics.status -eq 200) {

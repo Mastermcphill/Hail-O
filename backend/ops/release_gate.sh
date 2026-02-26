@@ -30,8 +30,6 @@ Smoke envs:
   SMOKE_PHONE_E164
   SMOKE_OTP_CODE
   SMOKE_WEBHOOK_SIM
-  SMOKE_MINT_PATH
-  ADMIN_TOKEN / ADMIN_TOKEN_ENABLED
 EOF
 }
 
@@ -179,13 +177,10 @@ else
   fi
 fi
 
-ADMIN_TOKEN_VALUE="${ADMIN_TOKEN:-${E2E_ADMIN_TOKEN:-}}"
-ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "${ADMIN_TOKEN_ENABLED:-false}")"
 SMOKE_ACCESS_TOKEN_VALUE="${SMOKE_ACCESS_TOKEN:-${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}}"
 SMOKE_PHONE_VALUE="${SMOKE_PHONE_E164:-${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}}"
 SMOKE_OTP_VALUE="${SMOKE_OTP_CODE:-${TEST_OTP:-${E2E_OTP_CODE:-}}}"
-SMOKE_WEBHOOK_SIM_VALUE="$(normalize_bool "${SMOKE_WEBHOOK_SIM:-${PAYMENTS_TEST_MODE:-false}}")"
-SMOKE_MINT_PATH_VALUE="${SMOKE_MINT_PATH:-/admin/smoke/mint_token}"
+SMOKE_WEBHOOK_SIM_VALUE="${SMOKE_WEBHOOK_SIM:-${PAYMENTS_TEST_MODE:-}}"
 
 TARGET_LABEL="$ENV_NAME"
 SMOKE_BASE="$BASE_URL"
@@ -194,6 +189,10 @@ SMOKE_ENV="$ENV_NAME"
 if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
   SMOKE_BASE="$BASE_STAGING"
   SMOKE_ENV="staging"
+fi
+
+if [[ -z "${SMOKE_ACCESS_TOKEN_VALUE// }" && -z "${SMOKE_PHONE_VALUE// }" ]]; then
+  fail "configure SMOKE_ACCESS_TOKEN (recommended) or SMOKE_PHONE_E164 for staging smoke auth"
 fi
 
 echo "[release-gate] target_env=${ENV_NAME}"
@@ -223,12 +222,9 @@ echo "[release-gate] running smoke_e2e.sh against ${SMOKE_BASE}"
     "${ROOT_DIR}/ops/smoke_e2e.sh"
     "--base=${SMOKE_BASE}"
     "--env=${SMOKE_ENV}"
-    "--admin-token-enabled=${ADMIN_TOKEN_ENABLED_VALUE}"
-    "--smoke-webhook-sim=${SMOKE_WEBHOOK_SIM_VALUE}"
-    "--smoke-mint-path=${SMOKE_MINT_PATH_VALUE}"
   )
-  if [[ -n "${ADMIN_TOKEN_VALUE// }" ]]; then
-    smoke_cmd+=("--admin-token=${ADMIN_TOKEN_VALUE}")
+  if [[ -n "${SMOKE_WEBHOOK_SIM_VALUE// }" ]]; then
+    smoke_cmd+=("--smoke-webhook-sim=$(normalize_bool "${SMOKE_WEBHOOK_SIM_VALUE}")")
   fi
   if [[ -n "${SMOKE_ACCESS_TOKEN_VALUE// }" ]]; then
     smoke_cmd+=("--smoke-access-token=${SMOKE_ACCESS_TOKEN_VALUE}")

@@ -195,13 +195,6 @@ if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
   }
 }
 
-$adminToken = if (-not [string]::IsNullOrWhiteSpace($env:ADMIN_TOKEN)) {
-  $env:ADMIN_TOKEN
-} else {
-  $env:E2E_ADMIN_TOKEN
-}
-$adminTokenEnabled = To-Bool $env:ADMIN_TOKEN_ENABLED
-
 if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_ACCESS_TOKEN)) {
   $smokeAccessToken = $env:SMOKE_ACCESS_TOKEN
 } elseif (-not [string]::IsNullOrWhiteSpace($env:TEST_ACCESS_TOKEN)) {
@@ -228,12 +221,7 @@ $smokeWebhookSim = if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_WEBHOOK_SIM)
 } elseif (-not [string]::IsNullOrWhiteSpace($env:PAYMENTS_TEST_MODE)) {
   $env:PAYMENTS_TEST_MODE
 } else {
-  "false"
-}
-$smokeMintPath = if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_MINT_PATH)) {
-  $env:SMOKE_MINT_PATH
-} else {
-  "/admin/smoke/mint_token"
+  ""
 }
 
 $targetLabel = if ($normalizedEnv) { $normalizedEnv } else { "staging" }
@@ -242,6 +230,10 @@ $smokeEnv = $targetLabel
 if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
   $smokeBase = $StagingBaseUrl
   $smokeEnv = "staging"
+}
+
+if ([string]::IsNullOrWhiteSpace($smokeAccessToken) -and [string]::IsNullOrWhiteSpace($smokePhone)) {
+  Fail("configure SMOKE_ACCESS_TOKEN (recommended) or SMOKE_PHONE_E164 for staging smoke auth")
 }
 
 Write-Host "[release-gate] target_env=$targetLabel"
@@ -269,13 +261,10 @@ $smokeScript = Join-Path $PSScriptRoot "smoke_e2e.ps1"
 Write-Host "[release-gate] running smoke_e2e.ps1 against $smokeBase"
 $smokeArgs = @(
   "-BaseUrl", $smokeBase,
-  "-EnvName", $smokeEnv,
-  "-AdminTokenEnabled", "$adminTokenEnabled",
-  "-SmokeWebhookSim", "$smokeWebhookSim",
-  "-SmokeMintPath", "$smokeMintPath"
+  "-EnvName", $smokeEnv
 )
-if (-not [string]::IsNullOrWhiteSpace($adminToken)) {
-  $smokeArgs += @("-AdminToken", $adminToken)
+if (-not [string]::IsNullOrWhiteSpace($smokeWebhookSim)) {
+  $smokeArgs += @("-SmokeWebhookSim", "$($smokeWebhookSim)")
 }
 if (-not [string]::IsNullOrWhiteSpace($smokeAccessToken)) {
   $smokeArgs += @("-SmokeAccessToken", $smokeAccessToken)

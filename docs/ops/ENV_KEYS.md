@@ -116,14 +116,11 @@ This file is the operational inventory of environment variables used by backend 
 | `BASE_URL` | Optional for smoke (defaulted), required for release gate target | staging, prod | Target base URL for `release_gate.*` / `smoke_e2e.*`; smoke defaults to `https://hail-o-api-staging.onrender.com`. |
 | `BASE_STAGING` | Required for prod gate | prod | Staging URL used when prod gate runs staging smoke before PASS. |
 | `STAGING_BASE_URL` | Optional legacy alias | prod | Backward-compatible alias for `BASE_STAGING`. |
-| `SMOKE_ACCESS_TOKEN` | Optional (preferred) | staging, prod | Pre-provisioned bearer token for smoke auth flow. |
-| `SMOKE_MINT_PATH` | Optional | staging | Admin mint endpoint path used when smoke mints a token via `ADMIN_TOKEN` (default `/admin/smoke/mint_token`). |
-| `SMOKE_PHONE_E164` | Required when using OTP fallback and no token/mint path | staging | Phone used for OTP auth fallback in smoke. |
-| `SMOKE_OTP_CODE` | Optional until OTP requested, then required to continue | staging | OTP code for smoke OTP verification. Missing code exits smoke with status `2` (`NEED_USER_INPUT`). |
+| `SMOKE_ACCESS_TOKEN` | Optional (preferred) | staging | Pre-provisioned bearer token for smoke auth flow (no admin token required). |
+| `SMOKE_PHONE_E164` | Required when `SMOKE_ACCESS_TOKEN` is not set | staging | Phone used for OTP auth fallback in smoke. |
+| `SMOKE_OTP_CODE` | Optional until OTP requested, then required to continue | staging | OTP code for smoke OTP verification. Missing code exits smoke with status `2` and writes `03_auth_need_input.json`. |
 | `SMOKE_WEBHOOK_SIM` | Optional | staging | Enables simulated webhook step in smoke script for non-production environments. |
 | `SMOKE_DRIVER_ID` | Optional | staging | Driver id used for `/dispatch/trips/{id}/assign` attempt in smoke flow. |
-| `ADMIN_TOKEN_ENABLED` | Optional | staging, prod | Enables `ADMIN_TOKEN` emergency access; required for admin-token mint/auth path. |
-| `ADMIN_TOKEN` / `E2E_ADMIN_TOKEN` | Optional | staging, prod | Admin emergency token used by smoke for admin endpoint checks and token mint flow. |
 | `TEST_ACCESS_TOKEN` / `E2E_ACCESS_TOKEN` | Optional legacy aliases | staging, prod | Backward-compatible aliases for `SMOKE_ACCESS_TOKEN`. |
 | `TEST_PHONE_E164` / `E2E_PHONE_E164` | Optional legacy aliases | staging | Backward-compatible aliases for `SMOKE_PHONE_E164`. |
 | `TEST_OTP` / `E2E_OTP_CODE` | Optional legacy aliases | staging | Backward-compatible aliases for `SMOKE_OTP_CODE`. |

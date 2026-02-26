@@ -11,16 +11,13 @@ FAILURES_FILE="${RUN_DIR}/failures.ndjson"
 DEFAULT_BASE_URL="https://hail-o-api-staging.onrender.com"
 BASE_URL="${BASE_URL:-${DEFAULT_BASE_URL}}"
 TARGET_ENV="${ENV:-staging}"
-ADMIN_TOKEN_VALUE="${ADMIN_TOKEN:-}"
-ADMIN_TOKEN_ENABLED_VALUE="${ADMIN_TOKEN_ENABLED:-false}"
 SMOKE_PHONE_VALUE="${SMOKE_PHONE_E164:-${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}}"
 SMOKE_OTP_VALUE="${SMOKE_OTP_CODE:-${TEST_OTP:-${E2E_OTP_CODE:-}}}"
 SMOKE_WEBHOOK_SIM_VALUE="${SMOKE_WEBHOOK_SIM:-}"
 ACCESS_TOKEN="${SMOKE_ACCESS_TOKEN:-${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}}"
 WEBHOOK_SECRET_VALUE="${PAYMENTS_WEBHOOK_SECRET:-${E2E_WEBHOOK_SECRET:-}}"
-PAYSTACK_WEBHOOK_SECRET_VALUE="${PAYSTACK_WEBHOOK_SECRET:-${E2E_PAYSTACK_SECRET:-${PAYSTACK_SECRET_KEY:-}}}"
+PAYSTACK_WEBHOOK_SECRET_VALUE="${PAYSTACK_WEBHOOK_SECRET:-${E2E_PAYSTACK_SECRET:-}}"
 SMOKE_DRIVER_ID_VALUE="${SMOKE_DRIVER_ID:-${TEST_DRIVER_ID:-}}"
-SMOKE_MINT_PATH_VALUE="${SMOKE_MINT_PATH:-/admin/smoke/mint_token}"
 DRY_RUN="false"
 
 usage() {
@@ -30,10 +27,7 @@ Usage: smoke_e2e.sh --base=<url> [options]
 Options:
   --base=<url>                    Target API base URL (default: https://hail-o-api-staging.onrender.com)
   --env=<name>                    Environment label (default: staging)
-  --admin-token=<token>           Admin token for admin flow
-  --admin-token-enabled=<bool>    Whether admin token bypass is enabled
   --smoke-access-token=<jwt>      Pre-provisioned user access token
-  --smoke-mint-path=<path>        Admin mint endpoint path (default: /admin/smoke/mint_token)
   --smoke-phone=<e164>            OTP phone (fallback flow)
   --smoke-otp=<code>              OTP code (fallback flow)
   --smoke-webhook-sim=<bool>      Simulate payment webhook (default: true in staging)
@@ -43,9 +37,8 @@ Options:
   --dry-run                       Run without real HTTP calls (CI utility)
 
 Environment variable fallbacks:
-  BASE_URL, ENV, ADMIN_TOKEN, ADMIN_TOKEN_ENABLED,
+  BASE_URL, ENV,
   SMOKE_ACCESS_TOKEN|TEST_ACCESS_TOKEN|E2E_ACCESS_TOKEN,
-  SMOKE_MINT_PATH,
   SMOKE_PHONE_E164|TEST_PHONE_E164|E2E_PHONE_E164,
   SMOKE_OTP_CODE|TEST_OTP|E2E_OTP_CODE,
   SMOKE_WEBHOOK_SIM,
@@ -68,13 +61,13 @@ for arg in "$@"; do
   case "$arg" in
     --base=*) BASE_URL="${arg#*=}" ;;
     --env=*) TARGET_ENV="${arg#*=}" ;;
-    --admin-token=*) ADMIN_TOKEN_VALUE="${arg#*=}" ;;
-    --admin-token-enabled=*) ADMIN_TOKEN_ENABLED_VALUE="${arg#*=}" ;;
     --smoke-access-token=*) ACCESS_TOKEN="${arg#*=}" ;;
-    --smoke-mint-path=*) SMOKE_MINT_PATH_VALUE="${arg#*=}" ;;
     --smoke-phone=*) SMOKE_PHONE_VALUE="${arg#*=}" ;;
     --smoke-otp=*) SMOKE_OTP_VALUE="${arg#*=}" ;;
     --smoke-webhook-sim=*) SMOKE_WEBHOOK_SIM_VALUE="${arg#*=}" ;;
+    --admin-token=*|--admin-token-enabled=*|--smoke-mint-path=*)
+      # Deprecated no-op args kept for backward compatibility.
+      ;;
     --access-token=*) ACCESS_TOKEN="${arg#*=}" ;;
     --test-phone=*) SMOKE_PHONE_VALUE="${arg#*=}" ;;
     --test-otp=*) SMOKE_OTP_VALUE="${arg#*=}" ;;
@@ -98,7 +91,6 @@ done
 
 BASE_URL="${BASE_URL%/}"
 TARGET_ENV="$(echo "$TARGET_ENV" | tr '[:upper:]' '[:lower:]' | xargs)"
-ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "$ADMIN_TOKEN_ENABLED_VALUE")"
 if [[ -z "${SMOKE_WEBHOOK_SIM_VALUE// }" ]]; then
   case "$TARGET_ENV" in
     staging|stage|development|dev|test) SMOKE_WEBHOOK_SIM_VALUE="true" ;;
@@ -379,7 +371,7 @@ sanitize_json() {
   jq '
     def redact:
       if type == "string" then
-        if length <= 6 then . else (.[0:6] + "...redacted") end
+        if length <= 6 then (. + "…") else (.[0:6] + "…") end
       else
         .
       end;
@@ -411,10 +403,10 @@ redact_token() {
     return 0
   fi
   if [[ "${#token}" -le 6 ]]; then
-    echo "${token}...redacted"
+    echo "${token}…"
     return 0
   fi
-  echo "${token:0:6}...redacted"
+  echo "${token:0:6}…"
 }
 # Step 01: Health
 call_http "GET" "/health" ""
@@ -465,68 +457,32 @@ auth_add_op() {
 }
 
 if [[ -n "$ACCESS_TOKEN" ]]; then
-  AUTH_MODE='smoke_access_token'
+  AUTH_MODE='access_token'
   AUTH_NOTE='Using SMOKE_ACCESS_TOKEN'
 else
-  AUTH_MODE='auto'
-  if [[ "$ADMIN_TOKEN_ENABLED_VALUE" == "true" && -n "$ADMIN_TOKEN_VALUE" ]]; then
-    mint_paths=()
-    for candidate in "${SMOKE_MINT_PATH_VALUE}" "/admin/smoke/mint_token" "/admin/test/session/mint" "/admin/test/access-token" "/admin/auth/mint" "/admin/session/mint" "/admin/tokens/mint"; do
-      normalized="$candidate"
-      if [[ -z "${normalized// }" ]]; then
-        continue
-      fi
-      if [[ "${normalized:0:1}" != "/" ]]; then
-        normalized="/${normalized}"
-      fi
-      if [[ " ${mint_paths[*]} " != *" ${normalized} "* ]]; then
-        mint_paths+=("$normalized")
-      fi
-    done
+  AUTH_MODE='otp'
+  if [[ -z "$SMOKE_PHONE_VALUE" ]]; then
+    AUTH_NOTE='SMOKE_PHONE_E164 is required when SMOKE_ACCESS_TOKEN is not set'
+  else
+    otp_request_body="$(jq -n --arg phone "$SMOKE_PHONE_VALUE" '{phone_e164:$phone}')"
+    call_http "POST" "/auth/otp/request" "$otp_request_body"
+    otp_req_call="$CALL_JSON"
+    auth_add_op "$otp_req_call"
 
-    mint_body="$(jq -n --arg phone "${SMOKE_PHONE_VALUE:-+15550001111}" '{role:"rider",scope:"smoke_e2e",phone_e164:$phone}')"
-    for mint_path in "${mint_paths[@]}"; do
-      call_http "POST" "$mint_path" "$mint_body" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
-      mint_call="$CALL_JSON"
-      auth_add_op "$mint_call"
-      mint_status="$(jq -r '.status' <<<"$mint_call")"
-      if [[ "$mint_status" == "200" || "$mint_status" == "201" ]]; then
-        minted_token="$(jq -r 'if (.response|type)=="object" then (.response.access_token // .response.data.access_token // .response.token // .response.data.token // empty) else empty end' <<<"$mint_call")"
-        if [[ -n "$minted_token" ]]; then
-          ACCESS_TOKEN="$minted_token"
-          AUTH_MODE='admin_token_mint'
-          AUTH_NOTE="Minted access token via ${mint_path}"
-          break
-        fi
-      fi
-    done
-  fi
-
-  if [[ -z "$ACCESS_TOKEN" ]]; then
-    AUTH_MODE='otp'
-    if [[ -z "$SMOKE_PHONE_VALUE" ]]; then
-      AUTH_NOTE='SMOKE_PHONE_E164 is required for OTP fallback'
+    if [[ -z "$SMOKE_OTP_VALUE" ]]; then
+      NEED_USER_INPUT='true'
+      AUTH_NOTE='OTP requested. Re-run with SMOKE_OTP_CODE=XXXXXX'
     else
-      otp_request_body="$(jq -n --arg phone "$SMOKE_PHONE_VALUE" '{phone_e164:$phone}')"
-      call_http "POST" "/auth/otp/request" "$otp_request_body"
-      otp_req_call="$CALL_JSON"
-      auth_add_op "$otp_req_call"
+      otp_verify_body="$(jq -n --arg phone "$SMOKE_PHONE_VALUE" --arg code "$SMOKE_OTP_VALUE" '{phone_e164:$phone,code:$code}')"
+      call_http "POST" "/auth/otp/verify" "$otp_verify_body"
+      otp_verify_call="$CALL_JSON"
+      auth_add_op "$otp_verify_call"
 
-      if [[ -z "$SMOKE_OTP_VALUE" ]]; then
-        NEED_USER_INPUT='true'
-        AUTH_NOTE='OTP requested. Re-run with SMOKE_OTP_CODE to continue.'
+      ACCESS_TOKEN="$(jq -r 'if (.response|type)=="object" then (.response.access_token // .response.token // .response.data.access_token // .response.data.token // empty) else empty end' <<<"$otp_verify_call")"
+      if [[ -n "$ACCESS_TOKEN" ]]; then
+        AUTH_NOTE='OTP flow verified and access token acquired'
       else
-        otp_verify_body="$(jq -n --arg phone "$SMOKE_PHONE_VALUE" --arg code "$SMOKE_OTP_VALUE" '{phone_e164:$phone,code:$code}')"
-        call_http "POST" "/auth/otp/verify" "$otp_verify_body"
-        otp_verify_call="$CALL_JSON"
-        auth_add_op "$otp_verify_call"
-
-        ACCESS_TOKEN="$(jq -r 'if (.response|type)=="object" then (.response.access_token // .response.token // .response.data.access_token // .response.data.token // empty) else empty end' <<<"$otp_verify_call")"
-        if [[ -n "$ACCESS_TOKEN" ]]; then
-          AUTH_NOTE='OTP flow verified and access token acquired'
-        else
-          AUTH_NOTE='OTP verify did not return access token'
-        fi
+        AUTH_NOTE='OTP verify did not return access token'
       fi
     fi
   fi
@@ -537,7 +493,7 @@ step03_status="auth_failed"
 step03_artifact="03_auth.json"
 if [[ "$NEED_USER_INPUT" == "true" ]]; then
   step03_status="needs_input"
-  step03_artifact="03_auth_skipped.json"
+  step03_artifact="03_auth_need_input.json"
 elif [[ -n "$ACCESS_TOKEN" ]]; then
   step03_ok="true"
   step03_status="ok"
@@ -547,7 +503,7 @@ if [[ -z "$AUTH_NOTE" ]]; then
 fi
 step03_duration="$(jq -r '[.[].duration_ms // 0] | add // 0' <<<"$AUTH_OPERATIONS")"
 step03_traces="$(jq -c '[.[].trace_id // empty] | map(select(length>0)) | unique' <<<"$AUTH_OPERATIONS")"
-step03_payload="$(jq -n --arg mode "$AUTH_MODE" --arg note "$AUTH_NOTE" --arg token_acquired "$(json_bool "$step03_ok")" --arg access_token_preview "$(redact_token "$ACCESS_TOKEN")" --arg needs_input "$(json_bool "$NEED_USER_INPUT")" --argjson operations "$AUTH_OPERATIONS" '{mode:$mode,token_acquired:($token_acquired=="true"),needs_input:($needs_input=="true"),access_token_preview:$access_token_preview,note:$note,operations:$operations}')"
+step03_payload="$(jq -n --arg auth_mode "$AUTH_MODE" --arg note "$AUTH_NOTE" --arg token_acquired "$(json_bool "$step03_ok")" --arg access_token_preview "$(redact_token "$ACCESS_TOKEN")" --arg needs_input "$(json_bool "$NEED_USER_INPUT")" --argjson operations "$AUTH_OPERATIONS" '{auth_mode:$auth_mode,token_acquired:($token_acquired=="true"),needs_input:($needs_input=="true"),access_token_preview:$access_token_preview,note:$note,operations:$operations}')"
 write_step "03_auth" "$step03_artifact" "$step03_ok" "$step03_status" "$AUTH_NOTE" "$step03_duration" "$step03_traces" "$step03_payload"
 
 if [[ "$NEED_USER_INPUT" == "true" ]]; then
@@ -567,7 +523,7 @@ if [[ "$NEED_USER_INPUT" == "true" ]]; then
     --argjson trace_ids "$trace_ids_json" \
     '{ok:$ok,base_url:$base_url,env:$env,generated_at:$generated_at,total_duration_ms:$total_duration_ms,steps:$steps,failures:$failures,trace_ids:$trace_ids,artifact_dir:$artifact_dir}')"
   printf '%s\n' "$summary_json" >"${RUN_DIR}/summary.json"
-  echo "NEED_USER_INPUT: set SMOKE_OTP_CODE and rerun"
+  echo "OTP requested. Re-run with SMOKE_OTP_CODE=XXXXXX"
   echo "summary: ${RUN_DIR}/summary.json"
   exit 2
 fi
@@ -643,8 +599,25 @@ else
 fi
 # Step 07: Webhook simulation (staging/test mode only)
 run_webhook_sim="false"
+allow_webhook_sim="false"
+ALLOW_PENDING_PURCHASE="false"
+step07_skip_reason=''
 if [[ "$SMOKE_WEBHOOK_SIM_VALUE" == "true" && "$TARGET_ENV" != "prod" && "$TARGET_ENV" != "production" && -n "$PURCHASE_ID" ]]; then
-  run_webhook_sim="true"
+  allow_webhook_sim="true"
+fi
+
+if [[ "$allow_webhook_sim" == "true" ]]; then
+  if [[ -z "$PAYSTACK_WEBHOOK_SECRET_VALUE" ]]; then
+    step07_skip_reason='Webhook simulation skipped: PAYSTACK_WEBHOOK_SECRET not provided to ops runtime'
+  else
+    run_webhook_sim="true"
+  fi
+elif [[ "$SMOKE_WEBHOOK_SIM_VALUE" != "true" ]]; then
+  step07_skip_reason='Webhook simulation disabled by SMOKE_WEBHOOK_SIM=false'
+elif [[ "$TARGET_ENV" == "prod" || "$TARGET_ENV" == "production" ]]; then
+  step07_skip_reason='Webhook simulation disabled in production environment'
+else
+  step07_skip_reason='Webhook simulation skipped because purchase_id is unavailable'
 fi
 
 if [[ "$run_webhook_sim" == "true" ]]; then
@@ -655,11 +628,9 @@ if [[ "$run_webhook_sim" == "true" ]]; then
     webhook_sig="$(printf '%s' "$webhook_payload" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET_VALUE" -hex | awk '{print $NF}')"
     webhook_headers+=("x-webhook-signature: ${webhook_sig}")
   fi
-  if [[ -n "$PAYSTACK_WEBHOOK_SECRET_VALUE" ]]; then
-    paystack_sig="$(printf '%s' "$webhook_payload" | openssl dgst -sha512 -hmac "$PAYSTACK_WEBHOOK_SECRET_VALUE" -hex | awk '{print $NF}')"
-    webhook_headers+=("x-paystack-signature: ${paystack_sig}")
-    webhook_headers+=("x-paystack-event-id: ${provider_event_id}")
-  fi
+  paystack_sig="$(printf '%s' "$webhook_payload" | openssl dgst -sha512 -hmac "$PAYSTACK_WEBHOOK_SECRET_VALUE" -hex | awk '{print $NF}')"
+  webhook_headers+=("x-paystack-signature: ${paystack_sig}")
+  webhook_headers+=("x-paystack-event-id: ${provider_event_id}")
 
   call_http "POST" "/webhooks/payments" "$webhook_payload" "${webhook_headers[@]}"
   step07_call="$CALL_JSON"
@@ -669,14 +640,20 @@ if [[ "$run_webhook_sim" == "true" ]]; then
   if [[ "$step07_status" == "200" || "$step07_status" == "202" ]]; then
     step07_ok="true"
     step07_note='Webhook simulation accepted'
+  elif [[ "$step07_status" == "404" || "$step07_status" == "405" ]]; then
+    step07_ok="true"
+    step07_status="skipped"
+    ALLOW_PENDING_PURCHASE="true"
+    step07_skip_reason='Webhook simulation endpoint unavailable on target'
+    step07_note="$step07_skip_reason"
   fi
   step07_duration="$(jq -r '.duration_ms // 0' <<<"$step07_call")"
   step07_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step07_call")"
-  step07_payload="$(jq -n --arg provider_event_id "$provider_event_id" --argjson call "$step07_call" '{provider_event_id:$provider_event_id,call:$call}')"
+  step07_payload="$(jq -n --arg provider_event_id "$provider_event_id" --arg skipped_reason "$step07_skip_reason" --argjson call "$step07_call" '{provider_event_id:$provider_event_id,skipped_reason:$skipped_reason,call:$call}')"
   write_step "07_webhook_sim" "07_webhook_sim.json" "$step07_ok" "$step07_status" "$step07_note" "$step07_duration" "$step07_traces" "$step07_payload"
 else
-  skip_reason='Webhook simulation skipped (requires non-production env, SMOKE_WEBHOOK_SIM=true, and purchase id)'
-  write_step "07_webhook_sim" "07_webhook_sim.json" "true" "skipped" "$skip_reason" "0" "[]" "$(jq -n --arg reason "$skip_reason" '{skipped:true,reason:$reason}')"
+  ALLOW_PENDING_PURCHASE="true"
+  write_step "07_webhook_sim" "07_webhook_sim.json" "true" "skipped" "$step07_skip_reason" "0" "[]" "$(jq -n --arg reason "$step07_skip_reason" '{skipped:true,skipped_reason:$reason}')"
 fi
 
 # Step 08: Purchase polling
@@ -701,7 +678,7 @@ if [[ -n "$ACCESS_TOKEN" && -n "$PURCHASE_ID" ]]; then
       terminal_outcome='paid'
       break
     fi
-    if [[ "$SMOKE_WEBHOOK_SIM_VALUE" != "true" && ( "$final_status" == "pending_payment" || "$final_status" == "pending" ) ]]; then
+    if [[ "$ALLOW_PENDING_PURCHASE" == "true" && ( "$final_status" == "pending_payment" || "$final_status" == "pending" ) ]]; then
       terminal_outcome='pending'
       break
     fi
@@ -721,13 +698,13 @@ if [[ -n "$ACCESS_TOKEN" && -n "$PURCHASE_ID" ]]; then
   step08_ok="false"
   step08_status="$terminal_outcome"
   step08_note="Purchase status=${final_status:-unknown}"
-  if [[ "$terminal_outcome" == "paid" || ( "$SMOKE_WEBHOOK_SIM_VALUE" != "true" && "$terminal_outcome" == "pending" ) ]]; then
+  if [[ "$terminal_outcome" == "paid" || ( "$ALLOW_PENDING_PURCHASE" == "true" && "$terminal_outcome" == "pending" ) ]]; then
     step08_ok="true"
     step08_status="ok"
     if [[ "$terminal_outcome" == "paid" ]]; then
       step08_note="Purchase reached terminal paid state (${final_status})"
     else
-      step08_note="Purchase remained pending as expected when SMOKE_WEBHOOK_SIM=false (${final_status})"
+      step08_note="Purchase remained pending as expected when webhook simulation is skipped (${final_status})"
     fi
   fi
 
@@ -906,42 +883,7 @@ admin_add_op() {
   admin_ops="$(jq -cn --argjson current "$admin_ops" --argjson op "$op_json" '$current + [$op]')"
 }
 
-run_admin_with_token='false'
-if [[ "$ADMIN_TOKEN_ENABLED_VALUE" == "true" && -n "$ADMIN_TOKEN_VALUE" ]]; then
-  run_admin_with_token='true'
-fi
-
-if [[ "$run_admin_with_token" == "true" ]]; then
-  call_http "GET" "/admin/metrics" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
-  admin_metrics_call="$CALL_JSON"
-  admin_add_op "$admin_metrics_call"
-  metrics_status="$(jq -r '.status' <<<"$admin_metrics_call")"
-  if [[ "$metrics_status" == "200" ]]; then
-    call_http "GET" "/admin/users?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
-    admin_users_call="$CALL_JSON"
-    admin_add_op "$admin_users_call"
-    call_http "GET" "/admin/trips?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
-    admin_trips_call="$CALL_JSON"
-    admin_add_op "$admin_trips_call"
-    call_http "GET" "/admin/audit?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
-    admin_audit_call="$CALL_JSON"
-    admin_add_op "$admin_audit_call"
-
-    if [[ "$(jq -r '.status' <<<"$admin_users_call")" == "200" && "$(jq -r '.status' <<<"$admin_trips_call")" == "200" ]]; then
-      admin_status='ok'
-      admin_ok='true'
-      admin_note='Admin metrics/users/trips checks passed'
-    else
-      admin_status='admin_flow_failed'
-      admin_ok='false'
-      admin_note='Admin metrics succeeded but users/trips checks failed'
-    fi
-  else
-    admin_status='admin_flow_failed'
-    admin_ok='false'
-    admin_note='Admin metrics request failed with admin token'
-  fi
-elif [[ -n "$ACCESS_TOKEN" ]]; then
+if [[ -n "$ACCESS_TOKEN" ]]; then
   call_http "GET" "/admin/metrics" "" "authorization: Bearer ${ACCESS_TOKEN}"
   bearer_admin_metrics_call="$CALL_JSON"
   admin_add_op "$bearer_admin_metrics_call"

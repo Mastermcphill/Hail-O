@@ -48,7 +48,7 @@ Optional migration-head assertion:
 - Artifact contract:
   - `01_health.json`
   - `02_ready.json`
-  - `03_auth.json` (or `03_auth_skipped.json` when OTP input is required)
+  - `03_auth.json` (or `03_auth_need_input.json` when OTP input is required)
   - `04_offers.json`
   - `05_purchase_create.json`
   - `06_intent_create.json`
@@ -63,14 +63,12 @@ Optional migration-head assertion:
 ## Run Smoke Locally
 - Bash:
   - `bash backend/ops/smoke_e2e.sh --env=staging --smoke-access-token=<jwt>`
-  - `bash backend/ops/smoke_e2e.sh --env=staging --admin-token-enabled=true --admin-token=<token> --smoke-mint-path=/admin/smoke/mint_token`
   - `bash backend/ops/smoke_e2e.sh --env=staging --smoke-phone=<e164> --smoke-otp=<code>`
 - PowerShell:
   - `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -EnvName staging -SmokeAccessToken <jwt>`
-  - `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -EnvName staging -AdminTokenEnabled true -AdminToken <token> -SmokeMintPath /admin/smoke/mint_token`
   - `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -EnvName staging -SmokePhoneE164 <e164> -SmokeOtpCode <code>`
 - Base URL defaults to `https://hail-o-api-staging.onrender.com` when `BASE_URL` / `-BaseUrl` is not set.
-- If OTP code is omitted after request, smoke exits with code `2` and writes `03_auth_skipped.json`.
+- If OTP code is omitted after request, smoke exits with code `2` and writes `03_auth_need_input.json`.
 - Dry-run mode (CI helper):
   - Bash: `bash backend/ops/smoke_e2e.sh --base=https://example.invalid --dry-run`
   - PowerShell: `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -BaseUrl https://example.invalid -DryRun`
@@ -81,21 +79,19 @@ Optional migration-head assertion:
   - production: `bash backend/ops/release_gate.sh --env=prod --base=https://<prod> --base-staging=https://<staging>`
 - Ensure one auth path is configured for smoke:
   - `SMOKE_ACCESS_TOKEN` (preferred), or
-  - `ADMIN_TOKEN_ENABLED=true` + `ADMIN_TOKEN` + `SMOKE_MINT_PATH=/admin/smoke/mint_token`, or
   - `SMOKE_PHONE_E164` + `SMOKE_OTP_CODE` (staging/dev OTP path)
-- Mint endpoint guidance:
-  - `POST /admin/smoke/mint_token` is staging/non-production only.
-  - It requires `ADMIN_TOKEN_ENABLED=true` and a valid `ADMIN_TOKEN`.
-  - It is rejected in production by design.
+- Recommended staging setup:
+  - Store `SMOKE_ACCESS_TOKEN` as a staging secret on `hail-o-api-staging` so release-gate smoke runs non-interactively.
 - Optional:
   - `SMOKE_WEBHOOK_SIM=true` enables simulated webhook step in non-production smoke.
+  - `PAYSTACK_WEBHOOK_SECRET` in the ops runtime enables signed webhook simulation. Without it, webhook simulation is skipped and polling remains pending-safe.
 
 ## Required Runtime Env
 See `docs/ops/ENV_KEYS.md` for full inventory. At minimum, release gate expects:
 - Staging:
   - `JWT_SECRET`
   - `PAYMENTS_PROVIDER` or `PAYMENT_PROVIDER`
-  - For smoke auth: `SMOKE_ACCESS_TOKEN`, or (`SMOKE_PHONE_E164` + `SMOKE_OTP_CODE`), or admin mint flow (`ADMIN_TOKEN_ENABLED=true`, `ADMIN_TOKEN`, optional `SMOKE_MINT_PATH`)
+  - For smoke auth: `SMOKE_ACCESS_TOKEN`, or (`SMOKE_PHONE_E164` + `SMOKE_OTP_CODE`)
 - Production (stricter):
   - staging requirements, plus
   - `OTP_PROVIDER`
