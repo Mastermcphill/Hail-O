@@ -49,10 +49,13 @@ This file is the operational inventory of environment variables used by backend 
 
 | Key | Required | Environments | Purpose |
 | --- | --- | --- | --- |
-| `PAYMENT_PROVIDER` | Yes | dev, staging, prod | Payment provider switch (`paystack`, `stripe`, `manual`). |
-| `PAYSTACK_SECRET_KEY` | Required when `PAYMENT_PROVIDER=paystack` | staging, prod | Server-to-Paystack API key. |
-| `STRIPE_WEBHOOK_SECRET` | Required when `PAYMENT_PROVIDER=stripe` | staging, prod | Stripe webhook secret. |
+| `PAYMENTS_PROVIDER` / `PAYMENT_PROVIDER` | Yes | dev, staging, prod | Payment provider switch (`paystack`, `stripe`, `manual`). |
+| `PAYSTACK_SECRET_KEY` | Required when provider is `paystack` | staging, prod | Server-to-Paystack API key. |
+| `PAYSTACK_WEBHOOK_SECRET` | Required when provider is `paystack` (strictly required in prod) | staging, prod | Paystack webhook signature secret. |
+| `STRIPE_WEBHOOK_SECRET` | Required when provider is `stripe` | staging, prod | Stripe webhook secret. |
 | `PAYMENTS_WEBHOOK_SECRET` | Required in prod | prod (recommended staging) | Incoming `/webhooks/payments` HMAC secret. |
+| `PAYSTACK_API_BASE_URL` | Optional | staging, prod | Paystack API base URL override. |
+| `PAYSTACK_CALLBACK_URL` | Optional | staging, prod | Redirect/callback URL for initialized transactions. |
 
 ## Dispatch Pricing
 
@@ -97,6 +100,21 @@ This file is the operational inventory of environment variables used by backend 
 | `BUILD_VERSION` | Optional | dev, staging, prod | Build/version metadata. |
 | `STARTUP_RUNTIME_MARKER` | Optional | dev, staging, prod | Runtime marker for diagnostics. |
 | `DART_SDK_VERSION` | Optional | dev, staging, prod | Runtime metadata. |
+
+## Release Gate / E2E Smoke
+
+| Key | Required | Environments | Purpose |
+| --- | --- | --- | --- |
+| `BASE_URL` | Yes for gate execution | staging, prod | Target base URL for `release_gate.*` / `smoke_e2e.*`. |
+| `STAGING_BASE_URL` | Required for prod gate | prod | Staging URL used when prod gate runs staging smoke. |
+| `E2E_ADMIN_TOKEN` / `ADMIN_TOKEN` | Required for full smoke | staging, prod | Admin access token used for admin flow checks. |
+| `E2E_ACCESS_TOKEN` | Optional | staging, prod | Pre-provisioned bearer token for smoke auth flow. |
+| `E2E_PHONE_E164` | Required when `E2E_ACCESS_TOKEN` is unset | staging | Phone used for OTP auth path in smoke. |
+| `E2E_OTP_CODE` | Required when `E2E_ACCESS_TOKEN` is unset | staging | OTP code used for smoke OTP verification. |
+| `E2E_WEBHOOK_SECRET` | Optional | staging | Override webhook HMAC secret for smoke simulation. |
+| `E2E_PAYSTACK_SECRET` | Optional | staging | Override Paystack HMAC secret for smoke simulation. |
+| `REQUIRED_MIGRATION_HEAD` | Optional | staging, prod | Hard assertion for migration head in release gate. |
+| `RELEASE_GATE_REQUIRE_PARITY` | Optional | prod | If true, fail when staging/target commits differ. |
 
 ## Security Notes
 - Never print secrets (`JWT_SECRET`, provider keys, webhook secrets, `ADMIN_TOKEN`) in logs, artifacts, or API responses.
