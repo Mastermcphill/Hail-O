@@ -157,6 +157,131 @@ void main() {
     expect(body['ok'], isTrue);
   });
 
+  test('non-admin gets 403 for /admin/payments/reconcile', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final riderToken = await _registerAndLogin(
+      handler,
+      email: 'admin.reconcile.rider@example.com',
+      role: 'rider',
+      registerKey: 'admin-reconcile-rider-register',
+    );
+
+    final response = await _request(
+      handler,
+      method: 'GET',
+      path: '/admin/payments/reconcile',
+      token: riderToken,
+    );
+    expect(response.statusCode, 403);
+    final body = await _decodeBody(response);
+    expect(body['error_code'], 'ADMIN_ONLY');
+    expect((body['trace_id'] as String?)?.isNotEmpty ?? false, isTrue);
+  });
+
+  test('admin payments reconcile updates stale pending intents', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    await _preparePaymentReconcileTables(db);
+
+    const purchaseId = 'purchase-reconcile-1';
+    const intentId = 'intent-reconcile-1';
+    final oldIso = DateTime.now()
+        .toUtc()
+        .subtract(const Duration(hours: 2))
+        .toIso8601String();
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+
+    await db.insert('marketplace_purchases', <String, Object?>{
+      'id': purchaseId,
+      'status': 'pending_payment',
+    });
+    await db.insert('payment_intents', <String, Object?>{
+      'id': intentId,
+      'purchase_id': purchaseId,
+      'provider': 'manual',
+      'status': 'pending',
+      'provider_ref': 'ref-reconcile-1',
+      'created_at': oldIso,
+      'updated_at': oldIso,
+    });
+    await db.insert('marketplace_webhook_events', <String, Object?>{
+      'id': 'evt-reconcile-1',
+      'purchase_id': purchaseId,
+      'event_type': 'charge.success',
+      'signature_valid': 1,
+      'created_at': nowIso,
+    });
+
+    final adminJwt = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'admin-user-1', role: 'admin');
+    final response = await _request(
+      handler,
+      method: 'GET',
+      path: '/admin/payments/reconcile?min_age_minutes=0&limit=5',
+      token: adminJwt,
+    );
+    expect(response.statusCode, 200);
+
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+    final data = Map<String, Object?>.from(body['data'] as Map);
+    expect((data['scanned'] as num?)?.toInt() ?? 0, 1);
+    expect((data['updated'] as num?)?.toInt() ?? 0, 1);
+    final intents = (data['intents'] as List<dynamic>? ?? const <dynamic>[])
+        .map((entry) => Map<String, Object?>.from(entry as Map))
+        .toList(growable: false);
+    expect(intents, hasLength(1));
+    expect(intents.first['intent_id'], intentId);
+    expect(intents.first['to_status'], 'succeeded');
+    expect(intents.first['reason'], 'webhook_event');
+
+    final intentRows = await db.query(
+      'payment_intents',
+      columns: const <String>['status'],
+      where: 'id = ?',
+      whereArgs: const <Object>[intentId],
+      limit: 1,
+    );
+    expect(intentRows, hasLength(1));
+    expect(intentRows.first['status'], 'succeeded');
+
+    final auditRows = await db.query(
+      'audit_logs',
+      where: 'action = ?',
+      whereArgs: const <Object>['admin.payments.reconcile'],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    expect(auditRows, isNotEmpty);
+    expect(auditRows.first['actor_type'], 'user');
+    expect(auditRows.first['actor_user_id'], 'admin-user-1');
+  });
+
+  test('admin payments reconcile validates since query', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+
+    final adminJwt = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'admin-user-1', role: 'admin');
+    final response = await _request(
+      handler,
+      method: 'GET',
+      path: '/admin/payments/reconcile?since=not-a-date',
+      token: adminJwt,
+    );
+    expect(response.statusCode, 400);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isFalse);
+    expect(body['error_code'], 'VALIDATION_ERROR');
+    expect((body['trace_id'] as String?)?.isNotEmpty ?? false, isTrue);
+  });
+
   test(
     'disabled user is denied protected routes and enable restores access',
     () async {
@@ -432,4 +557,37 @@ Future<void> _waitForAuditAction(
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
   fail('Audit action $action for user $targetUserId was not written');
+}
+
+Future<void> _preparePaymentReconcileTables(Database db) async {
+  await db.execute('DROP TABLE IF EXISTS marketplace_webhook_events');
+  await db.execute('DROP TABLE IF EXISTS payment_intents');
+  await db.execute('DROP TABLE IF EXISTS marketplace_purchases');
+
+  await db.execute('''
+    CREATE TABLE marketplace_purchases(
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL
+    )
+  ''');
+  await db.execute('''
+    CREATE TABLE payment_intents(
+      id TEXT PRIMARY KEY,
+      purchase_id TEXT,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_ref TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  ''');
+  await db.execute('''
+    CREATE TABLE marketplace_webhook_events(
+      id TEXT PRIMARY KEY,
+      purchase_id TEXT,
+      event_type TEXT NOT NULL,
+      signature_valid INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )
+  ''');
 }

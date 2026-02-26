@@ -210,6 +210,8 @@ Handler buildApiRouter({
     reconciliationService: reconciliationService,
     revenueService: revenueService,
     auditLogStore: auditLogStore,
+    paystackSecretKey: (env['PAYSTACK_SECRET_KEY'] ?? '').trim(),
+    paystackApiBaseUrl: (env['PAYSTACK_API_BASE_URL'] ?? '').trim(),
   );
   final adminUsersController = authService == null
       ? null

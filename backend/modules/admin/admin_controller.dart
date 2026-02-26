@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:sqflite_common/sqlite_api.dart';
@@ -30,6 +31,10 @@ class AdminController {
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
     AuditLogStore? auditLogStore,
+    String paystackSecretKey = '',
+    String paystackApiBaseUrl = 'https://api.paystack.co',
+    http.Client? httpClient,
+    Duration paystackVerifyTimeout = const Duration(seconds: 8),
   }) : _db = db,
        _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
@@ -40,7 +45,11 @@ class AdminController {
        _reconciliationService = reconciliationService,
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger(),
-       _auditLogStore = auditLogStore ?? AuditLogStore(sqliteDb: db);
+       _auditLogStore = auditLogStore ?? AuditLogStore(sqliteDb: db),
+       _paystackSecretKey = paystackSecretKey.trim(),
+       _paystackApiBaseUrl = _normalizeApiBaseUrl(paystackApiBaseUrl),
+       _httpClient = httpClient ?? http.Client(),
+       _paystackVerifyTimeout = paystackVerifyTimeout;
 
   final Database? _db;
   final WalletReversalService? _walletReversalService;
@@ -51,6 +60,10 @@ class AdminController {
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
   final AuditLogStore _auditLogStore;
+  final String _paystackSecretKey;
+  final String _paystackApiBaseUrl;
+  final http.Client _httpClient;
+  final Duration _paystackVerifyTimeout;
 
   static const Set<String> _tripStatuses = <String>{
     'created',
@@ -67,6 +80,7 @@ class AdminController {
     final router = Router();
     router.get('/health', _adminHealth);
     router.get('/metrics', _adminMetrics);
+    router.get('/payments/reconcile', _reconcilePaymentIntents);
     router.get('/users', _listUsers);
     router.post('/users/<userId>/disable', _disableUser);
     router.post('/users/<userId>/enable', _enableUser);
@@ -232,6 +246,335 @@ class AdminController {
       },
       'trace_id': request.requestContext.traceId,
     });
+  }
+
+  Future<Response> _reconcilePaymentIntents(Request request) async {
+    _requireAdmin(request);
+    final db = _db;
+    if (db == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Payment reconciliation is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+
+    final sinceRaw = (request.url.queryParameters['since'] ?? '').trim();
+    final since = _parseDateTimeOrNull(sinceRaw);
+    if (sinceRaw.isNotEmpty && since == null) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'since must be an ISO-8601 datetime',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+
+    final minAgeMinutesRaw =
+        (request.url.queryParameters['min_age_minutes'] ?? '15').trim();
+    final minAgeMinutes = int.tryParse(minAgeMinutesRaw);
+    if (minAgeMinutes == null || minAgeMinutes < 0 || minAgeMinutes > 10080) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'error_code': 'VALIDATION_ERROR',
+        'message': 'min_age_minutes must be between 0 and 10080',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final verifyRemote =
+        (request.url.queryParameters['verify_remote'] ?? 'false')
+            .trim()
+            .toLowerCase() ==
+        'true';
+    final limit = _parseLimit(request.url.queryParameters['limit']);
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final cutoffIso = DateTime.now()
+        .toUtc()
+        .subtract(Duration(minutes: minAgeMinutes))
+        .toIso8601String();
+    final hasUpdatedAtColumn = await _columnExists(
+      db,
+      'payment_intents',
+      'updated_at',
+    );
+
+    await _auditLogStore.recordFromRequest(
+      request,
+      action: 'admin.payments.reconcile',
+      resourceType: 'admin_endpoint',
+      resourceId: _auditResourceId(request),
+      metadata: <String, Object?>{
+        if (since != null) 'since': since.toIso8601String(),
+        'min_age_minutes': minAgeMinutes,
+        'verify_remote': verifyRemote,
+        'limit': limit,
+      },
+    );
+
+    if (!await _tableExists(db, 'payment_intents')) {
+      return jsonResponse(200, <String, Object?>{
+        'ok': true,
+        'trace_id': request.requestContext.traceId,
+        'data': <String, Object?>{
+          'scanned': 0,
+          'updated': 0,
+          'intents': const <Map<String, Object?>>[],
+        },
+      });
+    }
+
+    final whereParts = <String>[
+      'LOWER(status) IN (?, ?, ?)',
+      'created_at <= ?',
+    ];
+    final whereArgs = <Object>[
+      'pending',
+      'requires_action',
+      'processing',
+      cutoffIso,
+    ];
+    if (since != null) {
+      whereParts.add('created_at >= ?');
+      whereArgs.add(since.toIso8601String());
+    }
+    final hasProviderRefColumn = await _columnExists(
+      db,
+      'payment_intents',
+      'provider_ref',
+    );
+    final rows = await db.query(
+      'payment_intents',
+      columns: <String>[
+        'id',
+        'purchase_id',
+        'provider',
+        'status',
+        if (hasProviderRefColumn) 'provider_ref',
+        'created_at',
+      ],
+      where: whereParts.join(' AND '),
+      whereArgs: whereArgs,
+      orderBy: 'created_at ASC',
+      limit: limit,
+    );
+
+    final updates = <Map<String, Object?>>[];
+    for (final row in rows) {
+      final mapped = Map<String, Object?>.from(row);
+      final intentId = (mapped['id'] as String?)?.trim() ?? '';
+      final purchaseId = (mapped['purchase_id'] as String?)?.trim() ?? '';
+      final provider =
+          (mapped['provider'] as String?)?.trim().toLowerCase() ?? '';
+      final currentStatus =
+          (mapped['status'] as String?)?.trim().toLowerCase() ?? '';
+      final providerRef = (mapped['provider_ref'] as String?)?.trim() ?? '';
+      if (intentId.isEmpty || currentStatus.isEmpty) {
+        continue;
+      }
+
+      final decision = await _resolvePaymentIntentDecision(
+        db: db,
+        purchaseId: purchaseId,
+        provider: provider,
+        providerRef: providerRef,
+        verifyRemote: verifyRemote,
+      );
+      if (decision == null || decision.status == currentStatus) {
+        continue;
+      }
+
+      final updatePayload = <String, Object?>{'status': decision.status};
+      if (hasUpdatedAtColumn) {
+        updatePayload['updated_at'] = nowIso;
+      }
+      final changed = await db.update(
+        'payment_intents',
+        updatePayload,
+        where: 'id = ?',
+        whereArgs: <Object>[intentId],
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+      if (changed <= 0) {
+        continue;
+      }
+      updates.add(<String, Object?>{
+        'intent_id': intentId,
+        'purchase_id': purchaseId,
+        'provider': provider,
+        'from_status': currentStatus,
+        'to_status': decision.status,
+        'reason': decision.reason,
+      });
+    }
+
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{
+        if (since != null) 'since': since.toIso8601String(),
+        'min_age_minutes': minAgeMinutes,
+        'verify_remote': verifyRemote,
+        'scanned': rows.length,
+        'updated': updates.length,
+        'intents': updates,
+      },
+    });
+  }
+
+  Future<_PaymentIntentDecision?> _resolvePaymentIntentDecision({
+    required Database db,
+    required String purchaseId,
+    required String provider,
+    required String providerRef,
+    required bool verifyRemote,
+  }) async {
+    final hasMarketplaceWebhookTable =
+        purchaseId.isNotEmpty &&
+        await _tableExists(db, 'marketplace_webhook_events') &&
+        await _columnExists(db, 'marketplace_webhook_events', 'purchase_id') &&
+        await _columnExists(db, 'marketplace_webhook_events', 'event_type') &&
+        await _columnExists(
+          db,
+          'marketplace_webhook_events',
+          'signature_valid',
+        );
+    if (hasMarketplaceWebhookTable) {
+      final webhookRows = await db.query(
+        'marketplace_webhook_events',
+        columns: const <String>['event_type', 'signature_valid'],
+        where: 'purchase_id = ?',
+        whereArgs: <Object>[purchaseId],
+        orderBy: 'created_at DESC',
+        limit: 20,
+      );
+      for (final webhookRow in webhookRows) {
+        final signatureValid = webhookRow['signature_valid'];
+        final isValid = signatureValid == true || signatureValid == 1;
+        if (!isValid) {
+          continue;
+        }
+        final eventType =
+            (webhookRow['event_type'] as String?)?.trim().toLowerCase() ?? '';
+        final mapped = _statusFromWebhookEventType(eventType);
+        if (mapped != null) {
+          return _PaymentIntentDecision(
+            status: mapped,
+            reason: 'webhook_event',
+          );
+        }
+      }
+    }
+
+    final hasPurchaseTable =
+        purchaseId.isNotEmpty &&
+        await _tableExists(db, 'marketplace_purchases') &&
+        await _columnExists(db, 'marketplace_purchases', 'status');
+    if (hasPurchaseTable) {
+      final purchaseRows = await db.query(
+        'marketplace_purchases',
+        columns: const <String>['status'],
+        where: 'id = ?',
+        whereArgs: <Object>[purchaseId],
+        limit: 1,
+      );
+      if (purchaseRows.isNotEmpty) {
+        final purchaseStatus =
+            (purchaseRows.first['status'] as String?)?.trim().toLowerCase() ??
+            '';
+        if (purchaseStatus == 'paid' || purchaseStatus == 'active') {
+          return const _PaymentIntentDecision(
+            status: 'succeeded',
+            reason: 'purchase_status',
+          );
+        }
+        if (purchaseStatus == 'failed' ||
+            purchaseStatus == 'canceled' ||
+            purchaseStatus == 'cancelled' ||
+            purchaseStatus == 'refunded') {
+          return const _PaymentIntentDecision(
+            status: 'failed',
+            reason: 'purchase_status',
+          );
+        }
+      }
+    }
+
+    if (verifyRemote &&
+        provider == 'paystack' &&
+        providerRef.isNotEmpty &&
+        _paystackSecretKey.startsWith('sk_')) {
+      final remoteStatus = await _verifyPaystackReference(providerRef);
+      if (remoteStatus != null) {
+        return _PaymentIntentDecision(status: remoteStatus, reason: 'paystack');
+      }
+    }
+    return null;
+  }
+
+  String? _statusFromWebhookEventType(String eventType) {
+    switch (eventType) {
+      case 'payment_succeeded':
+      case 'invoice_paid':
+      case 'charge.success':
+        return 'succeeded';
+      case 'payment_failed':
+      case 'charge.failed':
+      case 'refund':
+      case 'refund_succeeded':
+      case 'chargeback':
+        return 'failed';
+      default:
+        return null;
+    }
+  }
+
+  Future<String?> _verifyPaystackReference(String providerRef) async {
+    if (_paystackSecretKey.trim().isEmpty || providerRef.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final response = await _httpClient
+          .get(
+            Uri.parse(
+              '$_paystackApiBaseUrl/transaction/verify/'
+              '${Uri.encodeComponent(providerRef.trim())}',
+            ),
+            headers: <String, String>{
+              'authorization': 'Bearer $_paystackSecretKey',
+              'accept': 'application/json',
+            },
+          )
+          .timeout(_paystackVerifyTimeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        return null;
+      }
+      final payload = decoded.map(
+        (key, value) => MapEntry<String, Object?>(key.toString(), value),
+      );
+      final data = payload['data'];
+      if (data is! Map) {
+        return null;
+      }
+      final status = (data['status'] as String?)?.trim().toLowerCase() ?? '';
+      if (status == 'success' || status == 'successful' || status == 'paid') {
+        return 'succeeded';
+      }
+      if (status == 'failed' ||
+          status == 'abandoned' ||
+          status == 'reversed' ||
+          status == 'cancelled' ||
+          status == 'canceled') {
+        return 'failed';
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Response> _disableUser(Request request, String userId) async {
@@ -1108,6 +1451,14 @@ class AdminController {
     }
   }
 
+  DateTime? _parseDateTimeOrNull(String raw) {
+    final normalized = raw.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    return DateTime.tryParse(normalized)?.toUtc();
+  }
+
   int _parseLimit(String? rawLimit) {
     final normalized = rawLimit?.trim() ?? '';
     if (normalized.isEmpty) {
@@ -1172,6 +1523,17 @@ class AdminController {
     }
     final padding = List<String>.filled(4 - remainder, '=').join();
     return '$cursor$padding';
+  }
+
+  static String _normalizeApiBaseUrl(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return 'https://api.paystack.co';
+    }
+    if (normalized.endsWith('/')) {
+      return normalized.substring(0, normalized.length - 1);
+    }
+    return normalized;
   }
 
   Future<int> _countRows(Database db, String tableName) async {
@@ -1311,4 +1673,11 @@ class _AdminCursor {
 
   final String createdAtIso;
   final String entityId;
+}
+
+class _PaymentIntentDecision {
+  const _PaymentIntentDecision({required this.status, required this.reason});
+
+  final String status;
+  final String reason;
 }
