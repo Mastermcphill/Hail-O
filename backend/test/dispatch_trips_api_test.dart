@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -479,9 +480,144 @@ void main() {
     final drivers = (body['drivers'] as List<dynamic>? ?? const <dynamic>[]);
     expect(drivers, isEmpty);
   });
+
+  test('quote returns deterministic price for known coordinates', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(
+      db,
+      environmentMap: const <String, String>{
+        'ENV': 'test',
+        'DISPATCH_BASE_FARE_MINOR': '1000',
+        'DISPATCH_PER_KM_MINOR': '200',
+        'DISPATCH_MIN_FARE_MINOR': '1200',
+        'DISPATCH_SURGE_MULTIPLIER': '1.0',
+        'DISPATCH_AVG_SPEED_KMH': '25',
+        'DISPATCH_CURRENCY': 'NGN',
+      },
+    );
+    final riderToken = await _registerAndLogin(
+      handler,
+      email: 'dispatch.quote.rider@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-quote-rider-register',
+    );
+
+    const pickupLat = 6.5244;
+    const pickupLng = 3.3792;
+    const dropoffLat = 6.6018;
+    const dropoffLng = 3.3515;
+    final expectedDistance = _haversineKm(
+      startLat: pickupLat,
+      startLng: pickupLng,
+      endLat: dropoffLat,
+      endLng: dropoffLng,
+    );
+    final expectedDistanceRounded = double.parse(
+      expectedDistance.toStringAsFixed(3),
+    );
+    final expectedDistanceCharge = (expectedDistance * 200).round();
+    final expectedPrice = 1000 + expectedDistanceCharge;
+    final expectedDuration = ((expectedDistance / 25) * 60).ceil();
+
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/quote',
+      token: riderToken,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': pickupLat, 'lng': pickupLng},
+        'dropoff': <String, Object?>{'lat': dropoffLat, 'lng': dropoffLng},
+        'service_level': 'standard',
+      },
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], true);
+    expect((body['distance_km'] as num?)?.toDouble(), expectedDistanceRounded);
+    expect((body['duration_min_est'] as num?)?.toInt(), expectedDuration);
+    expect((body['price_minor'] as num?)?.toInt(), expectedPrice);
+    expect(body['currency'], 'NGN');
+    final breakdown = Map<String, Object?>.from(body['breakdown'] as Map);
+    expect(breakdown['base_fare_minor'], 1000);
+    expect(breakdown['per_km_minor'], 200);
+    expect(breakdown['distance_charge_minor'], expectedDistanceCharge);
+    expect(breakdown['minimum_fare_minor'], 1200);
+    expect(breakdown['minimum_fare_applied'], false);
+  });
+
+  test('quote enforces minimum fare', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(
+      db,
+      environmentMap: const <String, String>{
+        'ENV': 'test',
+        'DISPATCH_BASE_FARE_MINOR': '300',
+        'DISPATCH_PER_KM_MINOR': '50',
+        'DISPATCH_MIN_FARE_MINOR': '2000',
+        'DISPATCH_SURGE_MULTIPLIER': '1.0',
+        'DISPATCH_AVG_SPEED_KMH': '25',
+        'DISPATCH_CURRENCY': 'NGN',
+      },
+    );
+    final riderToken = await _registerAndLogin(
+      handler,
+      email: 'dispatch.quote.minfare@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-quote-minfare-register',
+    );
+
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/quote',
+      token: riderToken,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 6.5, 'lng': 3.3},
+        'dropoff': <String, Object?>{'lat': 6.5, 'lng': 3.3},
+      },
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect((body['distance_km'] as num?)?.toDouble(), 0);
+    expect((body['price_minor'] as num?)?.toInt(), 2000);
+    final breakdown = Map<String, Object?>.from(body['breakdown'] as Map);
+    expect(breakdown['minimum_fare_applied'], true);
+  });
+
+  test('quote invalid coordinates return validation error', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final riderToken = await _registerAndLogin(
+      handler,
+      email: 'dispatch.quote.invalidcoords@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-quote-invalidcoords-register',
+    );
+
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/quote',
+      token: riderToken,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 95, 'lng': 3.2},
+        'dropoff': <String, Object?>{'lat': 6.5, 'lng': 3.3},
+      },
+    );
+    expect(response.statusCode, 409);
+    final body = await _decodeBody(response);
+    expect(body['error_code'], 'INVALID_PICKUP_LAT');
+    expect((body['trace_id'] as String?)?.isNotEmpty, isTrue);
+  });
 }
 
-Handler _buildHandler(Database db) {
+Handler _buildHandler(
+  Database db, {
+  Map<String, String> environmentMap = const <String, String>{},
+}) {
   return AppServer(
     db: db,
     tokenService: TokenService(secret: 'backend-test-secret'),
@@ -493,6 +629,7 @@ Handler _buildHandler(Database db) {
     authCredentialsStore: SqliteAuthCredentialsStore(db),
     rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
     operationalRecordStore: const SqliteOperationalRecordStore(),
+    environmentMap: environmentMap,
   ).buildHandler();
 }
 
@@ -588,4 +725,24 @@ class _AuthSession {
 
   final String userId;
   final String token;
+}
+
+double _haversineKm({
+  required double startLat,
+  required double startLng,
+  required double endLat,
+  required double endLng,
+}) {
+  const earthRadiusKm = 6371.0088;
+  const degToRad = math.pi / 180.0;
+  final latDelta = (endLat - startLat) * degToRad;
+  final lngDelta = (endLng - startLng) * degToRad;
+  final lat1 = startLat * degToRad;
+  final lat2 = endLat * degToRad;
+  final sinLat = math.sin(latDelta / 2);
+  final sinLng = math.sin(lngDelta / 2);
+  final a =
+      (sinLat * sinLat) + (math.cos(lat1) * math.cos(lat2) * sinLng * sinLng);
+  final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  return earthRadiusKm * c;
 }

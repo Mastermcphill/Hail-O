@@ -6,6 +6,7 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../../lib/domain/services/auth_service.dart';
+import '../../lib/domain/services/dispatch_pricing_service.dart';
 import '../../lib/domain/services/dispatch_trip_service.dart';
 import '../../lib/domain/services/dispute_service.dart';
 import '../../lib/domain/services/escrow_service.dart';
@@ -111,7 +112,12 @@ Handler buildApiRouter({
   final meController = db == null ? null : MeController(db);
   final dispatchController = db == null
       ? null
-      : DispatchController(dispatchTripService: DispatchTripService(db));
+      : DispatchController(
+          dispatchTripService: DispatchTripService(db),
+          dispatchPricingService: DispatchPricingService(
+            config: DispatchPricingConfig.fromEnvironment(env),
+          ),
+        );
   final settlementController = db == null
       ? null
       : SettlementController(

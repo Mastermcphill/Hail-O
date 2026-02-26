@@ -2,18 +2,24 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
+import '../../../lib/domain/services/dispatch_pricing_service.dart';
 import '../../../lib/domain/services/dispatch_trip_service.dart';
 import '../../infra/request_context.dart';
 import '../../server/http_utils.dart';
 
 class DispatchController {
-  DispatchController({required DispatchTripService dispatchTripService})
-    : _dispatchTripService = dispatchTripService;
+  DispatchController({
+    required DispatchTripService dispatchTripService,
+    required DispatchPricingService dispatchPricingService,
+  }) : _dispatchTripService = dispatchTripService,
+       _dispatchPricingService = dispatchPricingService;
 
   final DispatchTripService _dispatchTripService;
+  final DispatchPricingService _dispatchPricingService;
 
   Router get router {
     final router = Router();
+    router.post('/quote', _quote);
     router.post('/trips', _createTrip);
     router.get('/trips/<tripId>', _getTrip);
     router.get('/trips', _listTrips);
@@ -21,6 +27,13 @@ class DispatchController {
     router.post('/trips/<tripId>/assign', _assignDriver);
     router.get('/drivers/nearby', _nearbyDrivers);
     return router;
+  }
+
+  Future<Response> _quote(Request request) async {
+    _requireUserId(request);
+    final payload = await readJsonBody(request);
+    final quote = _dispatchPricingService.quoteFromPayload(payload);
+    return jsonResponse(200, <String, Object?>{'ok': true, ...quote});
   }
 
   Future<Response> _createTrip(Request request) async {
