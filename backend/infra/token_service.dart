@@ -47,14 +47,16 @@ class TokenService {
     required String userId,
     required String role,
     DateTime? nowUtc,
+    Duration? tokenTtl,
   }) {
     final now = (nowUtc ?? DateTime.now()).toUtc();
+    final ttl = tokenTtl ?? _tokenTtl;
     final jwt = JWT(<String, Object?>{
       'user_id': userId,
       'role': role,
       'issued_at': now.toIso8601String(),
     });
-    return jwt.sign(SecretKey(_secret), expiresIn: _tokenTtl);
+    return jwt.sign(SecretKey(_secret), expiresIn: ttl);
   }
 
   AuthTokenPayload verifyToken(String token) {

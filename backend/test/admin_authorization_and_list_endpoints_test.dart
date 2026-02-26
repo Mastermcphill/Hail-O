@@ -159,6 +159,77 @@ void main() {
   });
 
   test(
+    'admin smoke mint endpoint issues a usable token with ADMIN_TOKEN bypass',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          phone_e164 TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS user_roles (
+          user_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          UNIQUE(user_id, role)
+        )
+      ''');
+      final handler = _buildHandler(
+        db,
+        environmentMap: const <String, String>{
+          'ENV': 'staging',
+          'ADMIN_TOKEN_ENABLED': 'true',
+          'ADMIN_TOKEN': 'emergency-admin-token',
+        },
+      );
+
+      final mintResponse = await _request(
+        handler,
+        method: 'POST',
+        path: '/admin/smoke/mint_token',
+        headers: const <String, String>{'admin_token': 'emergency-admin-token'},
+        body: const <String, Object?>{
+          'phone_e164': '+15550009999',
+          'role': 'rider',
+        },
+      );
+      expect(mintResponse.statusCode, 200);
+      final mintBody = await _decodeBody(mintResponse);
+      expect(mintBody['ok'], isTrue);
+
+      final accessToken = (mintBody['access_token'] as String?) ?? '';
+      expect(accessToken.isNotEmpty, isTrue);
+      final user = Map<String, Object?>.from(mintBody['user'] as Map);
+      final userId = (user['id'] as String?) ?? '';
+      expect(userId.isNotEmpty, isTrue);
+      expect(user['phone_e164'], '+15550009999');
+
+      final quoteResponse = await _request(
+        handler,
+        method: 'POST',
+        path: '/dispatch/quote',
+        token: accessToken,
+        body: const <String, Object?>{
+          'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
+          'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
+        },
+      );
+      expect(quoteResponse.statusCode, 200);
+
+      final userRows = await db.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: <Object>[userId],
+        limit: 1,
+      );
+      expect(userRows, isNotEmpty);
+    },
+  );
+
+  test(
     'ADMIN_TOKEN bypass is denied when ADMIN_TOKEN_ENABLED is false',
     () async {
       final db = await HailODatabase().openInMemory();

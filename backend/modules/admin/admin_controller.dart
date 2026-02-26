@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:sqflite_common/sqlite_api.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../lib/domain/errors/domain_errors.dart';
 import '../../../lib/domain/services/wallet_reversal_service.dart';
@@ -12,8 +14,10 @@ import '../../infra/api_contract.dart';
 import '../../infra/analytics_event_store.dart';
 import '../../infra/audit_log_store.dart';
 import '../../infra/audit_logger.dart';
+import '../../infra/postgres_provider.dart';
 import '../../infra/request_context.dart';
 import '../../infra/sentry_observability.dart';
+import '../../infra/token_service.dart';
 import '../../jobs/job.dart';
 import '../../jobs/job_processor.dart';
 import '../marketplace/billing_ledger_repository.dart';
@@ -23,6 +27,7 @@ import '../marketplace/marketplace_reconciliation_service.dart';
 import '../marketplace/marketplace_revenue_service.dart';
 import '../payments/payment_service.dart' as payments;
 import '../../server/http_utils.dart';
+import '../../server/middleware/admin_emergency_access_middleware.dart';
 
 class AdminController {
   AdminController({
@@ -35,13 +40,16 @@ class AdminController {
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
     AuditLogStore? auditLogStore,
+    PostgresProvider? postgresProvider,
     payments.PaymentService? paymentService,
+    TokenService? tokenService,
     String paystackSecretKey = '',
     String paystackApiBaseUrl = 'https://api.paystack.co',
     http.Client? httpClient,
     Duration paystackVerifyTimeout = const Duration(seconds: 8),
     AnalyticsEventStore? analyticsEventStore,
     QueueJobProcessor? queueJobProcessor,
+    Uuid? uuid,
   }) : _db = db,
        _walletReversalService = walletReversalService,
        _runtimeConfigSnapshot = Map<String, Object?>.unmodifiable(
@@ -53,13 +61,16 @@ class AdminController {
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger(),
        _auditLogStore = auditLogStore ?? AuditLogStore(sqliteDb: db),
+       _postgresProvider = postgresProvider,
        _paymentService = paymentService,
+       _tokenService = tokenService ?? TokenService.fromEnvironment(),
        _paystackSecretKey = paystackSecretKey.trim(),
        _paystackApiBaseUrl = _normalizeApiBaseUrl(paystackApiBaseUrl),
        _httpClient = httpClient ?? http.Client(),
        _paystackVerifyTimeout = paystackVerifyTimeout,
        _analyticsEventStore = analyticsEventStore,
-       _queueJobProcessor = queueJobProcessor;
+       _queueJobProcessor = queueJobProcessor,
+       _uuid = uuid ?? const Uuid();
 
   final Database? _db;
   final WalletReversalService? _walletReversalService;
@@ -70,13 +81,16 @@ class AdminController {
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
   final AuditLogStore _auditLogStore;
+  final PostgresProvider? _postgresProvider;
   final payments.PaymentService? _paymentService;
+  final TokenService _tokenService;
   final String _paystackSecretKey;
   final String _paystackApiBaseUrl;
   final http.Client _httpClient;
   final Duration _paystackVerifyTimeout;
   final AnalyticsEventStore? _analyticsEventStore;
   final QueueJobProcessor? _queueJobProcessor;
+  final Uuid _uuid;
 
   static const Set<String> _tripStatuses = <String>{
     'created',
@@ -119,10 +133,111 @@ class AdminController {
     router.post('/dunning/<caseId>/resume', _resumeDunning);
     router.post('/dunning/<caseId>/writeoff', _writeoffDunning);
     router.get('/audit', _auditSummary);
+    router.post('/smoke/mint_token', _mintSmokeToken);
     if (_enableSentrySmokeEndpoint) {
       router.post('/ops/sentry-smoke', _sentrySmoke);
     }
     return router;
+  }
+
+  Future<Response> _mintSmokeToken(Request request) async {
+    _requireAdmin(request);
+    if (_isProductionEnvironment()) {
+      return jsonErrorResponse(
+        request,
+        403,
+        code: 'forbidden',
+        message: 'Smoke token mint endpoint is disabled in production',
+      );
+    }
+    if (!requestUsedAdminToken(request)) {
+      return jsonErrorResponse(
+        request,
+        403,
+        code: 'forbidden',
+        message:
+            'Smoke token mint requires ADMIN_TOKEN emergency access authentication',
+      );
+    }
+
+    try {
+      final payload = await readJsonBody(request);
+      final requestedRoleRaw = (payload['role'] as String?)
+          ?.trim()
+          .toLowerCase();
+      final requestedRole = switch (requestedRoleRaw) {
+        'admin' => 'admin',
+        'driver' => 'driver',
+        'fleet_owner' => 'fleet_owner',
+        'system' => 'system',
+        _ => 'rider',
+      };
+      final phoneE164 =
+          (payload['phone_e164'] as String?)?.trim().isNotEmpty == true
+          ? (payload['phone_e164'] as String).trim()
+          : '+15550001111';
+
+      String userId;
+      final db = _db;
+      if (db != null) {
+        userId = await _ensureSmokeUserSqlite(
+          db: db,
+          phoneE164: phoneE164,
+          role: requestedRole,
+        );
+      } else if (_postgresProvider != null) {
+        userId = await _ensureSmokeUserPostgres(
+          provider: _postgresProvider,
+          phoneE164: phoneE164,
+          role: requestedRole,
+        );
+      } else {
+        return jsonErrorResponse(
+          request,
+          501,
+          code: 'not_implemented',
+          message: 'Smoke token mint endpoint is unavailable in this mode',
+        );
+      }
+
+      final expiresIn = const Duration(minutes: 15);
+      final accessToken = _tokenService.issueToken(
+        userId: userId,
+        role: requestedRole,
+        tokenTtl: expiresIn,
+      );
+      await _auditLogStore.recordFromRequest(
+        request,
+        action: 'admin.smoke.mint_token',
+        resourceType: 'user',
+        resourceId: userId,
+        metadata: <String, Object?>{
+          'role': requestedRole,
+          'phone_e164': phoneE164,
+          'expires_in_seconds': expiresIn.inSeconds,
+        },
+      );
+      return jsonResponse(200, <String, Object?>{
+        'ok': true,
+        'access_token': accessToken,
+        'expires_in_seconds': expiresIn.inSeconds,
+        'user': <String, Object?>{
+          'id': userId,
+          'phone_e164': phoneE164,
+          'role': requestedRole,
+        },
+        'trace_id': request.requestContext.traceId,
+      });
+    } catch (error, stackTrace) {
+      stderr.writeln('WARN: admin_smoke_mint_failed: $error');
+      stderr.writeln(stackTrace);
+      return jsonErrorResponse(
+        request,
+        500,
+        code: 'internal_error',
+        message: 'Unable to mint smoke token',
+      );
+    }
   }
 
   Future<Response> _runtimeConfig(Request request) async {
@@ -1849,6 +1964,196 @@ class AdminController {
       <Object>['table', tableName],
     );
     return rows.isNotEmpty;
+  }
+
+  bool _isProductionEnvironment() {
+    final environment = (_runtimeConfigSnapshot['environment'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return environment == 'prod' || environment == 'production';
+  }
+
+  Future<String> _ensureSmokeUserSqlite({
+    required Database db,
+    required String phoneE164,
+    required String role,
+  }) async {
+    final userColumns = await _sqliteTableColumns(db, 'users');
+    if (!userColumns.contains('id')) {
+      throw StateError('users_table_missing_id_column');
+    }
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+
+    var userId = '';
+    if (userColumns.contains('phone_e164')) {
+      final existing = await db.query(
+        'users',
+        columns: const <String>['id'],
+        where: 'phone_e164 = ?',
+        whereArgs: <Object>[phoneE164],
+        limit: 1,
+      );
+      userId = existing.isEmpty
+          ? ''
+          : ((existing.first['id'] as String?)?.trim() ?? '');
+    }
+    if (userId.isEmpty) {
+      for (var attempt = 0; attempt < 4; attempt++) {
+        final candidateId = _uuid.v4();
+        final email = 'smoke.$candidateId@hailo.local';
+        final row = <String, Object?>{'id': candidateId};
+        if (userColumns.contains('phone_e164')) {
+          row['phone_e164'] = phoneE164;
+        }
+        if (userColumns.contains('role')) {
+          row['role'] = role;
+        }
+        if (userColumns.contains('email')) {
+          row['email'] = email;
+        }
+        if (userColumns.contains('display_name')) {
+          row['display_name'] = 'Smoke User';
+        }
+        if (userColumns.contains('created_at')) {
+          row['created_at'] = nowIso;
+        }
+        if (userColumns.contains('updated_at')) {
+          row['updated_at'] = nowIso;
+        }
+        try {
+          await db.insert('users', row);
+          userId = candidateId;
+          break;
+        } catch (_) {
+          if (userColumns.contains('phone_e164')) {
+            final retry = await db.query(
+              'users',
+              columns: const <String>['id'],
+              where: 'phone_e164 = ?',
+              whereArgs: <Object>[phoneE164],
+              limit: 1,
+            );
+            if (retry.isNotEmpty) {
+              userId = (retry.first['id'] as String?)?.trim() ?? '';
+              if (userId.isNotEmpty) {
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (userId.isEmpty) {
+      throw StateError('unable_to_create_smoke_user');
+    }
+
+    final hasUserRoles =
+        await _tableExists(db, 'user_roles') &&
+        await _columnExists(db, 'user_roles', 'user_id') &&
+        await _columnExists(db, 'user_roles', 'role');
+    if (hasUserRoles) {
+      await db.insert('user_roles', <String, Object?>{
+        'user_id': userId,
+        'role': role,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+    return userId;
+  }
+
+  Future<Set<String>> _sqliteTableColumns(Database db, String tableName) async {
+    final rows = await db.rawQuery('PRAGMA table_info($tableName)');
+    final columns = <String>{};
+    for (final row in rows) {
+      final name = (row['name'] as String?)?.trim().toLowerCase() ?? '';
+      if (name.isNotEmpty) {
+        columns.add(name);
+      }
+    }
+    return columns;
+  }
+
+  Future<String> _ensureSmokeUserPostgres({
+    required PostgresProvider provider,
+    required String phoneE164,
+    required String role,
+  }) async {
+    final existing = await provider.withConnection(
+      (connection) => connection.query(
+        '''
+        SELECT id::text
+        FROM users
+        WHERE phone_e164 = @phone_e164
+        LIMIT 1
+        ''',
+        substitutionValues: <String, Object?>{'phone_e164': phoneE164},
+      ),
+    );
+    var userId = existing.isEmpty
+        ? ''
+        : (existing.first[0] as String?)?.trim() ?? '';
+    if (userId.isEmpty) {
+      for (var attempt = 0; attempt < 4; attempt++) {
+        final candidateId = _uuid.v4();
+        try {
+          await provider.withConnection(
+            (connection) => connection.execute(
+              '''
+              INSERT INTO users(id, phone_e164, created_at)
+              VALUES(CAST(@id AS UUID), @phone_e164, @created_at)
+              ON CONFLICT (phone_e164) DO NOTHING
+              ''',
+              substitutionValues: <String, Object?>{
+                'id': candidateId,
+                'phone_e164': phoneE164,
+                'created_at': DateTime.now().toUtc().toIso8601String(),
+              },
+            ),
+          );
+          final retry = await provider.withConnection(
+            (connection) => connection.query(
+              '''
+              SELECT id::text
+              FROM users
+              WHERE phone_e164 = @phone_e164
+              LIMIT 1
+              ''',
+              substitutionValues: <String, Object?>{'phone_e164': phoneE164},
+            ),
+          );
+          if (retry.isNotEmpty) {
+            userId = (retry.first[0] as String?)?.trim() ?? '';
+            if (userId.isNotEmpty) {
+              break;
+            }
+          }
+        } catch (_) {
+          // Retry generation for rare UUID collision cases.
+        }
+      }
+    }
+    if (userId.isEmpty) {
+      throw StateError('unable_to_create_smoke_user');
+    }
+
+    try {
+      await provider.withConnection(
+        (connection) => connection.execute(
+          '''
+          INSERT INTO user_roles(user_id, role)
+          VALUES(CAST(@user_id AS UUID), @role)
+          ON CONFLICT (user_id, role) DO NOTHING
+          ''',
+          substitutionValues: <String, Object?>{
+            'user_id': userId,
+            'role': role,
+          },
+        ),
+      );
+    } catch (_) {
+      // user_roles may not exist in minimal deployments; keep endpoint resilient.
+    }
+    return userId;
   }
 
   void _requireAdmin(Request request) {

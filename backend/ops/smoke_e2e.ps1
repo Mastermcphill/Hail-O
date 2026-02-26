@@ -3,13 +3,14 @@ param(
   [string]$EnvName = "",
   [string]$AdminToken = "",
   [string]$AdminTokenEnabled = "",
-  [string]$TestPhoneE164 = "",
-  [string]$TestOtp = "",
-  [string]$PaymentsTestMode = "",
-  [string]$AccessToken = "",
+  [string]$SmokeAccessToken = "",
+  [string]$SmokeMintPath = "",
+  [string]$SmokePhoneE164 = "",
+  [string]$SmokeOtpCode = "",
+  [string]$SmokeWebhookSim = "",
   [string]$WebhookSecret = "",
   [string]$PaystackWebhookSecret = "",
-  [string]$TestDriverId = "",
+  [string]$SmokeDriverId = "",
   [switch]$DryRun
 )
 
@@ -40,7 +41,11 @@ function Try-Get([scriptblock]$Script) {
 }
 
 if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
-  $BaseUrl = $env:BASE_URL
+  if ($env:BASE_URL) {
+    $BaseUrl = $env:BASE_URL
+  } else {
+    $BaseUrl = "https://hail-o-api-staging.onrender.com"
+  }
 }
 if ([string]::IsNullOrWhiteSpace($EnvName)) {
   $EnvName = if ($env:ENV) { $env:ENV } else { "staging" }
@@ -51,28 +56,47 @@ if ([string]::IsNullOrWhiteSpace($AdminToken)) {
 if ([string]::IsNullOrWhiteSpace($AdminTokenEnabled)) {
   $AdminTokenEnabled = if ($env:ADMIN_TOKEN_ENABLED) { $env:ADMIN_TOKEN_ENABLED } else { "false" }
 }
-if ([string]::IsNullOrWhiteSpace($TestPhoneE164)) {
-  if ($env:TEST_PHONE_E164) {
-    $TestPhoneE164 = $env:TEST_PHONE_E164
+if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) {
+  if ($env:SMOKE_PHONE_E164) {
+    $SmokePhoneE164 = $env:SMOKE_PHONE_E164
+  } elseif ($env:TEST_PHONE_E164) {
+    $SmokePhoneE164 = $env:TEST_PHONE_E164
   } else {
-    $TestPhoneE164 = $env:E2E_PHONE_E164
+    $SmokePhoneE164 = $env:E2E_PHONE_E164
   }
 }
-if ([string]::IsNullOrWhiteSpace($TestOtp)) {
-  if ($env:TEST_OTP) {
-    $TestOtp = $env:TEST_OTP
+if ([string]::IsNullOrWhiteSpace($SmokeOtpCode)) {
+  if ($env:SMOKE_OTP_CODE) {
+    $SmokeOtpCode = $env:SMOKE_OTP_CODE
+  } elseif ($env:TEST_OTP) {
+    $SmokeOtpCode = $env:TEST_OTP
   } else {
-    $TestOtp = $env:E2E_OTP_CODE
+    $SmokeOtpCode = $env:E2E_OTP_CODE
   }
 }
-if ([string]::IsNullOrWhiteSpace($PaymentsTestMode)) {
-  $PaymentsTestMode = if ($env:PAYMENTS_TEST_MODE) { $env:PAYMENTS_TEST_MODE } else { "false" }
-}
-if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-  if ($env:TEST_ACCESS_TOKEN) {
-    $AccessToken = $env:TEST_ACCESS_TOKEN
+if ([string]::IsNullOrWhiteSpace($SmokeWebhookSim)) {
+  if ($env:SMOKE_WEBHOOK_SIM) {
+    $SmokeWebhookSim = $env:SMOKE_WEBHOOK_SIM
+  } elseif ($env:PAYMENTS_TEST_MODE) {
+    $SmokeWebhookSim = $env:PAYMENTS_TEST_MODE
   } else {
-    $AccessToken = $env:E2E_ACCESS_TOKEN
+    $SmokeWebhookSim = ""
+  }
+}
+if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  if ($env:SMOKE_ACCESS_TOKEN) {
+    $SmokeAccessToken = $env:SMOKE_ACCESS_TOKEN
+  } elseif ($env:TEST_ACCESS_TOKEN) {
+    $SmokeAccessToken = $env:TEST_ACCESS_TOKEN
+  } else {
+    $SmokeAccessToken = $env:E2E_ACCESS_TOKEN
+  }
+}
+if ([string]::IsNullOrWhiteSpace($SmokeMintPath)) {
+  if ($env:SMOKE_MINT_PATH) {
+    $SmokeMintPath = $env:SMOKE_MINT_PATH
+  } else {
+    $SmokeMintPath = "/admin/smoke/mint_token"
   }
 }
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
@@ -91,20 +115,30 @@ if ([string]::IsNullOrWhiteSpace($PaystackWebhookSecret)) {
     $PaystackWebhookSecret = $env:PAYSTACK_SECRET_KEY
   }
 }
-if ([string]::IsNullOrWhiteSpace($TestDriverId)) {
-  $TestDriverId = $env:TEST_DRIVER_ID
-}
-
-if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
-  throw "BaseUrl is required. Example: .\smoke_e2e.ps1 -BaseUrl https://staging.example.com"
+if ([string]::IsNullOrWhiteSpace($SmokeDriverId)) {
+  if ($env:SMOKE_DRIVER_ID) {
+    $SmokeDriverId = $env:SMOKE_DRIVER_ID
+  } else {
+    $SmokeDriverId = $env:TEST_DRIVER_ID
+  }
 }
 
 $BaseUrl = $BaseUrl.TrimEnd('/')
 $normalizedEnv = $EnvName.Trim().ToLowerInvariant()
 $adminTokenEnabledBool = To-Bool $AdminTokenEnabled
-$paymentsTestModeBool = To-Bool $PaymentsTestMode
-if ($DryRun -and [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $AccessToken = "dry_access_token"
+if (-not [string]::IsNullOrWhiteSpace($SmokeMintPath) -and -not $SmokeMintPath.StartsWith("/")) {
+  $SmokeMintPath = "/$SmokeMintPath"
+}
+if ([string]::IsNullOrWhiteSpace($SmokeWebhookSim)) {
+  if (@("staging", "stage", "development", "dev", "test") -contains $normalizedEnv) {
+    $SmokeWebhookSim = "true"
+  } else {
+    $SmokeWebhookSim = "false"
+  }
+}
+$smokeWebhookSimBool = To-Bool $SmokeWebhookSim
+if ($DryRun -and [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $SmokeAccessToken = "dry_access_token"
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -137,7 +171,7 @@ function Get-DryRunResponse {
     "/auth/otp/verify" { return @{ status = 200; payload = @{ access_token = "dry_access_token"; refresh_token = "dry_refresh_token"; user = @{ id = "dry-user"; phone_e164 = "+15550001111" } } } }
     "/auth/register" { return @{ status = 201; payload = @{ ok = $true; user_id = "00000000-0000-4000-8000-000000000111" } } }
     "/auth/login" { return @{ status = 200; payload = @{ ok = $true; token = "dry_driver_token"; user_id = "00000000-0000-4000-8000-000000000111" } } }
-    "/marketplace/offers" { return @{ status = 200; payload = @{ ok = $true; data = @(@{ id = "offer_dry_001"; title = "Dry Offer" }) } } }
+    "/marketplace/offers*" { return @{ status = 200; payload = @{ ok = $true; data = @(@{ id = "offer_dry_001"; title = "Dry Offer" }) } } }
     "/marketplace/purchases" { return @{ status = 200; payload = @{ ok = $true; data = @{ purchase = @{ purchase_id = "11111111-1111-4111-8111-111111111111"; status = "pending_payment" } } } } }
     "/payments/intents" { return @{ status = 200; payload = @{ ok = $true; data = @{ id = "22222222-2222-4222-8222-222222222222"; status = "pending" } } } }
     "/webhooks/payments" { return @{ status = 200; payload = @{ ok = $true; data = @{ action = "processed" } } } }
@@ -155,6 +189,7 @@ function Get-DryRunResponse {
     "/admin/users*" { return @{ status = 200; payload = @{ ok = $true; users = @() } } }
     "/admin/trips*" { return @{ status = 200; payload = @{ ok = $true; trips = @() } } }
     "/admin/audit*" { return @{ status = 200; payload = @{ ok = $true; data = @() } } }
+    "/admin/smoke/mint_token" { return @{ status = 200; payload = @{ ok = $true; access_token = "dry_access_token"; user = @{ id = "00000000-0000-4000-8000-000000000123"; phone_e164 = "+15550001111" } } } }
     default { return @{ status = 404; payload = @{ ok = $false; error_code = "ROUTE_NOT_FOUND" } } }
   }
 }
@@ -189,7 +224,6 @@ function Invoke-SmokeRequest {
       status = [int]$stub.status
       duration_ms = $duration
       trace_id = $traceId
-      request_body = $Body
       response = $stub.payload
       curl_error = $null
     }
@@ -252,10 +286,57 @@ function Invoke-SmokeRequest {
     status = $statusCode
     duration_ms = $durationMs
     trace_id = $traceId
-    request_body = $Body
     response = $payload
     curl_error = $curlError
   }
+}
+
+function Redact-Secret([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+  $trimmed = $Value.Trim()
+  if ($trimmed.Length -le 6) {
+    return "$trimmed...redacted"
+  }
+  return "$($trimmed.Substring(0, 6))...redacted"
+}
+
+function Is-SensitiveKey([string]$Key) {
+  if ([string]::IsNullOrWhiteSpace($Key)) {
+    return $false
+  }
+  $normalized = $Key.Trim().ToLowerInvariant()
+  return $normalized.Contains("token") -or
+    $normalized.Contains("secret") -or
+    $normalized.Contains("authorization") -or
+    $normalized.Contains("password") -or
+    $normalized.Contains("signature")
+}
+
+function Sanitize-Payload($Value, [string]$ParentKey = "") {
+  if ($null -eq $Value) {
+    return $null
+  }
+  if ($Value -is [System.Collections.IDictionary]) {
+    $clean = [ordered]@{}
+    foreach ($key in $Value.Keys) {
+      $keyText = "$key"
+      $clean[$keyText] = Sanitize-Payload -Value $Value[$key] -ParentKey $keyText
+    }
+    return $clean
+  }
+  if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+    $items = @()
+    foreach ($item in $Value) {
+      $items += ,(Sanitize-Payload -Value $item -ParentKey $ParentKey)
+    }
+    return $items
+  }
+  if ($Value -is [string] -and (Is-SensitiveKey $ParentKey)) {
+    return Redact-Secret $Value
+  }
+  return $Value
 }
 
 function Save-Step {
@@ -276,7 +357,7 @@ function Save-Step {
     status = $Status
     note = $Note
     generated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    payload = $Payload
+    payload = (Sanitize-Payload -Value $Payload)
   }
   $artifactPath = Join-Path $runDir $ArtifactFile
   ($artifactPayload | ConvertTo-Json -Depth 80) | Set-Content -Path $artifactPath
@@ -329,7 +410,7 @@ Write-Host "[smoke] artifacts=$runDir"
 $step01 = Invoke-SmokeRequest -Method "GET" -Path "/health" -Body $null -Headers @{}
 $step01Ok = ($step01.status -eq 200) -and (To-Bool (Try-Get { $step01.response.ok }))
 $step01Note = if ($step01Ok) { "Health responded with ok=true" } else { "Expected HTTP 200 and ok=true" }
-Save-Step -StepId "step_01_health" -ArtifactFile "step_01_health.json" -Ok $step01Ok -Status "$($step01.status)" -Note $step01Note -DurationMs ([int]$step01.duration_ms) -TraceIds @($step01.trace_id) -Payload ([ordered]@{ call = $step01; expected = "status=200 and ok=true" })
+Save-Step -StepId "01_health" -ArtifactFile "01_health.json" -Ok $step01Ok -Status "$($step01.status)" -Note $step01Note -DurationMs ([int]$step01.duration_ms) -TraceIds @($step01.trace_id) -Payload ([ordered]@{ call = $step01; expected = "status=200 and ok=true" })
 
 # Step 02: Ready
 $step02 = Invoke-SmokeRequest -Method "GET" -Path "/ready" -Body $null -Headers @{}
@@ -338,30 +419,43 @@ if ($step02.status -eq 404) {
 }
 $step02Ok = ($step02.status -eq 200) -and (To-Bool (Try-Get { $step02.response.ok }))
 $step02Note = if ($step02Ok) { "Ready responded with ok=true" } else { "Expected HTTP 200 and ok=true" }
-Save-Step -StepId "step_02_ready" -ArtifactFile "step_02_ready.json" -Ok $step02Ok -Status "$($step02.status)" -Note $step02Note -DurationMs ([int]$step02.duration_ms) -TraceIds @($step02.trace_id) -Payload ([ordered]@{ call = $step02; expected = "status=200 and ok=true" })
+Save-Step -StepId "02_ready" -ArtifactFile "02_ready.json" -Ok $step02Ok -Status "$($step02.status)" -Note $step02Note -DurationMs ([int]$step02.duration_ms) -TraceIds @($step02.trace_id) -Payload ([ordered]@{ call = $step02; expected = "status=200 and ok=true" })
 
 # Step 03: Auth
 $authOps = New-Object System.Collections.Generic.List[object]
 $authMode = "none"
 $authNote = ""
+$needsUserInput = $false
 
-if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $authMode = "preprovisioned_token"
-  $authNote = "Using provided access token"
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $authMode = "smoke_access_token"
+  $authNote = "Using SMOKE_ACCESS_TOKEN"
 } else {
   $authMode = "auto"
   if ($adminTokenEnabledBool -and -not [string]::IsNullOrWhiteSpace($AdminToken)) {
     $mintPaths = @(
+      $SmokeMintPath,
+      "/admin/smoke/mint_token",
       "/admin/test/session/mint",
       "/admin/test/access-token",
       "/admin/auth/mint",
       "/admin/session/mint",
       "/admin/tokens/mint"
     )
+    $mintPhone = if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) { "+15550001111" } else { $SmokePhoneE164 }
+    $seenMintPaths = New-Object System.Collections.Generic.HashSet[string]
     foreach ($path in $mintPaths) {
-      $mintCall = Invoke-SmokeRequest -Method "POST" -Path $path -Body @{ role = "rider"; scope = "smoke_e2e" } -Headers @{ "x-admin-token" = $AdminToken }
+      if ([string]::IsNullOrWhiteSpace($path)) {
+        continue
+      }
+      $normalizedPath = if ($path.StartsWith("/")) { $path } else { "/$path" }
+      if ($seenMintPaths.Contains($normalizedPath)) {
+        continue
+      }
+      $seenMintPaths.Add($normalizedPath) | Out-Null
+      $mintCall = Invoke-SmokeRequest -Method "POST" -Path $normalizedPath -Body @{ role = "rider"; scope = "smoke_e2e"; phone_e164 = $mintPhone } -Headers @{ "x-admin-token" = $AdminToken }
       $authOps.Add($mintCall)
-      if ($mintCall.status -eq 200) {
+      if ($mintCall.status -eq 200 -or $mintCall.status -eq 201) {
         $mintedToken = Try-Get { $mintCall.response.access_token }
         if ([string]::IsNullOrWhiteSpace($mintedToken)) {
           $mintedToken = Try-Get { $mintCall.response.data.access_token }
@@ -370,48 +464,73 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
           $mintedToken = Try-Get { $mintCall.response.token }
         }
         if (-not [string]::IsNullOrWhiteSpace($mintedToken)) {
-          $AccessToken = $mintedToken
+          $SmokeAccessToken = $mintedToken
           $authMode = "admin_token_mint"
-          $authNote = "Minted access token via $path"
+          $authNote = "Minted access token via $normalizedPath"
           break
         }
       }
     }
   }
 
-  if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+  if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
     $authMode = "otp"
-    if ([string]::IsNullOrWhiteSpace($TestPhoneE164) -or [string]::IsNullOrWhiteSpace($TestOtp)) {
-      $authNote = "OTP flow requires TEST_PHONE_E164 and TEST_OTP when no access token is provided"
+    if ([string]::IsNullOrWhiteSpace($SmokePhoneE164)) {
+      $authNote = "SMOKE_PHONE_E164 is required for OTP fallback"
     } else {
-      $otpRequest = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/request" -Body @{ phone_e164 = $TestPhoneE164 } -Headers @{}
+      $otpRequest = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/request" -Body @{ phone_e164 = $SmokePhoneE164 } -Headers @{}
       $authOps.Add($otpRequest)
-      $otpVerify = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/verify" -Body @{ phone_e164 = $TestPhoneE164; code = $TestOtp } -Headers @{}
-      $authOps.Add($otpVerify)
-      $AccessToken = Try-Get { $otpVerify.response.access_token }
-      if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-        $AccessToken = Try-Get { $otpVerify.response.data.access_token }
-      }
-      if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-        $AccessToken = Try-Get { $otpVerify.response.token }
-      }
-      if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-        $authNote = "OTP verify did not return access token"
+      if ([string]::IsNullOrWhiteSpace($SmokeOtpCode)) {
+        $needsUserInput = $true
+        $authNote = "OTP requested. Re-run with SMOKE_OTP_CODE to continue."
       } else {
-        $authNote = "OTP flow verified and access token acquired"
+        $otpVerify = Invoke-SmokeRequest -Method "POST" -Path "/auth/otp/verify" -Body @{ phone_e164 = $SmokePhoneE164; code = $SmokeOtpCode } -Headers @{}
+        $authOps.Add($otpVerify)
+        $SmokeAccessToken = Try-Get { $otpVerify.response.access_token }
+        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+          $SmokeAccessToken = Try-Get { $otpVerify.response.data.access_token }
+        }
+        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+          $SmokeAccessToken = Try-Get { $otpVerify.response.token }
+        }
+        if ([string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+          $authNote = "OTP verify did not return access token"
+        } else {
+          $authNote = "OTP flow verified and access token acquired"
+        }
       }
     }
   }
 }
 
-$step03Ok = -not [string]::IsNullOrWhiteSpace($AccessToken)
-$step03Status = if ($step03Ok) { "ok" } else { "auth_failed" }
+$step03Ok = -not [string]::IsNullOrWhiteSpace($SmokeAccessToken)
+$step03Status = if ($needsUserInput) { "needs_input" } elseif ($step03Ok) { "ok" } else { "auth_failed" }
+$step03Artifact = if ($needsUserInput) { "03_auth_skipped.json" } else { "03_auth.json" }
 if ([string]::IsNullOrWhiteSpace($authNote)) {
   $authNote = "Authentication flow completed"
 }
 $step03Duration = Sum-DurationMs $authOps
 $step03TraceIds = @($authOps | ForEach-Object { $_.trace_id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
-Save-Step -StepId "step_03_auth" -ArtifactFile "step_03_auth.json" -Ok $step03Ok -Status $step03Status -Note $authNote -DurationMs $step03Duration -TraceIds $step03TraceIds -Payload ([ordered]@{ mode = $authMode; token_acquired = $step03Ok; note = $authNote; operations = $authOps })
+Save-Step -StepId "03_auth" -ArtifactFile $step03Artifact -Ok $step03Ok -Status $step03Status -Note $authNote -DurationMs $step03Duration -TraceIds $step03TraceIds -Payload ([ordered]@{ mode = $authMode; token_acquired = $step03Ok; needs_input = $needsUserInput; access_token_preview = (Redact-Secret $SmokeAccessToken); note = $authNote; operations = $authOps })
+
+if ($needsUserInput) {
+  $summaryNeedsInput = [ordered]@{
+    ok = $false
+    base_url = $BaseUrl
+    env = $normalizedEnv
+    generated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    total_duration_ms = Sum-DurationMs $steps
+    steps = $steps
+    failures = $failures
+    trace_ids = @($allTraceIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    artifact_dir = $runDir
+  }
+  $summaryNeedsInputPath = Join-Path $runDir "summary.json"
+  ($summaryNeedsInput | ConvertTo-Json -Depth 80) | Set-Content -Path $summaryNeedsInputPath
+  Write-Host "NEED_USER_INPUT: set SMOKE_OTP_CODE and rerun"
+  Write-Host "summary: $summaryNeedsInputPath"
+  exit 2
+}
 
 $offerId = ""
 $purchaseId = ""
@@ -419,8 +538,8 @@ $intentId = ""
 $tripId = ""
 
 # Step 04: Offers
-if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $step04 = Invoke-SmokeRequest -Method "GET" -Path "/marketplace/offers" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $step04 = Invoke-SmokeRequest -Method "GET" -Path "/marketplace/offers?limit=5" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $offerId = Try-Get { $step04.response.data[0].id }
   if ([string]::IsNullOrWhiteSpace($offerId)) {
     $offerId = Try-Get { $step04.response.offers[0].id }
@@ -430,40 +549,40 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
   }
   $step04Ok = ($step04.status -eq 200) -and (-not [string]::IsNullOrWhiteSpace($offerId))
   $step04Note = if ($step04Ok) { "Selected offer_id=$offerId" } else { "Expected HTTP 200 and at least one offer id" }
-  Save-Step -StepId "step_04_offers" -ArtifactFile "step_04_offers.json" -Ok $step04Ok -Status "$($step04.status)" -Note $step04Note -DurationMs ([int]$step04.duration_ms) -TraceIds @($step04.trace_id) -Payload ([ordered]@{ offer_id = $offerId; call = $step04 })
+  Save-Step -StepId "04_offers" -ArtifactFile "04_offers.json" -Ok $step04Ok -Status "$($step04.status)" -Note $step04Note -DurationMs ([int]$step04.duration_ms) -TraceIds @($step04.trace_id) -Payload ([ordered]@{ offer_id = $offerId; call = $step04 })
 } else {
-  Save-Step -StepId "step_04_offers" -ArtifactFile "step_04_offers.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
+  Save-Step -StepId "04_offers" -ArtifactFile "04_offers.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
 }
 
 # Step 05: Purchase create
-if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOrWhiteSpace($offerId)) {
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsNullOrWhiteSpace($offerId)) {
   $purchaseIdempotency = "smoke-purchase-" + [guid]::NewGuid().ToString("N")
-  $step05 = Invoke-SmokeRequest -Method "POST" -Path "/marketplace/purchases" -Body @{ offer_id = $offerId; quantity = 1 } -Headers @{ Authorization = "Bearer $AccessToken"; "idempotency-key" = $purchaseIdempotency }
+  $step05 = Invoke-SmokeRequest -Method "POST" -Path "/marketplace/purchases" -Body @{ offer_id = $offerId; quantity = 1 } -Headers @{ Authorization = "Bearer $SmokeAccessToken"; "idempotency-key" = $purchaseIdempotency }
   $purchaseId = Try-Get { $step05.response.data.purchase_id }
   if ([string]::IsNullOrWhiteSpace($purchaseId)) { $purchaseId = Try-Get { $step05.response.data.purchase.purchase_id } }
   if ([string]::IsNullOrWhiteSpace($purchaseId)) { $purchaseId = Try-Get { $step05.response.data.purchase.id } }
   if ([string]::IsNullOrWhiteSpace($purchaseId)) { $purchaseId = Try-Get { $step05.response.purchase_id } }
   $step05Ok = (($step05.status -eq 200) -or ($step05.status -eq 201)) -and (-not [string]::IsNullOrWhiteSpace($purchaseId))
   $step05Note = if ($step05Ok) { "Created purchase_id=$purchaseId" } else { "Expected HTTP 200/201 and purchase_id" }
-  Save-Step -StepId "step_05_purchase_create" -ArtifactFile "step_05_purchase_create.json" -Ok $step05Ok -Status "$($step05.status)" -Note $step05Note -DurationMs ([int]$step05.duration_ms) -TraceIds @($step05.trace_id) -Payload ([ordered]@{ purchase_id = $purchaseId; call = $step05 })
+  Save-Step -StepId "05_purchase_create" -ArtifactFile "05_purchase_create.json" -Ok $step05Ok -Status "$($step05.status)" -Note $step05Note -DurationMs ([int]$step05.duration_ms) -TraceIds @($step05.trace_id) -Payload ([ordered]@{ purchase_id = $purchaseId; call = $step05 })
 } else {
-  Save-Step -StepId "step_05_purchase_create" -ArtifactFile "step_05_purchase_create.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and offer id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
+  Save-Step -StepId "05_purchase_create" -ArtifactFile "05_purchase_create.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and offer id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
 }
 
 # Step 06: Intent create
-if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOrWhiteSpace($purchaseId)) {
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsNullOrWhiteSpace($purchaseId)) {
   $intentIdempotency = "smoke-intent-" + [guid]::NewGuid().ToString("N")
-  $step06 = Invoke-SmokeRequest -Method "POST" -Path "/payments/intents" -Body @{ purchase_id = $purchaseId } -Headers @{ Authorization = "Bearer $AccessToken"; "idempotency-key" = $intentIdempotency }
+  $step06 = Invoke-SmokeRequest -Method "POST" -Path "/payments/intents" -Body @{ purchase_id = $purchaseId } -Headers @{ Authorization = "Bearer $SmokeAccessToken"; "idempotency-key" = $intentIdempotency }
   $intentId = Try-Get { $step06.response.data.id }
   if ([string]::IsNullOrWhiteSpace($intentId)) { $intentId = Try-Get { $step06.response.id } }
   $step06Ok = ($step06.status -eq 200) -and (-not [string]::IsNullOrWhiteSpace($intentId))
   $step06Note = if ($step06Ok) { "Created intent_id=$intentId" } else { "Expected HTTP 200 and intent id" }
-  Save-Step -StepId "step_06_intent_create" -ArtifactFile "step_06_intent_create.json" -Ok $step06Ok -Status "$($step06.status)" -Note $step06Note -DurationMs ([int]$step06.duration_ms) -TraceIds @($step06.trace_id) -Payload ([ordered]@{ intent_id = $intentId; call = $step06 })
+  Save-Step -StepId "06_intent_create" -ArtifactFile "06_intent_create.json" -Ok $step06Ok -Status "$($step06.status)" -Note $step06Note -DurationMs ([int]$step06.duration_ms) -TraceIds @($step06.trace_id) -Payload ([ordered]@{ intent_id = $intentId; call = $step06 })
 } else {
-  Save-Step -StepId "step_06_intent_create" -ArtifactFile "step_06_intent_create.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and purchase id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
+  Save-Step -StepId "06_intent_create" -ArtifactFile "06_intent_create.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and purchase id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
 }
 # Step 07: Webhook simulation (staging only test mode)
-$runWebhookSim = $paymentsTestModeBool -and ($normalizedEnv -ne "prod") -and ($normalizedEnv -ne "production") -and (-not [string]::IsNullOrWhiteSpace($purchaseId))
+$runWebhookSim = $smokeWebhookSimBool -and ($normalizedEnv -ne "prod") -and ($normalizedEnv -ne "production") -and (-not [string]::IsNullOrWhiteSpace($purchaseId))
 if ($runWebhookSim) {
   $providerEventId = "evt-smoke-" + [guid]::NewGuid().ToString("N")
   $webhookPayload = [ordered]@{
@@ -478,7 +597,7 @@ if ($runWebhookSim) {
     }
   }
   $payloadJson = $webhookPayload | ConvertTo-Json -Depth 20 -Compress
-  $headers = @{ Authorization = "Bearer $AccessToken" }
+  $headers = @{}
 
   if (-not [string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $hmac256 = New-Object System.Security.Cryptography.HMACSHA256
@@ -499,14 +618,14 @@ if ($runWebhookSim) {
   $step07 = Invoke-SmokeRequest -Method "POST" -Path "/webhooks/payments" -Body $webhookPayload -Headers $headers
   $step07Ok = ($step07.status -eq 200) -or ($step07.status -eq 202)
   $step07Note = if ($step07Ok) { "Webhook simulation accepted" } else { "Expected HTTP 200/202 from webhook simulation" }
-  Save-Step -StepId "step_07_webhook_sim" -ArtifactFile "step_07_webhook_sim.json" -Ok $step07Ok -Status "$($step07.status)" -Note $step07Note -DurationMs ([int]$step07.duration_ms) -TraceIds @($step07.trace_id) -Payload ([ordered]@{ provider_event_id = $providerEventId; call = $step07 })
+  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $step07Ok -Status "$($step07.status)" -Note $step07Note -DurationMs ([int]$step07.duration_ms) -TraceIds @($step07.trace_id) -Payload ([ordered]@{ provider_event_id = $providerEventId; call = $step07 })
 } else {
-  $skipReason = "Webhook simulation skipped (requires non-production env, PAYMENTS_TEST_MODE=true, and purchase id)"
-  Save-Step -StepId "step_07_webhook_sim" -ArtifactFile "step_07_webhook_sim.json" -Ok $true -Status "skipped" -Note $skipReason -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ skipped = $true; reason = $skipReason })
+  $skipReason = "Webhook simulation skipped (requires non-production env, SMOKE_WEBHOOK_SIM=true, and purchase id)"
+  Save-Step -StepId "07_webhook_sim" -ArtifactFile "07_webhook_sim.json" -Ok $true -Status "skipped" -Note $skipReason -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ skipped = $true; reason = $skipReason })
 }
 
 # Step 08: Purchase polling up to 45s
-if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOrWhiteSpace($purchaseId)) {
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsNullOrWhiteSpace($purchaseId)) {
   $pollOps = New-Object System.Collections.Generic.List[object]
   $pollStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
   $deadlineAt = [DateTime]::UtcNow.AddSeconds(45)
@@ -514,7 +633,7 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
   $terminalOutcome = "timeout"
 
   while ($true) {
-    $pollCall = Invoke-SmokeRequest -Method "GET" -Path "/marketplace/purchases/$purchaseId" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
+    $pollCall = Invoke-SmokeRequest -Method "GET" -Path "/marketplace/purchases/$purchaseId" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
     $pollOps.Add($pollCall)
     $pollHttpStatus = [int]$pollCall.status
     $finalStatus = Try-Get { $pollCall.response.data.status }
@@ -530,6 +649,10 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
       $terminalOutcome = "paid"
       break
     }
+    if (-not $smokeWebhookSimBool -and ($finalStatus -eq "pending_payment" -or $finalStatus -eq "pending")) {
+      $terminalOutcome = "pending"
+      break
+    }
     if ($finalStatus -eq "failed" -or $finalStatus -eq "canceled" -or $finalStatus -eq "cancelled") {
       $terminalOutcome = "failed"
       break
@@ -542,56 +665,64 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
   }
 
   $pollStopwatch.Stop()
-  $step08Ok = $terminalOutcome -eq "paid"
+  $step08Ok = ($terminalOutcome -eq "paid") -or ((-not $smokeWebhookSimBool) -and ($terminalOutcome -eq "pending"))
   $step08Status = if ($step08Ok) { "ok" } else { $terminalOutcome }
-  $step08Note = if ($step08Ok) { "Purchase reached terminal paid state ($finalStatus)" } else { "Purchase status=$finalStatus" }
+  $step08Note = if ($step08Ok) {
+    if ($terminalOutcome -eq "paid") {
+      "Purchase reached terminal paid state ($finalStatus)"
+    } else {
+      "Purchase remained pending as expected when SMOKE_WEBHOOK_SIM=false ($finalStatus)"
+    }
+  } else {
+    "Purchase status=$finalStatus"
+  }
   $step08TraceIds = @($pollOps | ForEach-Object { $_.trace_id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
-  Save-Step -StepId "step_08_purchase_get" -ArtifactFile "step_08_purchase_get.json" -Ok $step08Ok -Status $step08Status -Note $step08Note -DurationMs ([int]$pollStopwatch.ElapsedMilliseconds) -TraceIds $step08TraceIds -Payload ([ordered]@{ purchase_id = $purchaseId; final_status = $finalStatus; terminal_outcome = $terminalOutcome; attempts = $pollOps })
+  Save-Step -StepId "08_purchase_poll" -ArtifactFile "08_purchase_poll.json" -Ok $step08Ok -Status $step08Status -Note $step08Note -DurationMs ([int]$pollStopwatch.ElapsedMilliseconds) -TraceIds $step08TraceIds -Payload ([ordered]@{ purchase_id = $purchaseId; final_status = $finalStatus; terminal_outcome = $terminalOutcome; attempts = $pollOps })
 } else {
-  Save-Step -StepId "step_08_purchase_get" -ArtifactFile "step_08_purchase_get.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and purchase id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
+  Save-Step -StepId "08_purchase_poll" -ArtifactFile "08_purchase_poll.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and purchase id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
 }
 
 # Step 09: Dispatch quote
-if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $step09 = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/quote" -Body @{ pickup = @{ lat = 6.455; lng = 3.384 }; dropoff = @{ lat = 6.6018; lng = 3.3515 }; service_level = "standard" } -Headers @{ Authorization = "Bearer $AccessToken" }
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $step09 = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/quote" -Body @{ pickup = @{ lat = 6.455; lng = 3.384 }; dropoff = @{ lat = 6.6018; lng = 3.3515 }; service_level = "standard" } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $hasFields = ($null -ne $step09.response.distance_km) -and ($null -ne $step09.response.duration_min_est) -and ($null -ne $step09.response.price_minor) -and (-not [string]::IsNullOrWhiteSpace((Try-Get { $step09.response.currency })))
   $step09Ok = ($step09.status -eq 200) -and $hasFields
   $step09Note = if ($step09Ok) { "Quote validated (price_minor=$($step09.response.price_minor), distance_km=$($step09.response.distance_km))" } else { "Expected HTTP 200 with distance_km, duration_min_est, price_minor, currency" }
-  Save-Step -StepId "step_09_quote" -ArtifactFile "step_09_quote.json" -Ok $step09Ok -Status "$($step09.status)" -Note $step09Note -DurationMs ([int]$step09.duration_ms) -TraceIds @($step09.trace_id) -Payload ([ordered]@{ call = $step09 })
+  Save-Step -StepId "09_quote" -ArtifactFile "09_quote.json" -Ok $step09Ok -Status "$($step09.status)" -Note $step09Note -DurationMs ([int]$step09.duration_ms) -TraceIds @($step09.trace_id) -Payload ([ordered]@{ call = $step09 })
 } else {
-  Save-Step -StepId "step_09_quote" -ArtifactFile "step_09_quote.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
+  Save-Step -StepId "09_quote" -ArtifactFile "09_quote.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
 }
 
 # Step 10: Trip create
-if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $step10 = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips" -Body @{ pickup = @{ lat = 6.455; lng = 3.384; address = "Lagos Island" }; dropoff = @{ lat = 6.6018; lng = 3.3515; address = "Ikeja" }; notes = "smoke run" } -Headers @{ Authorization = "Bearer $AccessToken" }
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $step10 = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips" -Body @{ pickup = @{ lat = 6.455; lng = 3.384; address = "Lagos Island" }; dropoff = @{ lat = 6.6018; lng = 3.3515; address = "Ikeja" }; notes = "smoke run" } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $tripId = Try-Get { $step10.response.trip.id }
   if ([string]::IsNullOrWhiteSpace($tripId)) {
     $tripId = Try-Get { $step10.response.data.trip.id }
   }
-  $step10Ok = ($step10.status -eq 201) -and (-not [string]::IsNullOrWhiteSpace($tripId))
-  $step10Note = if ($step10Ok) { "Created trip_id=$tripId" } else { "Expected HTTP 201 and trip id" }
-  Save-Step -StepId "step_10_trip_create" -ArtifactFile "step_10_trip_create.json" -Ok $step10Ok -Status "$($step10.status)" -Note $step10Note -DurationMs ([int]$step10.duration_ms) -TraceIds @($step10.trace_id) -Payload ([ordered]@{ trip_id = $tripId; call = $step10 })
+  $step10Ok = (($step10.status -eq 200) -or ($step10.status -eq 201)) -and (-not [string]::IsNullOrWhiteSpace($tripId))
+  $step10Note = if ($step10Ok) { "Created trip_id=$tripId" } else { "Expected HTTP 200/201 and trip id" }
+  Save-Step -StepId "10_trip_create" -ArtifactFile "10_trip_create.json" -Ok $step10Ok -Status "$($step10.status)" -Note $step10Note -DurationMs ([int]$step10.duration_ms) -TraceIds @($step10.trace_id) -Payload ([ordered]@{ trip_id = $tripId; call = $step10 })
 } else {
-  Save-Step -StepId "step_10_trip_create" -ArtifactFile "step_10_trip_create.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
+  Save-Step -StepId "10_trip_create" -ArtifactFile "10_trip_create.json" -Ok $false -Status "missing_auth" -Note "Access token unavailable" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_access_token" })
 }
 
 # Step 11: Trip status lifecycle + assignment
-if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOrWhiteSpace($tripId)) {
+if (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken) -and -not [string]::IsNullOrWhiteSpace($tripId)) {
   $step11Ops = New-Object System.Collections.Generic.List[object]
   $step11Watch = [System.Diagnostics.Stopwatch]::StartNew()
   $step11FlowOk = $true
   $step11Note = "Trip reached delivered state"
   $assignSupported = "unknown"
 
-  $searchingCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = "searching" } -Headers @{ Authorization = "Bearer $AccessToken" }
+  $searchingCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = "searching" } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $step11Ops.Add($searchingCall)
   if ($searchingCall.status -ne 200) {
     $step11FlowOk = $false
     $step11Note = "Failed to transition trip to searching"
   }
 
-  $driverId = $TestDriverId
+  $driverId = $SmokeDriverId
   if ($step11FlowOk -and [string]::IsNullOrWhiteSpace($driverId)) {
     $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $driverEmail = "smoke.driver.$stamp@hailo.dev"
@@ -614,13 +745,13 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
   }
 
   if ($step11FlowOk) {
-    $assignCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/assign" -Body @{ driver_id = $driverId } -Headers @{ Authorization = "Bearer $AccessToken" }
+    $assignCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/assign" -Body @{ driver_id = $driverId } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
     $step11Ops.Add($assignCall)
     if ($assignCall.status -eq 200) {
       $assignSupported = "true"
     } elseif ($assignCall.status -eq 404 -or $assignCall.status -eq 405) {
       $assignSupported = "false"
-      $assignedFallback = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = "assigned" } -Headers @{ Authorization = "Bearer $AccessToken" }
+      $assignedFallback = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = "assigned" } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
       $step11Ops.Add($assignedFallback)
       if ($assignedFallback.status -ne 200) {
         $step11FlowOk = $false
@@ -636,7 +767,7 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
     if (-not $step11FlowOk) {
       break
     }
-    $transitionCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = $transition } -Headers @{ Authorization = "Bearer $AccessToken" }
+    $transitionCall = Invoke-SmokeRequest -Method "POST" -Path "/dispatch/trips/$tripId/status" -Body @{ status = $transition } -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
     $step11Ops.Add($transitionCall)
     if ($transitionCall.status -ne 200) {
       $step11FlowOk = $false
@@ -646,7 +777,7 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
   }
 
   if ($step11FlowOk) {
-    $tripGetCall = Invoke-SmokeRequest -Method "GET" -Path "/dispatch/trips/$tripId" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
+    $tripGetCall = Invoke-SmokeRequest -Method "GET" -Path "/dispatch/trips/$tripId" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
     $step11Ops.Add($tripGetCall)
     if ($tripGetCall.status -ne 200) {
       $step11FlowOk = $false
@@ -667,9 +798,9 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -and -not [string]::IsNullOr
   $step11Watch.Stop()
   $step11TraceIds = @($step11Ops | ForEach-Object { $_.trace_id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
   $step11Status = if ($step11FlowOk) { "ok" } else { "trip_flow_failed" }
-  Save-Step -StepId "step_11_trip_status" -ArtifactFile "step_11_trip_status.json" -Ok $step11FlowOk -Status $step11Status -Note $step11Note -DurationMs ([int]$step11Watch.ElapsedMilliseconds) -TraceIds $step11TraceIds -Payload ([ordered]@{ trip_id = $tripId; assign_supported = $assignSupported; note = $step11Note; operations = $step11Ops })
+  Save-Step -StepId "11_trip_status_flow" -ArtifactFile "11_trip_status_flow.json" -Ok $step11FlowOk -Status $step11Status -Note $step11Note -DurationMs ([int]$step11Watch.ElapsedMilliseconds) -TraceIds $step11TraceIds -Payload ([ordered]@{ trip_id = $tripId; assign_supported = $assignSupported; note = $step11Note; operations = $step11Ops })
 } else {
-  Save-Step -StepId "step_11_trip_status" -ArtifactFile "step_11_trip_status.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and trip id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
+  Save-Step -StepId "11_trip_status_flow" -ArtifactFile "11_trip_status_flow.json" -Ok $false -Status "prerequisite_missing" -Note "Requires access token and trip id" -DurationMs 0 -TraceIds @() -Payload ([ordered]@{ error = "missing_prerequisites" })
 }
 # Step 12: Admin metrics/users/trips
 $adminOps = New-Object System.Collections.Generic.List[object]
@@ -701,12 +832,12 @@ if ($adminTokenEnabledBool -and -not [string]::IsNullOrWhiteSpace($AdminToken)) 
     $adminOk = $false
     $adminNote = "Admin metrics request failed with admin token"
   }
-} elseif (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $bearerMetrics = Invoke-SmokeRequest -Method "GET" -Path "/admin/metrics" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
+} elseif (-not [string]::IsNullOrWhiteSpace($SmokeAccessToken)) {
+  $bearerMetrics = Invoke-SmokeRequest -Method "GET" -Path "/admin/metrics" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
   $adminOps.Add($bearerMetrics)
   if ($bearerMetrics.status -eq 200) {
-    $bearerUsers = Invoke-SmokeRequest -Method "GET" -Path "/admin/users?limit=5" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
-    $bearerTrips = Invoke-SmokeRequest -Method "GET" -Path "/admin/trips?limit=5" -Body $null -Headers @{ Authorization = "Bearer $AccessToken" }
+    $bearerUsers = Invoke-SmokeRequest -Method "GET" -Path "/admin/users?limit=5" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
+    $bearerTrips = Invoke-SmokeRequest -Method "GET" -Path "/admin/trips?limit=5" -Body $null -Headers @{ Authorization = "Bearer $SmokeAccessToken" }
     $adminOps.Add($bearerUsers)
     $adminOps.Add($bearerTrips)
     if ($bearerUsers.status -eq 200 -and $bearerTrips.status -eq 200) {
@@ -731,7 +862,7 @@ if ($adminTokenEnabledBool -and -not [string]::IsNullOrWhiteSpace($AdminToken)) 
 
 $step12Duration = Sum-DurationMs $adminOps
 $step12TraceIds = @($adminOps | ForEach-Object { $_.trace_id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
-Save-Step -StepId "step_12_admin_metrics" -ArtifactFile "step_12_admin_metrics.json" -Ok $adminOk -Status $adminStatus -Note $adminNote -DurationMs $step12Duration -TraceIds $step12TraceIds -Payload ([ordered]@{ note = $adminNote; operations = $adminOps })
+Save-Step -StepId "12_admin_metrics" -ArtifactFile "12_admin_metrics.json" -Ok $adminOk -Status $adminStatus -Note $adminNote -DurationMs $step12Duration -TraceIds $step12TraceIds -Payload ([ordered]@{ note = $adminNote; operations = $adminOps })
 
 $summary = [ordered]@{
   ok = $overallOk

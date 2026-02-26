@@ -1,6 +1,7 @@
 param(
   [string]$EnvName = "",
   [string]$BaseUrl = "",
+  [string]$BaseStaging = "",
   [string]$StagingBaseUrl = "",
   [string]$RequiredMigrationHead = "",
   [switch]$RequireParity
@@ -15,7 +16,13 @@ if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
   $BaseUrl = $env:BASE_URL
 }
 if ([string]::IsNullOrWhiteSpace($StagingBaseUrl)) {
-  $StagingBaseUrl = $env:STAGING_BASE_URL
+  if (-not [string]::IsNullOrWhiteSpace($BaseStaging)) {
+    $StagingBaseUrl = $BaseStaging
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:BASE_STAGING)) {
+    $StagingBaseUrl = $env:BASE_STAGING
+  } else {
+    $StagingBaseUrl = $env:STAGING_BASE_URL
+  }
 }
 if ([string]::IsNullOrWhiteSpace($RequiredMigrationHead)) {
   $RequiredMigrationHead = $env:REQUIRED_MIGRATION_HEAD
@@ -179,7 +186,7 @@ if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
     Fail("missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)")
   }
   if ([string]::IsNullOrWhiteSpace($StagingBaseUrl)) {
-    Fail("staging base URL is required for prod release gate (-StagingBaseUrl)")
+    Fail("BASE_STAGING is required for prod release gate (-BaseStaging or -StagingBaseUrl)")
   }
 } else {
   Require-Env "JWT_SECRET"
@@ -188,44 +195,45 @@ if ($normalizedEnv -eq "prod" -or $normalizedEnv -eq "production") {
   }
 }
 
-$adminToken = if (-not [string]::IsNullOrWhiteSpace($env:E2E_ADMIN_TOKEN)) {
-  $env:E2E_ADMIN_TOKEN
-} else {
+$adminToken = if (-not [string]::IsNullOrWhiteSpace($env:ADMIN_TOKEN)) {
   $env:ADMIN_TOKEN
-}
-if ([string]::IsNullOrWhiteSpace($adminToken)) {
-  Fail("set E2E_ADMIN_TOKEN or ADMIN_TOKEN for admin flow smoke checks")
+} else {
+  $env:E2E_ADMIN_TOKEN
 }
 $adminTokenEnabled = To-Bool $env:ADMIN_TOKEN_ENABLED
-if (-not $adminTokenEnabled) {
-  Fail("set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks")
-}
 
-if (-not [string]::IsNullOrWhiteSpace($env:TEST_ACCESS_TOKEN)) {
-  $testAccessToken = $env:TEST_ACCESS_TOKEN
+if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_ACCESS_TOKEN)) {
+  $smokeAccessToken = $env:SMOKE_ACCESS_TOKEN
+} elseif (-not [string]::IsNullOrWhiteSpace($env:TEST_ACCESS_TOKEN)) {
+  $smokeAccessToken = $env:TEST_ACCESS_TOKEN
 } else {
-  $testAccessToken = $env:E2E_ACCESS_TOKEN
+  $smokeAccessToken = $env:E2E_ACCESS_TOKEN
 }
-if (-not [string]::IsNullOrWhiteSpace($env:TEST_PHONE_E164)) {
-  $testPhone = $env:TEST_PHONE_E164
+if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_PHONE_E164)) {
+  $smokePhone = $env:SMOKE_PHONE_E164
+} elseif (-not [string]::IsNullOrWhiteSpace($env:TEST_PHONE_E164)) {
+  $smokePhone = $env:TEST_PHONE_E164
 } else {
-  $testPhone = $env:E2E_PHONE_E164
+  $smokePhone = $env:E2E_PHONE_E164
 }
-if (-not [string]::IsNullOrWhiteSpace($env:TEST_OTP)) {
-  $testOtp = $env:TEST_OTP
+if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_OTP_CODE)) {
+  $smokeOtp = $env:SMOKE_OTP_CODE
+} elseif (-not [string]::IsNullOrWhiteSpace($env:TEST_OTP)) {
+  $smokeOtp = $env:TEST_OTP
 } else {
-  $testOtp = $env:E2E_OTP_CODE
+  $smokeOtp = $env:E2E_OTP_CODE
 }
-$paymentsTestMode = if (-not [string]::IsNullOrWhiteSpace($env:PAYMENTS_TEST_MODE)) {
+$smokeWebhookSim = if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_WEBHOOK_SIM)) {
+  $env:SMOKE_WEBHOOK_SIM
+} elseif (-not [string]::IsNullOrWhiteSpace($env:PAYMENTS_TEST_MODE)) {
   $env:PAYMENTS_TEST_MODE
 } else {
   "false"
 }
-
-if ([string]::IsNullOrWhiteSpace($testAccessToken)) {
-  if ([string]::IsNullOrWhiteSpace($testPhone) -or [string]::IsNullOrWhiteSpace($testOtp)) {
-    Fail("set TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN) OR provide TEST_PHONE_E164/TEST_OTP (or E2E_* equivalents)")
-  }
+$smokeMintPath = if (-not [string]::IsNullOrWhiteSpace($env:SMOKE_MINT_PATH)) {
+  $env:SMOKE_MINT_PATH
+} else {
+  "/admin/smoke/mint_token"
 }
 
 $targetLabel = if ($normalizedEnv) { $normalizedEnv } else { "staging" }
@@ -262,14 +270,22 @@ Write-Host "[release-gate] running smoke_e2e.ps1 against $smokeBase"
 $smokeArgs = @(
   "-BaseUrl", $smokeBase,
   "-EnvName", $smokeEnv,
-  "-AdminToken", $adminToken,
   "-AdminTokenEnabled", "$adminTokenEnabled",
-  "-PaymentsTestMode", "$paymentsTestMode"
+  "-SmokeWebhookSim", "$smokeWebhookSim",
+  "-SmokeMintPath", "$smokeMintPath"
 )
-if (-not [string]::IsNullOrWhiteSpace($testAccessToken)) {
-  $smokeArgs += @("-AccessToken", $testAccessToken)
+if (-not [string]::IsNullOrWhiteSpace($adminToken)) {
+  $smokeArgs += @("-AdminToken", $adminToken)
+}
+if (-not [string]::IsNullOrWhiteSpace($smokeAccessToken)) {
+  $smokeArgs += @("-SmokeAccessToken", $smokeAccessToken)
 } else {
-  $smokeArgs += @("-TestPhoneE164", $testPhone, "-TestOtp", $testOtp)
+  if (-not [string]::IsNullOrWhiteSpace($smokePhone)) {
+    $smokeArgs += @("-SmokePhoneE164", $smokePhone)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($smokeOtp)) {
+    $smokeArgs += @("-SmokeOtpCode", $smokeOtp)
+  }
 }
 & $smokeScript @smokeArgs
 if ($LASTEXITCODE -ne 0) {

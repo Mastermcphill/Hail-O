@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_NAME="staging"
 BASE_URL="${BASE_URL:-}"
-STAGING_BASE_URL="${STAGING_BASE_URL:-}"
+BASE_STAGING="${BASE_STAGING:-${STAGING_BASE_URL:-}}"
 REQUIRED_MIGRATION_HEAD="${REQUIRED_MIGRATION_HEAD:-}"
 REQUIRE_PARITY="${RELEASE_GATE_REQUIRE_PARITY:-false}"
 
@@ -17,19 +17,21 @@ Usage: release_gate.sh --env=<staging|prod> --base=<url> [options]
 Options:
   --env=<name>                     Target environment label (staging|prod)
   --base=<url>                     Target environment base URL
-  --staging-base=<url>             Staging base URL (required when --env=prod)
+  --base-staging=<url>             Staging base URL (required when --env=prod)
   --required-migration-head=<num>  Optional migration head assertion
   --require-parity=<true|false>    Fail if staging/target commits differ
 
 Environment variable fallbacks:
-  BASE_URL, STAGING_BASE_URL, REQUIRED_MIGRATION_HEAD,
+  BASE_URL, BASE_STAGING, STAGING_BASE_URL, REQUIRED_MIGRATION_HEAD,
   RELEASE_GATE_REQUIRE_PARITY.
 
 Smoke envs:
-  TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN)
-  TEST_PHONE_E164 (or E2E_PHONE_E164)
-  TEST_OTP (or E2E_OTP_CODE)
-  PAYMENTS_TEST_MODE
+  SMOKE_ACCESS_TOKEN
+  SMOKE_PHONE_E164
+  SMOKE_OTP_CODE
+  SMOKE_WEBHOOK_SIM
+  SMOKE_MINT_PATH
+  ADMIN_TOKEN / ADMIN_TOKEN_ENABLED
 EOF
 }
 
@@ -131,7 +133,7 @@ for arg in "$@"; do
   case "$arg" in
     --env=*) ENV_NAME="${arg#*=}" ;;
     --base=*) BASE_URL="${arg#*=}" ;;
-    --staging-base=*) STAGING_BASE_URL="${arg#*=}" ;;
+    --base-staging=*|--staging-base=*) BASE_STAGING="${arg#*=}" ;;
     --required-migration-head=*) REQUIRED_MIGRATION_HEAD="${arg#*=}" ;;
     --require-parity=*) REQUIRE_PARITY="${arg#*=}" ;;
     -h|--help)
@@ -151,7 +153,7 @@ if [[ -z "${BASE_URL// }" ]]; then
   fail "BASE_URL is required (--base=...)"
 fi
 BASE_URL="${BASE_URL%/}"
-STAGING_BASE_URL="${STAGING_BASE_URL%/}"
+BASE_STAGING="${BASE_STAGING%/}"
 
 require_cmd curl
 require_cmd jq
@@ -167,8 +169,8 @@ if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
   if [[ -z "${PAYMENTS_PROVIDER_VALUE// }" ]]; then
     fail "missing required env var: PAYMENTS_PROVIDER (or PAYMENT_PROVIDER)"
   fi
-  if [[ -z "${STAGING_BASE_URL// }" ]]; then
-    fail "staging base URL is required for prod release gate (--staging-base=...)"
+  if [[ -z "${BASE_STAGING// }" ]]; then
+    fail "BASE_STAGING is required for prod release gate (--base-staging=...)"
   fi
 else
   require_env JWT_SECRET
@@ -177,32 +179,20 @@ else
   fi
 fi
 
-ADMIN_TOKEN_VALUE="${E2E_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}"
-if [[ -z "${ADMIN_TOKEN_VALUE// }" ]]; then
-  fail "set E2E_ADMIN_TOKEN or ADMIN_TOKEN for admin flow smoke checks"
-fi
-ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "${ADMIN_TOKEN_ENABLED:-}")"
-if [[ "${ADMIN_TOKEN_ENABLED_VALUE}" != "true" ]]; then
-  fail "set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks"
-fi
-
-TEST_ACCESS_TOKEN_VALUE="${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}"
-TEST_PHONE_VALUE="${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}"
-TEST_OTP_VALUE="${TEST_OTP:-${E2E_OTP_CODE:-}}"
-PAYMENTS_TEST_MODE_VALUE="$(normalize_bool "${PAYMENTS_TEST_MODE:-false}")"
-
-if [[ -z "${TEST_ACCESS_TOKEN_VALUE// }" ]]; then
-  if [[ -z "${TEST_PHONE_VALUE// }" || -z "${TEST_OTP_VALUE// }" ]]; then
-    fail "set TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN) OR provide TEST_PHONE_E164/TEST_OTP (or E2E_* equivalents)"
-  fi
-fi
+ADMIN_TOKEN_VALUE="${ADMIN_TOKEN:-${E2E_ADMIN_TOKEN:-}}"
+ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "${ADMIN_TOKEN_ENABLED:-false}")"
+SMOKE_ACCESS_TOKEN_VALUE="${SMOKE_ACCESS_TOKEN:-${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}}"
+SMOKE_PHONE_VALUE="${SMOKE_PHONE_E164:-${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}}"
+SMOKE_OTP_VALUE="${SMOKE_OTP_CODE:-${TEST_OTP:-${E2E_OTP_CODE:-}}}"
+SMOKE_WEBHOOK_SIM_VALUE="$(normalize_bool "${SMOKE_WEBHOOK_SIM:-${PAYMENTS_TEST_MODE:-false}}")"
+SMOKE_MINT_PATH_VALUE="${SMOKE_MINT_PATH:-/admin/smoke/mint_token}"
 
 TARGET_LABEL="$ENV_NAME"
 SMOKE_BASE="$BASE_URL"
 SMOKE_ENV="$ENV_NAME"
 
 if [[ "$ENV_NAME" == "prod" || "$ENV_NAME" == "production" ]]; then
-  SMOKE_BASE="$STAGING_BASE_URL"
+  SMOKE_BASE="$BASE_STAGING"
   SMOKE_ENV="staging"
 fi
 
@@ -233,14 +223,22 @@ echo "[release-gate] running smoke_e2e.sh against ${SMOKE_BASE}"
     "${ROOT_DIR}/ops/smoke_e2e.sh"
     "--base=${SMOKE_BASE}"
     "--env=${SMOKE_ENV}"
-    "--admin-token=${ADMIN_TOKEN_VALUE}"
     "--admin-token-enabled=${ADMIN_TOKEN_ENABLED_VALUE}"
-    "--payments-test-mode=${PAYMENTS_TEST_MODE_VALUE}"
+    "--smoke-webhook-sim=${SMOKE_WEBHOOK_SIM_VALUE}"
+    "--smoke-mint-path=${SMOKE_MINT_PATH_VALUE}"
   )
-  if [[ -n "${TEST_ACCESS_TOKEN_VALUE// }" ]]; then
-    smoke_cmd+=("--access-token=${TEST_ACCESS_TOKEN_VALUE}")
+  if [[ -n "${ADMIN_TOKEN_VALUE// }" ]]; then
+    smoke_cmd+=("--admin-token=${ADMIN_TOKEN_VALUE}")
+  fi
+  if [[ -n "${SMOKE_ACCESS_TOKEN_VALUE// }" ]]; then
+    smoke_cmd+=("--smoke-access-token=${SMOKE_ACCESS_TOKEN_VALUE}")
   else
-    smoke_cmd+=("--test-phone=${TEST_PHONE_VALUE}" "--test-otp=${TEST_OTP_VALUE}")
+    if [[ -n "${SMOKE_PHONE_VALUE// }" ]]; then
+      smoke_cmd+=("--smoke-phone=${SMOKE_PHONE_VALUE}")
+    fi
+    if [[ -n "${SMOKE_OTP_VALUE// }" ]]; then
+      smoke_cmd+=("--smoke-otp=${SMOKE_OTP_VALUE}")
+    fi
   fi
   "${smoke_cmd[@]}"
 )

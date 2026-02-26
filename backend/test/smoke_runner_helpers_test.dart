@@ -43,7 +43,7 @@ void main() {
 
       final file = await writeSmokeArtifact(
         runDir: tempDir,
-        fileName: 'step_01_health.json',
+        fileName: '01_health.json',
         payload: <String, Object?>{'ok': true, 'status': 200},
       );
 
