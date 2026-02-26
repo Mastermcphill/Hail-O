@@ -277,6 +277,208 @@ void main() {
     expect(allIds, expectedIds);
     expect(allIds.toSet().length, allIds.length);
   });
+
+  test('assigning driver creates assignment and updates trip status', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final rider = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.rider@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-assign-rider-register',
+    );
+    final driver = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.driver@example.com',
+      role: 'driver',
+      registerKey: 'dispatch-assign-driver-register',
+    );
+
+    final createResponse = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips',
+      token: rider.token,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
+        'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
+      },
+    );
+    expect(createResponse.statusCode, 201);
+    final createBody = await _decodeBody(createResponse);
+    final tripId =
+        (Map<String, Object?>.from(createBody['trip'] as Map)['id']
+            as String?) ??
+        '';
+    expect(tripId.isNotEmpty, isTrue);
+
+    final assignResponse = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips/$tripId/assign',
+      token: rider.token,
+      body: <String, Object?>{'driver_id': driver.userId},
+    );
+    expect(assignResponse.statusCode, 200);
+    final assignBody = await _decodeBody(assignResponse);
+    final trip = Map<String, Object?>.from(assignBody['trip'] as Map);
+    final assignment = Map<String, Object?>.from(
+      assignBody['assignment'] as Map,
+    );
+    expect(trip['status'], 'assigned');
+    expect(assignment['trip_id'], tripId);
+    expect(assignment['driver_id'], driver.userId);
+    expect(assignment['status'], 'assigned');
+
+    final assignmentRows = await db.query(
+      'trip_assignments',
+      where: 'trip_id = ?',
+      whereArgs: <Object>[tripId],
+      limit: 1,
+    );
+    expect(assignmentRows.length, 1);
+    expect(assignmentRows.first['driver_id'], driver.userId);
+    expect(assignmentRows.first['status'], 'assigned');
+
+    final eventRows = await db.query(
+      'trip_events',
+      columns: <String>['to_status'],
+      where: 'trip_id = ?',
+      whereArgs: <Object>[tripId],
+      orderBy: 'created_at ASC',
+    );
+    final statuses = eventRows
+        .map((row) => (row['to_status'] as String?) ?? '')
+        .toList(growable: false);
+    expect(statuses, contains('searching'));
+    expect(statuses, contains('assigned'));
+  });
+
+  test('assigning again returns 409', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final rider = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.again.rider@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-assign-again-rider-register',
+    );
+    final firstDriver = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.again.driver1@example.com',
+      role: 'driver',
+      registerKey: 'dispatch-assign-again-driver1-register',
+    );
+    final secondDriver = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.again.driver2@example.com',
+      role: 'driver',
+      registerKey: 'dispatch-assign-again-driver2-register',
+    );
+
+    final createResponse = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips',
+      token: rider.token,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
+        'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
+      },
+    );
+    final createBody = await _decodeBody(createResponse);
+    final tripId =
+        (Map<String, Object?>.from(createBody['trip'] as Map)['id']
+            as String?) ??
+        '';
+
+    final firstAssign = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips/$tripId/assign',
+      token: rider.token,
+      body: <String, Object?>{'driver_id': firstDriver.userId},
+    );
+    expect(firstAssign.statusCode, 200);
+
+    final secondAssign = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips/$tripId/assign',
+      token: rider.token,
+      body: <String, Object?>{'driver_id': secondDriver.userId},
+    );
+    expect(secondAssign.statusCode, 409);
+    final secondBody = await _decodeBody(secondAssign);
+    expect(secondBody['error_code'], 'TRIP_ALREADY_ASSIGNED');
+  });
+
+  test('invalid driver_id returns 404', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final rider = await _registerAndLoginSession(
+      handler,
+      email: 'dispatch.assign.invalid.rider@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-assign-invalid-rider-register',
+    );
+
+    final createResponse = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips',
+      token: rider.token,
+      body: const <String, Object?>{
+        'pickup': <String, Object?>{'lat': 6.455, 'lng': 3.384},
+        'dropoff': <String, Object?>{'lat': 6.6018, 'lng': 3.3515},
+      },
+    );
+    final createBody = await _decodeBody(createResponse);
+    final tripId =
+        (Map<String, Object?>.from(createBody['trip'] as Map)['id']
+            as String?) ??
+        '';
+
+    final assignResponse = await _request(
+      handler,
+      method: 'POST',
+      path: '/dispatch/trips/$tripId/assign',
+      token: rider.token,
+      body: const <String, Object?>{
+        'driver_id': '00000000-0000-4000-8000-000000000000',
+      },
+    );
+    expect(assignResponse.statusCode, 404);
+    final body = await _decodeBody(assignResponse);
+    expect(body['error_code'], 'DRIVER_NOT_FOUND');
+  });
+
+  test('nearby drivers endpoint returns empty list when none exist', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+    final riderToken = await _registerAndLogin(
+      handler,
+      email: 'dispatch.nearby.rider@example.com',
+      role: 'rider',
+      registerKey: 'dispatch-nearby-rider-register',
+    );
+
+    final response = await _request(
+      handler,
+      method: 'GET',
+      path: '/dispatch/drivers/nearby?lat=6.45&lng=3.38&radius_km=10&limit=5',
+      token: riderToken,
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], true);
+    final drivers = (body['drivers'] as List<dynamic>? ?? const <dynamic>[]);
+    expect(drivers, isEmpty);
+  });
 }
 
 Handler _buildHandler(Database db) {
@@ -300,6 +502,21 @@ Future<String> _registerAndLogin(
   required String role,
   required String registerKey,
 }) async {
+  final session = await _registerAndLoginSession(
+    handler,
+    email: email,
+    role: role,
+    registerKey: registerKey,
+  );
+  return session.token;
+}
+
+Future<_AuthSession> _registerAndLoginSession(
+  Handler handler, {
+  required String email,
+  required String role,
+  required String registerKey,
+}) async {
   final register = await _request(
     handler,
     method: 'POST',
@@ -312,6 +529,9 @@ Future<String> _registerAndLogin(
     },
   );
   expect(register.statusCode, 201);
+  final registerBody = await _decodeBody(register);
+  final userId = (registerBody['user_id'] as String?) ?? '';
+  expect(userId.isNotEmpty, isTrue);
 
   final login = await _request(
     handler,
@@ -323,7 +543,7 @@ Future<String> _registerAndLogin(
   final loginBody = await _decodeBody(login);
   final token = (loginBody['token'] as String?) ?? '';
   expect(token.isNotEmpty, isTrue);
-  return token;
+  return _AuthSession(userId: userId, token: token);
 }
 
 Future<Response> _request(
@@ -361,4 +581,11 @@ int _requestCounter = 0;
 Future<Map<String, Object?>> _decodeBody(Response response) async {
   final decoded = jsonDecode(await response.readAsString());
   return Map<String, Object?>.from(decoded as Map<String, dynamic>);
+}
+
+class _AuthSession {
+  const _AuthSession({required this.userId, required this.token});
+
+  final String userId;
+  final String token;
 }

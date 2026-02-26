@@ -35,6 +35,8 @@ void main() {
     final phoneAuthSql = sqlByName['019_auth_phone_otp.sql'] ?? '';
     final profileRolesSql = sqlByName['020_user_profile_roles.sql'] ?? '';
     final dispatchSql = sqlByName['021_dispatch_trips.sql'] ?? '';
+    final dispatchAssignmentsSql =
+        sqlByName['022_dispatch_trip_assignments.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -328,6 +330,25 @@ void main() {
       ),
       isTrue,
       reason: 'dispatch trip events timeline index must exist',
+    );
+    expect(
+      dispatchAssignmentsSql.contains(
+        'CREATE TABLE IF NOT EXISTS trip_assignments',
+      ),
+      isTrue,
+      reason: 'dispatch trip assignments table must exist',
+    );
+    expect(
+      dispatchAssignmentsSql.contains('trip_id UUID NOT NULL UNIQUE'),
+      isTrue,
+      reason: 'dispatch trip assignments active uniqueness must exist',
+    );
+    expect(
+      dispatchAssignmentsSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_trip_assignments_driver_status_created_desc',
+      ),
+      isTrue,
+      reason: 'dispatch trip assignments driver timeline index must exist',
     );
   });
 }

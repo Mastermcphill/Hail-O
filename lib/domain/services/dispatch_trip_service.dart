@@ -5,6 +5,13 @@ import 'package:uuid/uuid.dart';
 
 import '../errors/domain_errors.dart';
 
+class DispatchNotFoundError implements Exception {
+  const DispatchNotFoundError({required this.code, required this.message});
+
+  final String code;
+  final String message;
+}
+
 class DispatchTripService {
   DispatchTripService(this._db, {Uuid? uuid, DateTime Function()? nowUtc})
     : _uuid = uuid ?? const Uuid(),
@@ -287,6 +294,184 @@ class DispatchTripService {
     };
   }
 
+  Future<Map<String, Object?>> assignDriver({
+    required String tripId,
+    required String actorUserId,
+    required bool actorIsAdmin,
+    required Map<String, Object?> payload,
+  }) async {
+    final driverId = _requiredText(
+      payload['driver_id'],
+      codeIfMissing: 'driver_id_required',
+      codeIfInvalid: 'invalid_driver_id',
+    );
+    final nowIso = _nowUtc().toUtc().toIso8601String();
+
+    Map<String, Object?>? updatedTrip;
+    Map<String, Object?>? createdAssignment;
+
+    await _db.transaction((txn) async {
+      final tripRows = await txn.query(
+        'trips',
+        where: 'id = ?',
+        whereArgs: <Object>[tripId],
+        limit: 1,
+      );
+      if (tripRows.isEmpty) {
+        throw const DispatchNotFoundError(
+          code: 'trip_not_found',
+          message: 'Trip not found',
+        );
+      }
+      final trip = Map<String, Object?>.from(tripRows.first);
+      final tripOwnerUserId = (trip['user_id'] as String?) ?? '';
+      if (!actorIsAdmin && tripOwnerUserId != actorUserId) {
+        throw const DispatchNotFoundError(
+          code: 'trip_not_found',
+          message: 'Trip not found',
+        );
+      }
+
+      await _assertValidDriver(txn, driverId: driverId);
+
+      final assignmentRows = await txn.query(
+        'trip_assignments',
+        where: 'trip_id = ?',
+        whereArgs: <Object>[tripId],
+        limit: 1,
+      );
+      if (assignmentRows.isNotEmpty) {
+        throw const DomainInvariantError(code: 'trip_already_assigned');
+      }
+
+      final currentStatus =
+          (trip['status'] as String?)?.trim().toLowerCase() ?? '';
+      if (currentStatus != 'created' && currentStatus != 'searching') {
+        throw const DomainInvariantError(
+          code: 'assignment_not_allowed_from_status',
+        );
+      }
+
+      var transitionFrom = currentStatus;
+      if (currentStatus == 'created') {
+        await txn.update(
+          'trips',
+          <String, Object?>{'status': 'searching', 'updated_at': nowIso},
+          where: 'id = ?',
+          whereArgs: <Object>[tripId],
+          conflictAlgorithm: ConflictAlgorithm.abort,
+        );
+        await _insertTripEvent(
+          txn,
+          tripId: tripId,
+          actorUserId: actorUserId,
+          fromStatus: 'created',
+          toStatus: 'searching',
+          metadata: _encodeMetadata(const <String, Object?>{
+            'reason': 'assignment_flow',
+          }),
+          createdAtIso: nowIso,
+        );
+        transitionFrom = 'searching';
+      }
+
+      final assignmentId = _uuid.v4();
+      await txn.insert('trip_assignments', <String, Object?>{
+        'id': assignmentId,
+        'trip_id': tripId,
+        'driver_id': driverId,
+        'status': 'assigned',
+        'created_at': nowIso,
+        'updated_at': nowIso,
+      }, conflictAlgorithm: ConflictAlgorithm.abort);
+
+      await txn.update(
+        'trips',
+        <String, Object?>{'status': 'assigned', 'updated_at': nowIso},
+        where: 'id = ?',
+        whereArgs: <Object>[tripId],
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+
+      await _insertTripEvent(
+        txn,
+        tripId: tripId,
+        actorUserId: actorUserId,
+        fromStatus: transitionFrom,
+        toStatus: 'assigned',
+        metadata: _encodeMetadata(<String, Object?>{
+          'assignment_id': assignmentId,
+          'driver_id': driverId,
+        }),
+        createdAtIso: nowIso,
+      );
+
+      final refreshedTripRows = await txn.query(
+        'trips',
+        where: 'id = ?',
+        whereArgs: <Object>[tripId],
+        limit: 1,
+      );
+      if (refreshedTripRows.isEmpty) {
+        throw const DispatchNotFoundError(
+          code: 'trip_not_found',
+          message: 'Trip not found',
+        );
+      }
+      updatedTrip = _tripPayloadFromRow(
+        Map<String, Object?>.from(refreshedTripRows.first),
+      );
+
+      final createdAssignmentRows = await txn.query(
+        'trip_assignments',
+        where: 'id = ?',
+        whereArgs: <Object>[assignmentId],
+        limit: 1,
+      );
+      if (createdAssignmentRows.isEmpty) {
+        throw const DomainInvariantError(code: 'assignment_persist_failed');
+      }
+      createdAssignment = _assignmentPayloadFromRow(
+        Map<String, Object?>.from(createdAssignmentRows.first),
+      );
+    });
+
+    return <String, Object?>{
+      'trip': updatedTrip ?? const <String, Object?>{},
+      'assignment': createdAssignment ?? const <String, Object?>{},
+    };
+  }
+
+  Future<Map<String, Object?>> listNearbyDrivers({required int limit}) async {
+    final hasDriverProfiles = await _tableExists(_db, 'driver_profiles');
+    if (!hasDriverProfiles) {
+      return const <String, Object?>{'drivers': <Map<String, Object?>>[]};
+    }
+    final rows = await _db.rawQuery(
+      '''
+      SELECT
+        dp.driver_id,
+        dp.status,
+        dp.safety_score,
+        dp.updated_at,
+        u.display_name,
+        u.star_rating
+      FROM driver_profiles dp
+      LEFT JOIN users u
+      ON u.id = dp.driver_id
+      ORDER BY COALESCE(u.star_rating, 0) DESC, dp.updated_at DESC
+      LIMIT ?
+      ''',
+      <Object>[limit],
+    );
+    final drivers = rows
+        .map(
+          (row) => _nearbyDriverPayloadFromRow(Map<String, Object?>.from(row)),
+        )
+        .toList(growable: false);
+    return <String, Object?>{'drivers': drivers};
+  }
+
   Future<Map<String, Object?>?> _findAccessibleTripRow({
     required String tripId,
     required String requesterUserId,
@@ -346,6 +531,27 @@ class DispatchTripService {
     };
   }
 
+  Map<String, Object?> _assignmentPayloadFromRow(Map<String, Object?> row) {
+    return <String, Object?>{
+      'id': row['id'],
+      'trip_id': row['trip_id'],
+      'driver_id': row['driver_id'],
+      'status': row['status'],
+      'created_at': _nullableTrim(row['created_at']),
+      'updated_at': _nullableTrim(row['updated_at']),
+    };
+  }
+
+  Map<String, Object?> _nearbyDriverPayloadFromRow(Map<String, Object?> row) {
+    return <String, Object?>{
+      'driver_id': row['driver_id'],
+      'display_name': _nullableTrim(row['display_name']),
+      'status': _nullableTrim(row['status']) ?? 'active',
+      'safety_score': (row['safety_score'] as num?)?.toInt() ?? 0,
+      'star_rating': (row['star_rating'] as num?)?.toDouble() ?? 0,
+    };
+  }
+
   Map<Object?, Object?>? _asObjectMap(Object? value) {
     if (value is Map<Object?, Object?>) {
       return value;
@@ -400,6 +606,24 @@ class DispatchTripService {
     return normalized;
   }
 
+  String _requiredText(
+    Object? value, {
+    required String codeIfMissing,
+    required String codeIfInvalid,
+  }) {
+    if (value == null) {
+      throw DomainInvariantError(code: codeIfMissing);
+    }
+    if (value is! String) {
+      throw DomainInvariantError(code: codeIfInvalid);
+    }
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw DomainInvariantError(code: codeIfMissing);
+    }
+    return normalized;
+  }
+
   String? _optionalIsoUtc(Object? value, {required String codeIfInvalid}) {
     final normalized = _optionalText(value, codeIfInvalid: codeIfInvalid);
     if (normalized == null) {
@@ -447,6 +671,99 @@ class DispatchTripService {
     } catch (_) {
       throw const DomainInvariantError(code: 'invalid_status_metadata');
     }
+  }
+
+  Future<void> _insertTripEvent(
+    DatabaseExecutor txn, {
+    required String tripId,
+    required String actorUserId,
+    required String? fromStatus,
+    required String toStatus,
+    required String? metadata,
+    required String createdAtIso,
+  }) {
+    return txn.insert('trip_events', <String, Object?>{
+      'id': _uuid.v4(),
+      'trip_id': tripId,
+      'actor_user_id': actorUserId,
+      'from_status': fromStatus,
+      'to_status': toStatus,
+      'metadata': metadata,
+      'created_at': createdAtIso,
+    }, conflictAlgorithm: ConflictAlgorithm.abort);
+  }
+
+  Future<void> _assertValidDriver(
+    DatabaseExecutor executor, {
+    required String driverId,
+  }) async {
+    final userRows = await executor.query(
+      'users',
+      columns: <String>['id', 'role'],
+      where: 'id = ?',
+      whereArgs: <Object>[driverId],
+      limit: 1,
+    );
+    if (userRows.isEmpty) {
+      throw const DispatchNotFoundError(
+        code: 'driver_not_found',
+        message: 'Driver not found',
+      );
+    }
+
+    final hasUserRolesTable = await _tableExists(executor, 'user_roles');
+    if (hasUserRolesTable) {
+      final roleRows = await executor.query(
+        'user_roles',
+        columns: <String>['role'],
+        where: 'user_id = ? AND role = ?',
+        whereArgs: <Object>[driverId, 'driver'],
+        limit: 1,
+      );
+      if (roleRows.isNotEmpty) {
+        return;
+      }
+      throw const DispatchNotFoundError(
+        code: 'driver_not_found',
+        message: 'Driver not found',
+      );
+    }
+
+    final userRole =
+        (userRows.first['role'] as String?)?.trim().toLowerCase() ?? '';
+    if (userRole == 'driver') {
+      return;
+    }
+
+    final hasDriverProfilesTable = await _tableExists(
+      executor,
+      'driver_profiles',
+    );
+    if (hasDriverProfilesTable) {
+      final profileRows = await executor.query(
+        'driver_profiles',
+        columns: <String>['driver_id'],
+        where: 'driver_id = ?',
+        whereArgs: <Object>[driverId],
+        limit: 1,
+      );
+      if (profileRows.isNotEmpty) {
+        return;
+      }
+    }
+
+    throw const DispatchNotFoundError(
+      code: 'driver_not_found',
+      message: 'Driver not found',
+    );
+  }
+
+  Future<bool> _tableExists(DatabaseExecutor executor, String tableName) async {
+    final rows = await executor.rawQuery(
+      'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1',
+      <Object>['table', tableName],
+    );
+    return rows.isNotEmpty;
   }
 
   Object? _decodeMetadata(Object? raw) {

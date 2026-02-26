@@ -25,6 +25,7 @@ import 'migrations/m0019_ride_request_metadata.dart';
 import 'migrations/m0020_phone_auth.dart';
 import 'migrations/m0021_user_profile_roles.dart';
 import 'migrations/m0022_dispatch_trips.dart';
+import 'migrations/m0023_dispatch_trip_assignments.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -55,6 +56,7 @@ class HailODatabase {
              M0020PhoneAuth(),
              M0021UserProfileRoles(),
              M0022DispatchTrips(),
+             M0023DispatchTripAssignments(),
            ];
 
   final String databaseName;
