@@ -9,6 +9,7 @@ import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
 import '../modules/marketplace/marketplace_offer_repository.dart';
 import '../modules/payments/manual_payment_provider.dart';
 import '../modules/payments/payment_intent_repository.dart';
+import '../modules/payments/payment_webhook_event_repository.dart';
 import '../modules/payments/payment_service.dart';
 import '../modules/payments/payment_provider.dart';
 import '../modules/payments/paystack_payment_provider.dart';
@@ -189,6 +190,87 @@ void main() {
     );
 
     test(
+      'failed webhook processing is retried from stored pending event',
+      () async {
+        final offerRepository = InMemoryMarketplaceOfferRepository();
+        final intentRepository = InMemoryPaymentIntentRepository();
+        final webhookRepository = InMemoryPaymentWebhookEventRepository();
+        final flakyLedger = _FlakyBillingLedgerRepository(
+          failEntryType: 'charge_captured',
+          failuresBeforeSuccess: 1,
+        );
+        var now = DateTime.utc(2026, 2, 1, 12, 0, 0);
+        final service = PaymentService(
+          provider: ManualPaymentProvider(),
+          offerRepository: offerRepository,
+          paymentIntentRepository: intentRepository,
+          paymentWebhookEventRepository: webhookRepository,
+          billingLedgerRepository: flakyLedger,
+          nowUtc: () => now,
+        );
+
+        final purchase = await offerRepository.createOrGetPurchase(
+          userId: 'webhook-retry-user-1',
+          offerId: 'offer_sedan_01',
+          seatCount: 1,
+          idempotencyKey: 'webhook-retry-idem-1',
+          provider: 'paystack',
+        );
+        final intent = await service.createPaymentIntent(
+          userId: purchase.userId,
+          purchaseId: purchase.id,
+        );
+
+        final body = jsonEncode(<String, Object?>{
+          'provider_event_id': 'evt-retry-1',
+          'event_type': 'payment_succeeded',
+          'purchase_id': purchase.id,
+          'amount_minor': purchase.totalAmountMinor,
+          'currency': purchase.currency,
+        });
+
+        await expectLater(
+          service.handleWebhook(
+            headers: const <String, String>{},
+            rawBody: body,
+          ),
+          throwsA(isA<StateError>()),
+        );
+
+        final pending = await webhookRepository.findEvent(
+          provider: 'manual',
+          eventId: 'evt-retry-1',
+        );
+        expect(pending, isNotNull);
+        expect(pending!.processingState, 'pending_processing');
+        expect(pending.attemptCount, 1);
+        expect((pending.lastError ?? '').isNotEmpty, isTrue);
+
+        now = now.add(const Duration(minutes: 1));
+        final retryResult = await service.retryPendingWebhooks(limit: 5);
+        expect(retryResult.scanned, 1);
+        expect(retryResult.retried, 1);
+        expect(retryResult.rescheduled, 0);
+        expect(retryResult.failed, 0);
+
+        final processed = await webhookRepository.findEvent(
+          provider: 'manual',
+          eventId: 'evt-retry-1',
+        );
+        expect(processed, isNotNull);
+        expect(processed!.processingState, 'processed');
+        expect(processed.attemptCount, 2);
+
+        final updatedIntent = await service.getPaymentIntentForUser(
+          userId: purchase.userId,
+          intentId: intent.id,
+        );
+        expect(updatedIntent, isNotNull);
+        expect(updatedIntent!.status, 'succeeded');
+      },
+    );
+
+    test(
       'createPaymentIntent persists provider_ref from checkout provider',
       () async {
         final offerRepository = InMemoryMarketplaceOfferRepository();
@@ -261,5 +343,78 @@ class _CheckoutStubProvider implements PaymentProvider {
       purchaseId: null,
       payload: <String, Object?>{},
     );
+  }
+}
+
+class _FlakyBillingLedgerRepository implements BillingLedgerRepository {
+  _FlakyBillingLedgerRepository({
+    required String failEntryType,
+    required int failuresBeforeSuccess,
+  }) : _failEntryType = failEntryType.trim().toLowerCase(),
+       _failuresLeft = failuresBeforeSuccess;
+
+  final InMemoryBillingLedgerRepository _delegate =
+      InMemoryBillingLedgerRepository();
+  final String _failEntryType;
+  int _failuresLeft;
+
+  @override
+  Future<bool> append(BillingLedgerEntryRecord entry) {
+    return appendEntry(
+      purchaseId: entry.purchaseId,
+      userId: entry.userId,
+      entryType: entry.entryType,
+      provider: entry.provider,
+      providerRef: entry.providerRef,
+      amountMinor: entry.amountMinor,
+      currency: entry.currency,
+      metadata: entry.metadata,
+      occurredAt: entry.occurredAt,
+    );
+  }
+
+  @override
+  Future<bool> appendEntry({
+    required String? purchaseId,
+    required String userId,
+    required String entryType,
+    required String provider,
+    required String providerRef,
+    required int amountMinor,
+    required String currency,
+    required Map<String, Object?> metadata,
+    DateTime? occurredAt,
+  }) async {
+    if (_failuresLeft > 0 && entryType.trim().toLowerCase() == _failEntryType) {
+      _failuresLeft -= 1;
+      throw StateError('simulated_ledger_failure');
+    }
+    return _delegate.appendEntry(
+      purchaseId: purchaseId,
+      userId: userId,
+      entryType: entryType,
+      provider: provider,
+      providerRef: providerRef,
+      amountMinor: amountMinor,
+      currency: currency,
+      metadata: metadata,
+      occurredAt: occurredAt,
+    );
+  }
+
+  @override
+  Future<List<BillingLedgerEntryRecord>> listByPurchase({
+    required String purchaseId,
+    int limit = 200,
+  }) {
+    return _delegate.listByPurchase(purchaseId: purchaseId, limit: limit);
+  }
+
+  @override
+  Future<List<BillingLedgerEntryRecord>> listByUser({
+    required String userId,
+    int limit = 200,
+  }) {
+    return _delegate.listByUser(userId: userId, limit: limit);
   }
 }

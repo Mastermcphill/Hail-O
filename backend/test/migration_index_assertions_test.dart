@@ -40,6 +40,7 @@ void main() {
     final auditLogsSql = sqlByName['023_audit_logs.sql'] ?? '';
     final adminModerationMetricsSql =
         sqlByName['024_admin_moderation_metrics.sql'] ?? '';
+    final webhookRetrySql = sqlByName['025_webhook_events_retry.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -260,6 +261,23 @@ void main() {
       ),
       isTrue,
       reason: 'webhook events dedupe index must exist',
+    );
+    expect(
+      webhookRetrySql.contains('ADD COLUMN IF NOT EXISTS processing_state'),
+      isTrue,
+      reason: 'webhook retry processing state column must exist',
+    );
+    expect(
+      webhookRetrySql.contains('ADD COLUMN IF NOT EXISTS attempt_count'),
+      isTrue,
+      reason: 'webhook retry attempt_count column must exist',
+    );
+    expect(
+      webhookRetrySql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_webhook_events_processing_retry',
+      ),
+      isTrue,
+      reason: 'webhook retry processing index must exist',
     );
     expect(
       phoneAuthSql.contains('CREATE TABLE IF NOT EXISTS users'),

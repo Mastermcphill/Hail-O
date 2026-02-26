@@ -210,6 +210,7 @@ Handler buildApiRouter({
     reconciliationService: reconciliationService,
     revenueService: revenueService,
     auditLogStore: auditLogStore,
+    paymentService: paymentService,
     paystackSecretKey: (env['PAYSTACK_SECRET_KEY'] ?? '').trim(),
     paystackApiBaseUrl: (env['PAYSTACK_API_BASE_URL'] ?? '').trim(),
   );

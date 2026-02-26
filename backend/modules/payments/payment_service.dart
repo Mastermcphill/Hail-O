@@ -32,6 +32,22 @@ class PaymentWebhookProcessResult {
   final bool signatureValid;
 }
 
+class PaymentWebhookRetryResult {
+  const PaymentWebhookRetryResult({
+    required this.scanned,
+    required this.retried,
+    required this.rescheduled,
+    required this.failed,
+    required this.skipped,
+  });
+
+  final int scanned;
+  final int retried;
+  final int rescheduled;
+  final int failed;
+  final int skipped;
+}
+
 class PaymentWebhookSignatureException implements Exception {
   const PaymentWebhookSignatureException();
 }
@@ -160,6 +176,8 @@ class PaymentService {
   static final RegExp _uuidPattern = RegExp(
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
   );
+  static const int _maxWebhookRetryAttempts = 6;
+  static const int _maxRetryBackoffSeconds = 900;
 
   String get providerName => _provider.provider;
 
@@ -323,81 +341,318 @@ class PaymentService {
       throw const PaymentWebhookSignatureException();
     }
 
+    final now = _nowUtc();
     final canonicalRecorded = await _recordCanonicalWebhookEvent(
       event: event,
-      rawBody: rawBody,
+      receivedAt: now,
     );
-    if (!canonicalRecorded) {
+    final persistedEvent = await _paymentWebhookEventRepository.findEvent(
+      provider: event.provider,
+      eventId: event.providerEventId,
+    );
+    if (!canonicalRecorded && persistedEvent != null) {
+      if (persistedEvent.isProcessed || persistedEvent.isFailed) {
+        _metrics?.recordMarketplaceWebhookEvent(
+          provider: event.provider,
+          action: 'duplicate_ignored',
+        );
+        _logWebhookOutcome(
+          provider: event.provider,
+          providerEventId: event.providerEventId,
+          verified: true,
+          action: 'duplicate_ignored',
+        );
+        return PaymentWebhookProcessResult(
+          provider: event.provider,
+          providerEventId: event.providerEventId,
+          action: 'duplicate_ignored',
+          duplicate: true,
+          signatureValid: true,
+        );
+      }
+      if (persistedEvent.processingState == 'pending_processing') {
+        final nextRetryAt = persistedEvent.nextRetryAt;
+        if (nextRetryAt != null && nextRetryAt.isAfter(now)) {
+          _metrics?.recordMarketplaceWebhookEvent(
+            provider: event.provider,
+            action: 'retry_scheduled',
+          );
+          _logWebhookOutcome(
+            provider: event.provider,
+            providerEventId: event.providerEventId,
+            verified: true,
+            action: 'retry_scheduled',
+          );
+          return PaymentWebhookProcessResult(
+            provider: event.provider,
+            providerEventId: event.providerEventId,
+            action: 'retry_scheduled',
+            duplicate: true,
+            signatureValid: true,
+          );
+        }
+      }
+    }
+
+    await _recordWebhook(event: event, rawBody: rawBody);
+
+    try {
+      final action = await _applyWebhookEvent(event);
+      await _paymentWebhookEventRepository.markEventProcessed(
+        provider: event.provider,
+        eventId: event.providerEventId,
+        processedAt: _nowUtc(),
+      );
       _metrics?.recordMarketplaceWebhookEvent(
         provider: event.provider,
-        action: 'duplicate_ignored',
+        action: action,
       );
       _logWebhookOutcome(
         provider: event.provider,
         providerEventId: event.providerEventId,
         verified: true,
-        action: 'duplicate_ignored',
+        action: action,
       );
       return PaymentWebhookProcessResult(
         provider: event.provider,
         providerEventId: event.providerEventId,
-        action: 'duplicate_ignored',
-        duplicate: true,
+        action: action,
+        duplicate: false,
         signatureValid: true,
       );
-    }
-
-    final duplicate = await _recordWebhook(event: event, rawBody: rawBody);
-    if (duplicate) {
+    } catch (error) {
+      final exhausted = await _scheduleWebhookRetry(
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        error: error,
+      );
+      final retryAction = exhausted ? 'retry_exhausted' : 'retry_scheduled';
       _metrics?.recordMarketplaceWebhookEvent(
         provider: event.provider,
-        action: 'duplicate_ignored',
+        action: retryAction,
       );
       _logWebhookOutcome(
         provider: event.provider,
         providerEventId: event.providerEventId,
         verified: true,
-        action: 'duplicate_ignored',
+        action: retryAction,
       );
-      return PaymentWebhookProcessResult(
-        provider: event.provider,
-        providerEventId: event.providerEventId,
-        action: 'duplicate_ignored',
-        duplicate: true,
-        signatureValid: true,
-      );
+      rethrow;
     }
-
-    final action = await _applyWebhookEvent(event);
-    _metrics?.recordMarketplaceWebhookEvent(
-      provider: event.provider,
-      action: action,
-    );
-    _logWebhookOutcome(
-      provider: event.provider,
-      providerEventId: event.providerEventId,
-      verified: true,
-      action: action,
-    );
-    return PaymentWebhookProcessResult(
-      provider: event.provider,
-      providerEventId: event.providerEventId,
-      action: action,
-      duplicate: false,
-      signatureValid: true,
-    );
   }
 
   Future<bool> _recordCanonicalWebhookEvent({
     required PaymentWebhookEvent event,
-    required String rawBody,
+    required DateTime receivedAt,
   }) {
+    final payload = jsonEncode(<String, Object?>{
+      'provider': event.provider,
+      'provider_event_id': event.providerEventId,
+      'event_type': event.eventType,
+      'purchase_id': event.purchaseId,
+      'payload': event.payload,
+    });
     return _paymentWebhookEventRepository.recordEvent(
       provider: event.provider,
       eventId: event.providerEventId,
-      payload: rawBody.trim().isEmpty ? jsonEncode(event.payload) : rawBody,
-      receivedAt: _nowUtc(),
+      payload: payload,
+      receivedAt: receivedAt,
     );
+  }
+
+  Future<PaymentWebhookRetryResult> retryPendingWebhooks({
+    int limit = 25,
+  }) async {
+    final safeLimit = limit < 1
+        ? 1
+        : limit > 200
+        ? 200
+        : limit;
+    final now = _nowUtc();
+    final events = await _paymentWebhookEventRepository.listRetryableEvents(
+      nowUtc: now,
+      limit: safeLimit,
+    );
+    var retried = 0;
+    var rescheduled = 0;
+    var failed = 0;
+    var skipped = 0;
+    for (final storedEvent in events) {
+      if (storedEvent.isProcessed || storedEvent.isFailed) {
+        skipped += 1;
+        continue;
+      }
+      final event = _decodeStoredWebhookEvent(storedEvent);
+      if (event == null) {
+        await _paymentWebhookEventRepository.markEventFailed(
+          provider: storedEvent.provider,
+          eventId: storedEvent.eventId,
+          lastError: 'invalid_webhook_event_payload',
+        );
+        failed += 1;
+        continue;
+      }
+      try {
+        await _recordWebhook(event: event, rawBody: jsonEncode(event.payload));
+        await _applyWebhookEvent(event);
+        await _paymentWebhookEventRepository.markEventProcessed(
+          provider: event.provider,
+          eventId: event.providerEventId,
+          processedAt: _nowUtc(),
+        );
+        _metrics?.recordMarketplaceWebhookEvent(
+          provider: event.provider,
+          action: 'retry_processed',
+        );
+        _logWebhookOutcome(
+          provider: event.provider,
+          providerEventId: event.providerEventId,
+          verified: true,
+          action: 'retry_processed',
+        );
+        retried += 1;
+      } catch (error) {
+        final exhausted = await _scheduleWebhookRetry(
+          provider: event.provider,
+          providerEventId: event.providerEventId,
+          error: error,
+        );
+        if (exhausted) {
+          failed += 1;
+          _metrics?.recordMarketplaceWebhookEvent(
+            provider: event.provider,
+            action: 'retry_exhausted',
+          );
+          _logWebhookOutcome(
+            provider: event.provider,
+            providerEventId: event.providerEventId,
+            verified: true,
+            action: 'retry_exhausted',
+          );
+        } else {
+          rescheduled += 1;
+          _metrics?.recordMarketplaceWebhookEvent(
+            provider: event.provider,
+            action: 'retry_scheduled',
+          );
+          _logWebhookOutcome(
+            provider: event.provider,
+            providerEventId: event.providerEventId,
+            verified: true,
+            action: 'retry_scheduled',
+          );
+        }
+      }
+    }
+    return PaymentWebhookRetryResult(
+      scanned: events.length,
+      retried: retried,
+      rescheduled: rescheduled,
+      failed: failed,
+      skipped: skipped,
+    );
+  }
+
+  PaymentWebhookEvent? _decodeStoredWebhookEvent(
+    PaymentWebhookStoredEvent storedEvent,
+  ) {
+    try {
+      final decoded = jsonDecode(storedEvent.payload);
+      if (decoded is! Map) {
+        return null;
+      }
+      final map = decoded.map(
+        (key, value) => MapEntry<String, Object?>(key.toString(), value),
+      );
+      final provider = (map['provider'] as String?)?.trim().toLowerCase();
+      final providerEventId =
+          (map['provider_event_id'] as String?)?.trim() ?? storedEvent.eventId;
+      final eventType = (map['event_type'] as String?)?.trim().toLowerCase();
+      final purchaseId = (map['purchase_id'] as String?)?.trim();
+      final payloadRaw = map['payload'];
+      Map<String, Object?> payload = <String, Object?>{};
+      if (payloadRaw is Map) {
+        payload = payloadRaw.map(
+          (key, value) => MapEntry<String, Object?>(key.toString(), value),
+        );
+      }
+      final resolvedProvider = (provider == null || provider.isEmpty)
+          ? storedEvent.provider
+          : provider;
+      final resolvedEventType = (eventType == null || eventType.isEmpty)
+          ? (payload['event_type'] as String?)?.trim().toLowerCase() ?? ''
+          : eventType;
+      if (resolvedProvider.trim().isEmpty ||
+          providerEventId.trim().isEmpty ||
+          resolvedEventType.trim().isEmpty) {
+        return null;
+      }
+      return PaymentWebhookEvent(
+        provider: resolvedProvider,
+        providerEventId: providerEventId,
+        eventType: resolvedEventType,
+        signatureValid: true,
+        purchaseId: (purchaseId?.isEmpty ?? true) ? null : purchaseId,
+        payload: payload,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _scheduleWebhookRetry({
+    required String provider,
+    required String providerEventId,
+    required Object error,
+  }) async {
+    final storedEvent = await _paymentWebhookEventRepository.findEvent(
+      provider: provider,
+      eventId: providerEventId,
+    );
+    final attemptCount = storedEvent?.attemptCount ?? 0;
+    final safeErrorMessage = _safeErrorMessage(error);
+    if (attemptCount + 1 >= _maxWebhookRetryAttempts) {
+      await _paymentWebhookEventRepository.markEventFailed(
+        provider: provider,
+        eventId: providerEventId,
+        lastError: safeErrorMessage,
+      );
+      return true;
+    }
+    final delay = _retryBackoffDuration(attemptCount + 1);
+    await _paymentWebhookEventRepository.markEventPendingProcessing(
+      provider: provider,
+      eventId: providerEventId,
+      lastError: safeErrorMessage,
+      nextRetryAt: _nowUtc().add(delay),
+    );
+    return false;
+  }
+
+  Duration _retryBackoffDuration(int attempt) {
+    if (attempt <= 1) {
+      return const Duration(seconds: 15);
+    }
+    var seconds = 15;
+    for (var index = 1; index < attempt; index++) {
+      seconds *= 2;
+      if (seconds >= _maxRetryBackoffSeconds) {
+        seconds = _maxRetryBackoffSeconds;
+        break;
+      }
+    }
+    return Duration(seconds: seconds);
+  }
+
+  String _safeErrorMessage(Object error) {
+    final normalized = error.toString().trim();
+    if (normalized.isEmpty) {
+      return 'unknown_webhook_processing_error';
+    }
+    if (normalized.length <= 512) {
+      return normalized;
+    }
+    return normalized.substring(0, 512);
   }
 
   Future<void> _activatePurchase({

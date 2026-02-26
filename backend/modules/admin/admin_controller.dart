@@ -18,6 +18,7 @@ import '../marketplace/marketplace_entitlement_service.dart';
 import '../marketplace/marketplace_offer_repository.dart';
 import '../marketplace/marketplace_reconciliation_service.dart';
 import '../marketplace/marketplace_revenue_service.dart';
+import '../payments/payment_service.dart' as payments;
 import '../../server/http_utils.dart';
 
 class AdminController {
@@ -31,6 +32,7 @@ class AdminController {
     MarketplaceRevenueService? revenueService,
     AuditLogger? auditLogger,
     AuditLogStore? auditLogStore,
+    payments.PaymentService? paymentService,
     String paystackSecretKey = '',
     String paystackApiBaseUrl = 'https://api.paystack.co',
     http.Client? httpClient,
@@ -46,6 +48,7 @@ class AdminController {
        _revenueService = revenueService ?? MarketplaceRevenueService(),
        _auditLogger = auditLogger ?? AuditLogger(),
        _auditLogStore = auditLogStore ?? AuditLogStore(sqliteDb: db),
+       _paymentService = paymentService,
        _paystackSecretKey = paystackSecretKey.trim(),
        _paystackApiBaseUrl = _normalizeApiBaseUrl(paystackApiBaseUrl),
        _httpClient = httpClient ?? http.Client(),
@@ -60,6 +63,7 @@ class AdminController {
   final MarketplaceRevenueService _revenueService;
   final AuditLogger _auditLogger;
   final AuditLogStore _auditLogStore;
+  final payments.PaymentService? _paymentService;
   final String _paystackSecretKey;
   final String _paystackApiBaseUrl;
   final http.Client _httpClient;
@@ -81,6 +85,7 @@ class AdminController {
     router.get('/health', _adminHealth);
     router.get('/metrics', _adminMetrics);
     router.get('/payments/reconcile', _reconcilePaymentIntents);
+    router.post('/payments/webhooks/retry', _retryPaymentWebhookProcessing);
     router.get('/users', _listUsers);
     router.post('/users/<userId>/disable', _disableUser);
     router.post('/users/<userId>/enable', _enableUser);
@@ -575,6 +580,61 @@ class AdminController {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<Response> _retryPaymentWebhookProcessing(Request request) async {
+    _requireAdmin(request);
+    final paymentService = _paymentService;
+    if (paymentService == null) {
+      return jsonResponse(501, <String, Object?>{
+        'ok': false,
+        'error_code': 'NOT_IMPLEMENTED',
+        'message': 'Webhook retry processing is unavailable in this mode',
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    Map<String, Object?>? payload;
+    try {
+      payload = await _readJsonBodyOrNull(request);
+    } on FormatException catch (error) {
+      return jsonResponse(400, <String, Object?>{
+        'ok': false,
+        'error_code': 'VALIDATION_ERROR',
+        'message': error.message,
+        'trace_id': request.requestContext.traceId,
+      });
+    }
+    final queryLimit = request.url.queryParameters['limit'];
+    final bodyLimit = payload == null ? null : payload['limit'];
+    final resolvedLimitRaw = bodyLimit?.toString() ?? queryLimit;
+    final limit = _parseLimit(resolvedLimitRaw);
+
+    final result = await paymentService.retryPendingWebhooks(limit: limit);
+    await _auditLogStore.recordFromRequest(
+      request,
+      action: 'admin.payments.webhooks.retry',
+      resourceType: 'admin_endpoint',
+      resourceId: _auditResourceId(request),
+      metadata: <String, Object?>{
+        'limit': limit,
+        'scanned': result.scanned,
+        'retried': result.retried,
+        'rescheduled': result.rescheduled,
+        'failed': result.failed,
+        'skipped': result.skipped,
+      },
+    );
+    return jsonResponse(200, <String, Object?>{
+      'ok': true,
+      'trace_id': request.requestContext.traceId,
+      'data': <String, Object?>{
+        'scanned': result.scanned,
+        'retried': result.retried,
+        'rescheduled': result.rescheduled,
+        'failed': result.failed,
+        'skipped': result.skipped,
+      },
+    });
   }
 
   Future<Response> _disableUser(Request request, String userId) async {
@@ -1457,6 +1517,21 @@ class AdminController {
       return null;
     }
     return DateTime.tryParse(normalized)?.toUtc();
+  }
+
+  Future<Map<String, Object?>?> _readJsonBodyOrNull(Request request) async {
+    final rawBody = await request.readAsString();
+    final normalized = rawBody.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final decoded = jsonDecode(normalized);
+    if (decoded is! Map) {
+      throw const FormatException('request body must be a JSON object');
+    }
+    return decoded.map(
+      (key, value) => MapEntry<String, Object?>(key.toString(), value),
+    );
   }
 
   int _parseLimit(String? rawLimit) {

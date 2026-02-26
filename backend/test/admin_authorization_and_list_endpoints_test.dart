@@ -282,6 +282,31 @@ void main() {
     expect((body['trace_id'] as String?)?.isNotEmpty ?? false, isTrue);
   });
 
+  test('admin can trigger payment webhook retry processing', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+
+    final adminJwt = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'admin-user-1', role: 'admin');
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/admin/payments/webhooks/retry?limit=3',
+      token: adminJwt,
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+    final data = Map<String, Object?>.from(body['data'] as Map);
+    expect(data.containsKey('scanned'), isTrue);
+    expect(data.containsKey('retried'), isTrue);
+    expect(data.containsKey('rescheduled'), isTrue);
+    expect(data.containsKey('failed'), isTrue);
+    expect(data.containsKey('skipped'), isTrue);
+  });
+
   test(
     'disabled user is denied protected routes and enable restores access',
     () async {
