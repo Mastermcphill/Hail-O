@@ -201,9 +201,31 @@ if (-not $adminTokenEnabled) {
   Fail("set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks")
 }
 
-if ([string]::IsNullOrWhiteSpace($env:E2E_ACCESS_TOKEN)) {
-  Require-Env "E2E_PHONE_E164"
-  Require-Env "E2E_OTP_CODE"
+if (-not [string]::IsNullOrWhiteSpace($env:TEST_ACCESS_TOKEN)) {
+  $testAccessToken = $env:TEST_ACCESS_TOKEN
+} else {
+  $testAccessToken = $env:E2E_ACCESS_TOKEN
+}
+if (-not [string]::IsNullOrWhiteSpace($env:TEST_PHONE_E164)) {
+  $testPhone = $env:TEST_PHONE_E164
+} else {
+  $testPhone = $env:E2E_PHONE_E164
+}
+if (-not [string]::IsNullOrWhiteSpace($env:TEST_OTP)) {
+  $testOtp = $env:TEST_OTP
+} else {
+  $testOtp = $env:E2E_OTP_CODE
+}
+$paymentsTestMode = if (-not [string]::IsNullOrWhiteSpace($env:PAYMENTS_TEST_MODE)) {
+  $env:PAYMENTS_TEST_MODE
+} else {
+  "false"
+}
+
+if ([string]::IsNullOrWhiteSpace($testAccessToken)) {
+  if ([string]::IsNullOrWhiteSpace($testPhone) -or [string]::IsNullOrWhiteSpace($testOtp)) {
+    Fail("set TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN) OR provide TEST_PHONE_E164/TEST_OTP (or E2E_* equivalents)")
+  }
 }
 
 $targetLabel = if ($normalizedEnv) { $normalizedEnv } else { "staging" }
@@ -236,16 +258,22 @@ if ($RequireParity -and $smokeBase -ne $BaseUrl) {
 }
 
 $smokeScript = Join-Path $PSScriptRoot "smoke_e2e.ps1"
-$previousAdminToken = $env:E2E_ADMIN_TOKEN
-$env:E2E_ADMIN_TOKEN = $adminToken
-try {
-  Write-Host "[release-gate] running smoke_e2e.ps1 against $smokeBase"
-  & $smokeScript -BaseUrl $smokeBase -EnvName $smokeEnv
-  if ($LASTEXITCODE -ne 0) {
-    Fail("smoke_e2e.ps1 failed with exit code $LASTEXITCODE")
-  }
-} finally {
-  $env:E2E_ADMIN_TOKEN = $previousAdminToken
+Write-Host "[release-gate] running smoke_e2e.ps1 against $smokeBase"
+$smokeArgs = @(
+  "-BaseUrl", $smokeBase,
+  "-EnvName", $smokeEnv,
+  "-AdminToken", $adminToken,
+  "-AdminTokenEnabled", "$adminTokenEnabled",
+  "-PaymentsTestMode", "$paymentsTestMode"
+)
+if (-not [string]::IsNullOrWhiteSpace($testAccessToken)) {
+  $smokeArgs += @("-AccessToken", $testAccessToken)
+} else {
+  $smokeArgs += @("-TestPhoneE164", $testPhone, "-TestOtp", $testOtp)
+}
+& $smokeScript @smokeArgs
+if ($LASTEXITCODE -ne 0) {
+  Fail("smoke_e2e.ps1 failed with exit code $LASTEXITCODE")
 }
 
 Write-Host "RELEASE GATE: PASS"

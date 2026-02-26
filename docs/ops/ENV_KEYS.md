@@ -117,9 +117,10 @@ This file is the operational inventory of environment variables used by backend 
 | `STAGING_BASE_URL` | Required for prod gate | prod | Staging URL used when prod gate runs staging smoke. |
 | `ADMIN_TOKEN_ENABLED` | Required for admin-token smoke | staging, prod | Must be `true` when smoke/admin checks depend on `ADMIN_TOKEN`. |
 | `E2E_ADMIN_TOKEN` / `ADMIN_TOKEN` | Required for full smoke | staging, prod | Admin access token used for admin flow checks. |
-| `E2E_ACCESS_TOKEN` | Optional | staging, prod | Pre-provisioned bearer token for smoke auth flow. |
-| `E2E_PHONE_E164` | Required when `E2E_ACCESS_TOKEN` is unset | staging | Phone used for OTP auth path in smoke. |
-| `E2E_OTP_CODE` | Required when `E2E_ACCESS_TOKEN` is unset | staging | OTP code used for smoke OTP verification. |
+| `TEST_ACCESS_TOKEN` / `E2E_ACCESS_TOKEN` | Optional | staging, prod | Pre-provisioned bearer token for smoke auth flow. |
+| `TEST_PHONE_E164` / `E2E_PHONE_E164` | Required when test access token is unset | staging | Phone used for OTP auth path in smoke. |
+| `TEST_OTP` / `E2E_OTP_CODE` | Required when test access token is unset | staging | OTP code used for smoke OTP verification. |
+| `PAYMENTS_TEST_MODE` | Optional | staging | Enables simulated webhook step in smoke script for non-production environments. |
 | `E2E_WEBHOOK_SECRET` | Optional | staging | Override webhook HMAC secret for smoke simulation. |
 | `E2E_PAYSTACK_SECRET` | Optional | staging | Override Paystack HMAC secret for smoke simulation. |
 | `REQUIRED_MIGRATION_HEAD` | Optional | staging, prod | Hard assertion for migration head in release gate. |

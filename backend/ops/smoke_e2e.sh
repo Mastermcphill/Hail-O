@@ -7,48 +7,71 @@ RUN_TS="$(date -u +%Y%m%d_%H%M%S)"
 RUN_DIR="${ARTIFACT_ROOT}/${RUN_TS}"
 STEPS_FILE="${RUN_DIR}/steps.ndjson"
 FAILURES_FILE="${RUN_DIR}/failures.ndjson"
-TRACE_IDS_FILE="${RUN_DIR}/trace_ids.ndjson"
 
 BASE_URL="${BASE_URL:-}"
 TARGET_ENV="${ENV:-staging}"
-PHONE_E164="${E2E_PHONE_E164:-+15550001111}"
-OTP_CODE="${E2E_OTP_CODE:-000000}"
-ACCESS_TOKEN="${E2E_ACCESS_TOKEN:-}"
-ADMIN_TOKEN_VALUE="${E2E_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}"
-WEBHOOK_SECRET_VALUE="${E2E_WEBHOOK_SECRET:-${PAYMENTS_WEBHOOK_SECRET:-}}"
-PAYSTACK_SECRET_VALUE="${E2E_PAYSTACK_SECRET:-${PAYSTACK_WEBHOOK_SECRET:-${PAYSTACK_SECRET_KEY:-}}}"
+ADMIN_TOKEN_VALUE="${ADMIN_TOKEN:-}"
+ADMIN_TOKEN_ENABLED_VALUE="${ADMIN_TOKEN_ENABLED:-false}"
+TEST_PHONE_VALUE="${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}"
+TEST_OTP_VALUE="${TEST_OTP:-${E2E_OTP_CODE:-}}"
+PAYMENTS_TEST_MODE_VALUE="${PAYMENTS_TEST_MODE:-false}"
+ACCESS_TOKEN="${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}"
+WEBHOOK_SECRET_VALUE="${PAYMENTS_WEBHOOK_SECRET:-${E2E_WEBHOOK_SECRET:-}}"
+PAYSTACK_WEBHOOK_SECRET_VALUE="${PAYSTACK_WEBHOOK_SECRET:-${E2E_PAYSTACK_SECRET:-${PAYSTACK_SECRET_KEY:-}}}"
+TEST_DRIVER_ID_VALUE="${TEST_DRIVER_ID:-}"
+DRY_RUN="false"
 
 usage() {
   cat <<'EOF'
 Usage: smoke_e2e.sh --base=<url> [options]
 
 Options:
-  --base=<url>              Base URL, for example https://staging.example.com
-  --env=<name>              Environment label (default: staging)
-  --phone=<e164>            Phone number for OTP login (default: +15550001111)
-  --otp-code=<code>         OTP code for staging/dev bypass (default: 000000)
-  --token=<jwt>             Pre-provisioned access token (skips OTP)
-  --admin-token=<token>     Admin token for admin flow endpoints
-  --webhook-secret=<secret> PAYMENTS_WEBHOOK_SECRET for x-webhook-signature
-  --paystack-secret=<key>   PAYSTACK secret for x-paystack-signature
+  --base=<url>                    Target API base URL (required)
+  --env=<name>                    Environment label (default: staging)
+  --admin-token=<token>           Admin token for admin flow
+  --admin-token-enabled=<bool>    Whether admin token bypass is enabled
+  --test-phone=<e164>             OTP phone (staging/dev flows)
+  --test-otp=<code>               OTP code (staging/dev flows)
+  --payments-test-mode=<bool>     Enable webhook simulation flow (non-prod)
+  --access-token=<jwt>            Pre-provisioned user access token
+  --webhook-secret=<secret>       Generic webhook secret for x-webhook-signature
+  --paystack-webhook-secret=<s>   Paystack webhook secret for x-paystack-signature
+  --test-driver-id=<uuid>         Optional pre-seeded driver id for dispatch assign
+  --dry-run                       Run without real HTTP calls (CI utility)
 
-Environment variable equivalents:
-  BASE_URL, ENV, E2E_PHONE_E164, E2E_OTP_CODE, E2E_ACCESS_TOKEN,
-  E2E_ADMIN_TOKEN/ADMIN_TOKEN, E2E_WEBHOOK_SECRET/PAYMENTS_WEBHOOK_SECRET,
-  E2E_PAYSTACK_SECRET/PAYSTACK_WEBHOOK_SECRET/PAYSTACK_SECRET_KEY
+Environment variable fallbacks:
+  BASE_URL, ENV, ADMIN_TOKEN, ADMIN_TOKEN_ENABLED,
+  TEST_PHONE_E164|E2E_PHONE_E164, TEST_OTP|E2E_OTP_CODE,
+  PAYMENTS_TEST_MODE, TEST_ACCESS_TOKEN|E2E_ACCESS_TOKEN,
+  PAYMENTS_WEBHOOK_SECRET|E2E_WEBHOOK_SECRET,
+  PAYSTACK_WEBHOOK_SECRET|E2E_PAYSTACK_SECRET|PAYSTACK_SECRET_KEY,
+  TEST_DRIVER_ID
 EOF
+}
+
+normalize_bool() {
+  local value="${1:-}"
+  value="$(echo "$value" | tr '[:upper:]' '[:lower:]' | xargs)"
+  case "$value" in
+    1|true|yes|y|on) echo "true" ;;
+    *) echo "false" ;;
+  esac
 }
 
 for arg in "$@"; do
   case "$arg" in
     --base=*) BASE_URL="${arg#*=}" ;;
     --env=*) TARGET_ENV="${arg#*=}" ;;
-    --phone=*) PHONE_E164="${arg#*=}" ;;
-    --otp-code=*) OTP_CODE="${arg#*=}" ;;
-    --token=*) ACCESS_TOKEN="${arg#*=}" ;;
     --admin-token=*) ADMIN_TOKEN_VALUE="${arg#*=}" ;;
+    --admin-token-enabled=*) ADMIN_TOKEN_ENABLED_VALUE="${arg#*=}" ;;
+    --test-phone=*) TEST_PHONE_VALUE="${arg#*=}" ;;
+    --test-otp=*) TEST_OTP_VALUE="${arg#*=}" ;;
+    --payments-test-mode=*) PAYMENTS_TEST_MODE_VALUE="${arg#*=}" ;;
+    --access-token=*) ACCESS_TOKEN="${arg#*=}" ;;
     --webhook-secret=*) WEBHOOK_SECRET_VALUE="${arg#*=}" ;;
-    --paystack-secret=*) PAYSTACK_SECRET_VALUE="${arg#*=}" ;;
+    --paystack-webhook-secret=*) PAYSTACK_WEBHOOK_SECRET_VALUE="${arg#*=}" ;;
+    --test-driver-id=*) TEST_DRIVER_ID_VALUE="${arg#*=}" ;;
+    --dry-run) DRY_RUN="true" ;;
     -h|--help)
       usage
       exit 0
@@ -61,9 +84,17 @@ for arg in "$@"; do
   esac
 done
 
-if [[ -z "${BASE_URL}" ]]; then
-  echo "BASE_URL is required (use --base=...)" >&2
+if [[ -z "${BASE_URL// }" ]]; then
+  echo "BASE_URL is required (--base=...)" >&2
   exit 2
+fi
+
+BASE_URL="${BASE_URL%/}"
+TARGET_ENV="$(echo "$TARGET_ENV" | tr '[:upper:]' '[:lower:]' | xargs)"
+ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "$ADMIN_TOKEN_ENABLED_VALUE")"
+PAYMENTS_TEST_MODE_VALUE="$(normalize_bool "$PAYMENTS_TEST_MODE_VALUE")"
+if [[ "$DRY_RUN" == "true" && -z "${ACCESS_TOKEN// }" ]]; then
+  ACCESS_TOKEN="dry_access_token"
 fi
 
 require_cmd() {
@@ -73,27 +104,24 @@ require_cmd() {
   fi
 }
 
-require_cmd curl
 require_cmd jq
-require_cmd openssl
+if [[ "$DRY_RUN" != "true" ]]; then
+  require_cmd curl
+  require_cmd openssl
+fi
 
 mkdir -p "${RUN_DIR}"
 : >"${STEPS_FILE}"
 : >"${FAILURES_FILE}"
-: >"${TRACE_IDS_FILE}"
 
-echo "[smoke] base=${BASE_URL} env=${TARGET_ENV}"
+echo "[smoke] base=${BASE_URL} env=${TARGET_ENV} dry_run=${DRY_RUN}"
 echo "[smoke] artifacts=${RUN_DIR}"
-
-json_escape() {
-  jq -Rn --arg value "$1" '$value'
-}
 
 now_ms() {
   local ms
   ms="$(date +%s%3N 2>/dev/null || true)"
-  if [[ -n "${ms}" && "${ms}" =~ ^[0-9]+$ ]]; then
-    echo "${ms}"
+  if [[ -n "$ms" && "$ms" =~ ^[0-9]+$ ]]; then
+    echo "$ms"
     return 0
   fi
   echo "$(( $(date +%s) * 1000 ))"
@@ -107,352 +135,755 @@ uuidish() {
   fi
 }
 
-append_step() {
-  local name="$1"
-  local ok="$2"
-  local status="$3"
-  local duration_ms="$4"
-  local trace_id="$5"
-  local artifact="$6"
-  local detail="$7"
+CALL_JSON='{}'
 
-  jq -n \
-    --arg name "${name}" \
-    --argjson ok "${ok}" \
-    --arg status "${status}" \
-    --argjson duration_ms "${duration_ms}" \
-    --arg trace_id "${trace_id}" \
-    --arg artifact "${artifact}" \
-    --arg detail "${detail}" \
-    '{name:$name,ok:$ok,status:$status,duration_ms:$duration_ms,trace_id:$trace_id,artifact:$artifact,detail:$detail}' \
-    >>"${STEPS_FILE}"
-
-  if [[ -n "${trace_id}" ]]; then
-    jq -n --arg trace_id "${trace_id}" '{trace_id:$trace_id}' >>"${TRACE_IDS_FILE}"
-  fi
-  if [[ "${ok}" != "true" ]]; then
-    jq -n \
-      --arg name "${name}" \
-      --arg status "${status}" \
-      --arg trace_id "${trace_id}" \
-      --arg detail "${detail}" \
-      '{name:$name,status:$status,trace_id:$trace_id,detail:$detail}' \
-      >>"${FAILURES_FILE}"
-  fi
-}
-
-run_request() {
+build_dry_run_response() {
   local method="$1"
   local path="$2"
   local body="$3"
-  local out_file="$4"
-  shift 4
 
+  case "$path" in
+    /health)
+      jq -n '{status:200,body:{ok:true,service:"hail-o-backend",env:"dry-run"}}'
+      ;;
+    /ready|/api/ready)
+      jq -n '{status:200,body:{ok:true,ready:true,db:true,migrations_ok:true,payments_ready:true,otp_ready:true,redis_configured:false,redis_ready:false}}'
+      ;;
+    /auth/otp/request)
+      jq -n '{status:200,body:{ok:true}}'
+      ;;
+    /auth/otp/verify)
+      jq -n '{status:200,body:{access_token:"dry_access_token",refresh_token:"dry_refresh_token",user:{id:"dry-user",phone_e164:"+15550001111"}}}'
+      ;;
+    /auth/register)
+      jq -n '{status:201,body:{ok:true,user_id:"00000000-0000-4000-8000-000000000111"}}'
+      ;;
+    /auth/login)
+      jq -n '{status:200,body:{ok:true,token:"dry_driver_token",user_id:"00000000-0000-4000-8000-000000000111"}}'
+      ;;
+    /marketplace/offers)
+      jq -n '{status:200,body:{ok:true,data:[{id:"offer_dry_001",title:"Dry Offer"}]}}'
+      ;;
+    /marketplace/purchases)
+      jq -n '{status:200,body:{ok:true,data:{purchase:{purchase_id:"11111111-1111-4111-8111-111111111111",status:"pending_payment"}}}}'
+      ;;
+    /payments/intents)
+      jq -n '{status:200,body:{ok:true,data:{id:"22222222-2222-4222-8222-222222222222",status:"pending",provider:"manual"}}}'
+      ;;
+    /webhooks/payments)
+      jq -n '{status:200,body:{ok:true,data:{action:"processed"}}}'
+      ;;
+    /marketplace/purchases/*)
+      jq -n '{status:200,body:{ok:true,data:{status:"paid",purchase:{status:"paid"}}}}'
+      ;;
+    /dispatch/quote)
+      jq -n '{status:200,body:{ok:true,distance_km:12.35,duration_min_est:30,price_minor:4500,currency:"NGN",breakdown:{base_fare_minor:1000,per_km_minor:200}}}'
+      ;;
+    /dispatch/trips)
+      if [[ "$method" == "POST" ]]; then
+        jq -n '{status:201,body:{ok:true,trip:{id:"33333333-3333-4333-8333-333333333333",status:"created"}}}'
+      else
+        jq -n '{status:404,body:{ok:false,error_code:"ROUTE_NOT_FOUND"}}'
+      fi
+      ;;
+    /dispatch/trips/*/assign)
+      jq -n '{status:200,body:{ok:true,trip:{id:"33333333-3333-4333-8333-333333333333",status:"assigned"},assignment:{driver_id:"00000000-0000-4000-8000-000000000111",status:"assigned"}}}'
+      ;;
+    /dispatch/trips/*/status)
+      local desired_status="searching"
+      if [[ -n "$body" ]]; then
+        desired_status="$(jq -r '.status // "searching"' <<<"$body" 2>/dev/null || echo "searching")"
+      fi
+      jq -n --arg status "$desired_status" '{status:200,body:{ok:true,trip:{id:"33333333-3333-4333-8333-333333333333",status:$status},event:{to_status:$status}}}'
+      ;;
+    /dispatch/trips/*)
+      jq -n '{status:200,body:{ok:true,trip:{id:"33333333-3333-4333-8333-333333333333",status:"delivered"}}}'
+      ;;
+    /admin/metrics)
+      jq -n '{status:200,body:{ok:true,users_total:1,trips_total:1,purchases_total:1}}'
+      ;;
+    /admin/users*|/admin/trips*|/admin/audit*)
+      jq -n '{status:200,body:{ok:true,data:[]}}'
+      ;;
+    /admin/test/session/mint|/admin/test/access-token|/admin/auth/mint|/admin/session/mint|/admin/tokens/mint)
+      jq -n '{status:404,body:{ok:false,error_code:"ROUTE_NOT_FOUND"}}'
+      ;;
+    *)
+      jq -n '{status:404,body:{ok:false,error_code:"ROUTE_NOT_FOUND"}}'
+      ;;
+  esac
+}
+
+call_http() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  shift 3
+
+  local url="${BASE_URL}${path}"
   local trace="smoke-$(uuidish)"
-  local header_args=(
+  local start_ms end_ms duration_ms
+  start_ms="$(now_ms)"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    local dry_json dry_status dry_body
+    dry_json="$(build_dry_run_response "$method" "$path" "$body")"
+    dry_status="$(jq -r '.status // 0' <<<"$dry_json")"
+    dry_body="$(jq -c '.body' <<<"$dry_json")"
+    end_ms="$(now_ms)"
+    duration_ms="$(( end_ms - start_ms ))"
+    CALL_JSON="$(jq -n \
+      --arg method "$method" \
+      --arg path "$path" \
+      --arg url "$url" \
+      --arg trace_id "$trace" \
+      --arg request_body "$body" \
+      --argjson status "$dry_status" \
+      --argjson duration_ms "$duration_ms" \
+      --argjson response "$dry_body" \
+      '{method:$method,path:$path,url:$url,status:$status,duration_ms:$duration_ms,trace_id:$trace_id,request_body:(if $request_body=="" then null else $request_body end),response:$response,curl_error:null}')"
+    return 0
+  fi
+
+  local body_file err_file status resp_json trace_id curl_error
+  body_file="$(mktemp "${RUN_DIR}/http_body.XXXXXX")"
+  err_file="$(mktemp "${RUN_DIR}/http_err.XXXXXX")"
+
+  local cmd=(
+    curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url"
     -H "accept: application/json"
     -H "x-trace-id: ${trace}"
   )
   while (($# > 0)); do
-    header_args+=( -H "$1" )
+    cmd+=( -H "$1" )
     shift
   done
-
-  local response_code
-  if [[ -n "${body}" ]]; then
-    response_code="$(curl -sS -o "${out_file}" -w "%{http_code}" -X "${method}" "${BASE_URL}${path}" "${header_args[@]}" -H "content-type: application/json" --data "${body}")"
-  else
-    response_code="$(curl -sS -o "${out_file}" -w "%{http_code}" -X "${method}" "${BASE_URL}${path}" "${header_args[@]}")"
+  if [[ -n "$body" ]]; then
+    cmd+=( -H "content-type: application/json" --data "$body" )
   fi
-  echo "${response_code}"
-}
 
-assert_step() {
-  local step_name="$1"
-  local expected_codes="$2"
-  local code="$3"
-  local start_ms="$4"
-  local artifact_file="$5"
-  local detail="${6:-}"
+  if ! status="$("${cmd[@]}" 2>"$err_file")"; then
+    status="000"
+  fi
+  status="$(echo "$status" | tr -cd '0-9')"
+  if [[ -z "$status" ]]; then
+    status="0"
+  fi
 
-  local end_ms duration_ms trace_id ok
   end_ms="$(now_ms)"
   duration_ms="$(( end_ms - start_ms ))"
-  trace_id="$(jq -r '.trace_id // empty' "${artifact_file}" 2>/dev/null || true)"
-  ok="false"
-  if [[ " ${expected_codes} " == *" ${code} "* ]]; then
-    ok="true"
+
+  if jq -e . "$body_file" >/dev/null 2>&1; then
+    resp_json="$(cat "$body_file")"
+  else
+    local raw_body
+    raw_body="$(cat "$body_file" 2>/dev/null || true)"
+    resp_json="$(jq -Rn --arg raw "$raw_body" '$raw')"
   fi
-  append_step "${step_name}" "${ok}" "${code}" "${duration_ms}" "${trace_id}" "$(basename "${artifact_file}")" "${detail}"
-  if [[ "${ok}" != "true" ]]; then
-    return 1
+
+  curl_error="$(cat "$err_file" 2>/dev/null || true)"
+  trace_id="$(jq -r '.trace_id // .data.trace_id // empty' "$body_file" 2>/dev/null || true)"
+  if [[ -z "$trace_id" ]]; then
+    trace_id="$trace"
   fi
-  return 0
+
+  CALL_JSON="$(jq -n \
+    --arg method "$method" \
+    --arg path "$path" \
+    --arg url "$url" \
+    --arg trace_id "$trace_id" \
+    --arg request_body "$body" \
+    --argjson status "$status" \
+    --argjson duration_ms "$duration_ms" \
+    --argjson response "$resp_json" \
+    --arg curl_error "$curl_error" \
+    '{method:$method,path:$path,url:$url,status:$status,duration_ms:$duration_ms,trace_id:$trace_id,request_body:(if $request_body=="" then null else $request_body end),response:$response,curl_error:(if $curl_error=="" then null else $curl_error end)}')"
+
+  rm -f "$body_file" "$err_file"
 }
 
-extract_json_value() {
-  local file="$1"
-  local jq_expr="$2"
-  jq -er "${jq_expr}" "${file}" 2>/dev/null || true
-}
+OVERALL_OK="true"
 
-safe_copy_json() {
-  local src="$1"
-  local target_name="$2"
-  cp "${src}" "${RUN_DIR}/${target_name}"
-}
+append_step_summary() {
+  local step_id="$1"
+  local artifact="$2"
+  local ok="$3"
+  local status="$4"
+  local note="$5"
+  local duration_ms="$6"
+  local trace_ids_json="$7"
 
-tmp_file() {
-  mktemp "${RUN_DIR}/tmp.XXXXXX.json"
-}
+  jq -n \
+    --arg step "$step_id" \
+    --arg artifact "$artifact" \
+    --argjson ok "$ok" \
+    --arg status "$status" \
+    --arg note "$note" \
+    --argjson duration_ms "$duration_ms" \
+    --argjson trace_ids "$trace_ids_json" \
+    '{step:$step,ok:$ok,status:$status,note:$note,duration_ms:$duration_ms,trace_ids:$trace_ids,artifact:$artifact}' \
+    >>"$STEPS_FILE"
 
-fail_fast="false"
-
-run_step_request() {
-  local step_name="$1"
-  local expected_codes="$2"
-  local method="$3"
-  local path="$4"
-  local body="$5"
-  local artifact_name="$6"
-  shift 6
-
-  local start_ms out_file code
-  start_ms="$(now_ms)"
-  out_file="$(tmp_file)"
-  code="$(run_request "${method}" "${path}" "${body}" "${out_file}" "$@")"
-  safe_copy_json "${out_file}" "${artifact_name}"
-  if ! assert_step "${step_name}" "${expected_codes}" "${code}" "${start_ms}" "${RUN_DIR}/${artifact_name}"; then
-    fail_fast="true"
-    return 1
+  if [[ "$ok" != "true" ]]; then
+    OVERALL_OK="false"
+    jq -n \
+      --arg step "$step_id" \
+      --arg status "$status" \
+      --arg note "$note" \
+      --arg artifact "$artifact" \
+      '{step:$step,status:$status,note:$note,artifact:$artifact}' \
+      >>"$FAILURES_FILE"
   fi
-  return 0
 }
 
-auth_header() {
-  if [[ -n "${ACCESS_TOKEN}" ]]; then
-    echo "authorization: Bearer ${ACCESS_TOKEN}"
+write_step() {
+  local step_id="$1"
+  local artifact="$2"
+  local ok="$3"
+  local status="$4"
+  local note="$5"
+  local duration_ms="$6"
+  local trace_ids_json="$7"
+  local payload_json="$8"
+
+  printf '%s\n' "$payload_json" >"${RUN_DIR}/${artifact}"
+  append_step_summary "$step_id" "$artifact" "$ok" "$status" "$note" "$duration_ms" "$trace_ids_json"
+}
+
+json_bool() {
+  if [[ "$1" == "true" ]]; then
+    echo "true"
+  else
+    echo "false"
   fi
 }
+# Step 01: Health
+call_http "GET" "/health" ""
+step01_call="$CALL_JSON"
+step01_status="$(jq -r '.status' <<<"$step01_call")"
+step01_body_ok="$(jq -r 'if (.response|type)=="object" then (.response.ok // false) else false end' <<<"$step01_call")"
+step01_ok="false"
+step01_note="Expected HTTP 200 and ok=true"
+if [[ "$step01_status" == "200" && "$step01_body_ok" == "true" ]]; then
+  step01_ok="true"
+  step01_note="Health responded with ok=true"
+fi
+step01_payload="$(jq -n --argjson call "$step01_call" --arg expected "status=200 and ok=true" '{call:$call,expected:$expected}')"
+step01_duration="$(jq -r '.duration_ms // 0' <<<"$step01_call")"
+step01_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step01_call")"
+write_step "step_01_health" "step_01_health.json" "$step01_ok" "$step01_status" "$step01_note" "$step01_duration" "$step01_traces" "$step01_payload"
 
-# FLOW A: Auth + marketplace purchase + payment intent + webhook + purchase verify
-if [[ -z "${ACCESS_TOKEN}" ]]; then
-  run_id="$(date -u +%s)"
-  request_body="$(jq -n --arg phone "${PHONE_E164}" '{phone_e164:$phone}')"
-  run_step_request "auth.otp_request" "200" "POST" "/auth/otp/request" "${request_body}" "01_auth_otp_request.json" || true
+# Step 02: Ready
+call_http "GET" "/ready" ""
+step02_call="$CALL_JSON"
+step02_status="$(jq -r '.status' <<<"$step02_call")"
+if [[ "$step02_status" == "404" ]]; then
+  call_http "GET" "/api/ready" ""
+  step02_call="$CALL_JSON"
+  step02_status="$(jq -r '.status' <<<"$step02_call")"
+fi
+step02_body_ok="$(jq -r 'if (.response|type)=="object" then (.response.ok // false) else false end' <<<"$step02_call")"
+step02_ok="false"
+step02_note="Expected HTTP 200 and ok=true"
+if [[ "$step02_status" == "200" && "$step02_body_ok" == "true" ]]; then
+  step02_ok="true"
+  step02_note="Ready responded with ok=true"
+fi
+step02_payload="$(jq -n --argjson call "$step02_call" --arg expected "status=200 and ok=true" '{call:$call,expected:$expected}')"
+step02_duration="$(jq -r '.duration_ms // 0' <<<"$step02_call")"
+step02_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step02_call")"
+write_step "step_02_ready" "step_02_ready.json" "$step02_ok" "$step02_status" "$step02_note" "$step02_duration" "$step02_traces" "$step02_payload"
 
-  if [[ "${fail_fast}" == "false" ]]; then
-    verify_body="$(jq -n --arg phone "${PHONE_E164}" --arg code "${OTP_CODE}" '{phone_e164:$phone,code:$code}')"
-    run_step_request "auth.otp_verify" "200" "POST" "/auth/otp/verify" "${verify_body}" "02_auth_otp_verify.json" || true
-    if [[ "${fail_fast}" == "false" ]]; then
-      ACCESS_TOKEN="$(extract_json_value "${RUN_DIR}/02_auth_otp_verify.json" '.access_token // .data.access_token // empty')"
-      REFRESH_TOKEN="$(extract_json_value "${RUN_DIR}/02_auth_otp_verify.json" '.refresh_token // .data.refresh_token // empty')"
-      if [[ -z "${ACCESS_TOKEN}" ]]; then
-        append_step "auth.extract_token" false "parse_error" 0 "" "02_auth_otp_verify.json" "access_token missing"
-        fail_fast="true"
-      else
-        append_step "auth.extract_token" true "ok" 0 "" "02_auth_otp_verify.json" "token acquired"
+# Step 03: Auth
+AUTH_OPERATIONS='[]'
+AUTH_MODE='none'
+AUTH_NOTE=''
+
+auth_add_op() {
+  local op_json="$1"
+  AUTH_OPERATIONS="$(jq -cn --argjson current "$AUTH_OPERATIONS" --argjson op "$op_json" '$current + [$op]')"
+}
+
+if [[ -n "$ACCESS_TOKEN" ]]; then
+  AUTH_MODE='preprovisioned_token'
+  AUTH_NOTE='Using provided access token'
+else
+  AUTH_MODE='auto'
+  if [[ "$ADMIN_TOKEN_ENABLED_VALUE" == "true" && -n "$ADMIN_TOKEN_VALUE" ]]; then
+    for mint_path in "/admin/test/session/mint" "/admin/test/access-token" "/admin/auth/mint" "/admin/session/mint" "/admin/tokens/mint"; do
+      call_http "POST" "$mint_path" '{"role":"rider","scope":"smoke_e2e"}' "x-admin-token: ${ADMIN_TOKEN_VALUE}"
+      mint_call="$CALL_JSON"
+      auth_add_op "$mint_call"
+      mint_status="$(jq -r '.status' <<<"$mint_call")"
+      if [[ "$mint_status" == "200" ]]; then
+        minted_token="$(jq -r 'if (.response|type)=="object" then (.response.access_token // .response.data.access_token // .response.token // .response.data.token // empty) else empty end' <<<"$mint_call")"
+        if [[ -n "$minted_token" ]]; then
+          ACCESS_TOKEN="$minted_token"
+          AUTH_MODE='admin_token_mint'
+          AUTH_NOTE="Minted access token via ${mint_path}"
+          break
+        fi
       fi
-      if [[ -n "${REFRESH_TOKEN:-}" ]]; then
-        refresh_body="$(jq -n --arg token "${REFRESH_TOKEN}" '{refresh_token:$token}')"
-        run_step_request "auth.refresh" "200" "POST" "/auth/token/refresh" "${refresh_body}" "03_auth_refresh.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
+    done
+  fi
+
+  if [[ -z "$ACCESS_TOKEN" ]]; then
+    AUTH_MODE='otp'
+    if [[ -z "$TEST_PHONE_VALUE" || -z "$TEST_OTP_VALUE" ]]; then
+      AUTH_NOTE='OTP flow requires TEST_PHONE_E164 and TEST_OTP when no access token is provided'
+    else
+      otp_request_body="$(jq -n --arg phone "$TEST_PHONE_VALUE" '{phone_e164:$phone}')"
+      call_http "POST" "/auth/otp/request" "$otp_request_body"
+      otp_req_call="$CALL_JSON"
+      auth_add_op "$otp_req_call"
+
+      otp_verify_body="$(jq -n --arg phone "$TEST_PHONE_VALUE" --arg code "$TEST_OTP_VALUE" '{phone_e164:$phone,code:$code}')"
+      call_http "POST" "/auth/otp/verify" "$otp_verify_body"
+      otp_verify_call="$CALL_JSON"
+      auth_add_op "$otp_verify_call"
+
+      ACCESS_TOKEN="$(jq -r 'if (.response|type)=="object" then (.response.access_token // .response.token // .response.data.access_token // .response.data.token // empty) else empty end' <<<"$otp_verify_call")"
+      if [[ -n "$ACCESS_TOKEN" ]]; then
+        AUTH_NOTE='OTP flow verified and access token acquired'
+      else
+        AUTH_NOTE='OTP verify did not return access token'
       fi
     fi
   fi
+fi
+
+step03_ok="false"
+step03_status="auth_failed"
+if [[ -n "$ACCESS_TOKEN" ]]; then
+  step03_ok="true"
+  step03_status="ok"
+fi
+if [[ -z "$AUTH_NOTE" ]]; then
+  AUTH_NOTE='Authentication flow completed'
+fi
+step03_duration="$(jq -r '[.[].duration_ms // 0] | add // 0' <<<"$AUTH_OPERATIONS")"
+step03_traces="$(jq -c '[.[].trace_id // empty] | map(select(length>0)) | unique' <<<"$AUTH_OPERATIONS")"
+step03_payload="$(jq -n --arg mode "$AUTH_MODE" --arg note "$AUTH_NOTE" --arg token_acquired "$(json_bool "$step03_ok")" --argjson operations "$AUTH_OPERATIONS" '{mode:$mode,token_acquired:($token_acquired=="true"),note:$note,operations:$operations}')"
+write_step "step_03_auth" "step_03_auth.json" "$step03_ok" "$step03_status" "$AUTH_NOTE" "$step03_duration" "$step03_traces" "$step03_payload"
+
+# Shared state
+OFFER_ID=''
+PURCHASE_ID=''
+INTENT_ID=''
+TRIP_ID=''
+
+# Step 04: Offers
+if [[ -n "$ACCESS_TOKEN" ]]; then
+  call_http "GET" "/marketplace/offers" "" "authorization: Bearer ${ACCESS_TOKEN}"
+  step04_call="$CALL_JSON"
+  step04_status="$(jq -r '.status' <<<"$step04_call")"
+  OFFER_ID="$(jq -r 'if (.response|type)=="object" then ((try .response.data[0].id catch empty) // (try .response.offers[0].id catch empty) // (try .response.data.offers[0].id catch empty) // empty) else empty end' <<<"$step04_call")"
+  step04_ok="false"
+  step04_note='Expected HTTP 200 and at least one offer id'
+  if [[ "$step04_status" == "200" && -n "$OFFER_ID" ]]; then
+    step04_ok="true"
+    step04_note="Selected offer_id=${OFFER_ID}"
+  fi
+  step04_duration="$(jq -r '.duration_ms // 0' <<<"$step04_call")"
+  step04_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step04_call")"
+  step04_payload="$(jq -n --arg offer_id "$OFFER_ID" --argjson call "$step04_call" '{offer_id:$offer_id,call:$call}')"
+  write_step "step_04_offers" "step_04_offers.json" "$step04_ok" "$step04_status" "$step04_note" "$step04_duration" "$step04_traces" "$step04_payload"
 else
-  append_step "auth.preprovisioned_token" true "ok" 0 "" "" "using provided E2E_ACCESS_TOKEN"
+  write_step "step_04_offers" "step_04_offers.json" "false" "missing_auth" "Access token unavailable" "0" "[]" '{"error":"missing_access_token"}'
 fi
 
-OFFER_ID=""
-PURCHASE_ID=""
-INTENT_ID=""
-TRIP_ID=""
-DRIVER_ID=""
-
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "marketplace.offers" "200" "GET" "/marketplace/offers" "" "04_marketplace_offers.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-  OFFER_ID="$(extract_json_value "${RUN_DIR}/04_marketplace_offers.json" '.data[0].id // .offers[0].id // empty')"
-  if [[ -z "${OFFER_ID}" ]]; then
-    append_step "marketplace.pick_offer" false "parse_error" 0 "" "04_marketplace_offers.json" "no offer id found"
-    fail_fast="true"
-  else
-    append_step "marketplace.pick_offer" true "ok" 0 "" "04_marketplace_offers.json" "offer_id=${OFFER_ID}"
-  fi
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
+# Step 05: Purchase create
+if [[ -n "$ACCESS_TOKEN" && -n "$OFFER_ID" ]]; then
+  purchase_body="$(jq -n --arg offer_id "$OFFER_ID" '{offer_id:$offer_id,quantity:1}')"
   purchase_idem="smoke-purchase-$(uuidish)"
-  purchase_body="$(jq -n --arg offer_id "${OFFER_ID}" '{offer_id:$offer_id,quantity:1}')"
-  run_step_request "marketplace.purchase_create" "200 201" "POST" "/marketplace/purchases" "${purchase_body}" "05_marketplace_purchase_create.json" "authorization: Bearer ${ACCESS_TOKEN}" "idempotency-key: ${purchase_idem}" || true
-  PURCHASE_ID="$(extract_json_value "${RUN_DIR}/05_marketplace_purchase_create.json" '.data.purchase.purchase_id // .data.purchase.purchaseId // .data.purchase_id // .data.purchaseId // .purchase.purchase_id // .purchase_id // empty')"
-  if [[ -z "${PURCHASE_ID}" ]]; then
-    append_step "marketplace.extract_purchase_id" false "parse_error" 0 "" "05_marketplace_purchase_create.json" "purchase id missing"
-    fail_fast="true"
-  else
-    append_step "marketplace.extract_purchase_id" true "ok" 0 "" "05_marketplace_purchase_create.json" "purchase_id=${PURCHASE_ID}"
+  call_http "POST" "/marketplace/purchases" "$purchase_body" "authorization: Bearer ${ACCESS_TOKEN}" "idempotency-key: ${purchase_idem}"
+  step05_call="$CALL_JSON"
+  step05_status="$(jq -r '.status' <<<"$step05_call")"
+  PURCHASE_ID="$(jq -r 'if (.response|type)=="object" then (.response.data.purchase_id // .response.data.purchase.purchase_id // .response.data.purchase.id // .response.purchase_id // .response.purchase.purchase_id // .response.purchase.id // empty) else empty end' <<<"$step05_call")"
+  step05_ok="false"
+  step05_note='Expected HTTP 200/201 and purchase_id'
+  if [[ ( "$step05_status" == "200" || "$step05_status" == "201" ) && -n "$PURCHASE_ID" ]]; then
+    step05_ok="true"
+    step05_note="Created purchase_id=${PURCHASE_ID}"
   fi
+  step05_duration="$(jq -r '.duration_ms // 0' <<<"$step05_call")"
+  step05_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step05_call")"
+  step05_payload="$(jq -n --arg purchase_id "$PURCHASE_ID" --argjson call "$step05_call" '{purchase_id:$purchase_id,call:$call}')"
+  write_step "step_05_purchase_create" "step_05_purchase_create.json" "$step05_ok" "$step05_status" "$step05_note" "$step05_duration" "$step05_traces" "$step05_payload"
+else
+  write_step "step_05_purchase_create" "step_05_purchase_create.json" "false" "prerequisite_missing" "Requires access token and offer id" "0" "[]" '{"error":"missing_prerequisites"}'
 fi
 
-if [[ "${fail_fast}" == "false" ]]; then
-  intent_body="$(jq -n --arg purchase_id "${PURCHASE_ID}" '{purchase_id:$purchase_id}')"
+# Step 06: Intent create
+if [[ -n "$ACCESS_TOKEN" && -n "$PURCHASE_ID" ]]; then
+  intent_body="$(jq -n --arg purchase_id "$PURCHASE_ID" '{purchase_id:$purchase_id}')"
   intent_idem="smoke-intent-$(uuidish)"
-  run_step_request "payments.intent_create" "200" "POST" "/payments/intents" "${intent_body}" "06_payments_intent_create.json" "authorization: Bearer ${ACCESS_TOKEN}" "idempotency-key: ${intent_idem}" || true
-  INTENT_ID="$(extract_json_value "${RUN_DIR}/06_payments_intent_create.json" '.data.id // .id // empty')"
-  if [[ -n "${INTENT_ID}" ]]; then
-    append_step "payments.extract_intent_id" true "ok" 0 "" "06_payments_intent_create.json" "intent_id=${INTENT_ID}"
-  else
-    append_step "payments.extract_intent_id" false "parse_error" 0 "" "06_payments_intent_create.json" "intent id missing"
-    fail_fast="true"
+  call_http "POST" "/payments/intents" "$intent_body" "authorization: Bearer ${ACCESS_TOKEN}" "idempotency-key: ${intent_idem}"
+  step06_call="$CALL_JSON"
+  step06_status="$(jq -r '.status' <<<"$step06_call")"
+  INTENT_ID="$(jq -r 'if (.response|type)=="object" then (.response.data.id // .response.id // empty) else empty end' <<<"$step06_call")"
+  step06_ok="false"
+  step06_note='Expected HTTP 200 and intent id'
+  if [[ "$step06_status" == "200" && -n "$INTENT_ID" ]]; then
+    step06_ok="true"
+    step06_note="Created intent_id=${INTENT_ID}"
   fi
+  step06_duration="$(jq -r '.duration_ms // 0' <<<"$step06_call")"
+  step06_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step06_call")"
+  step06_payload="$(jq -n --arg intent_id "$INTENT_ID" --argjson call "$step06_call" '{intent_id:$intent_id,call:$call}')"
+  write_step "step_06_intent_create" "step_06_intent_create.json" "$step06_ok" "$step06_status" "$step06_note" "$step06_duration" "$step06_traces" "$step06_payload"
+else
+  write_step "step_06_intent_create" "step_06_intent_create.json" "false" "prerequisite_missing" "Requires access token and purchase id" "0" "[]" '{"error":"missing_prerequisites"}'
+fi
+# Step 07: Webhook simulation (staging/test mode only)
+run_webhook_sim="false"
+if [[ "$PAYMENTS_TEST_MODE_VALUE" == "true" && "$TARGET_ENV" != "prod" && "$TARGET_ENV" != "production" && -n "$PURCHASE_ID" ]]; then
+  run_webhook_sim="true"
 fi
 
-if [[ "${fail_fast}" == "false" ]]; then
+if [[ "$run_webhook_sim" == "true" ]]; then
   provider_event_id="evt-smoke-$(uuidish)"
-  webhook_payload="$(jq -n --arg event_id "${provider_event_id}" --arg purchase_id "${PURCHASE_ID}" '{provider_event_id:$event_id,event_type:"payment_succeeded",purchase_id:$purchase_id,event:"charge.success",data:{id:$event_id,metadata:{purchase_id:$purchase_id}}}')"
+  webhook_payload="$(jq -n --arg event_id "$provider_event_id" --arg purchase_id "$PURCHASE_ID" '{provider_event_id:$event_id,event_id:$event_id,event_type:"payment_succeeded",purchase_id:$purchase_id,event:"charge.success",data:{id:$event_id,metadata:{purchase_id:$purchase_id}}}')"
   webhook_headers=("authorization: Bearer ${ACCESS_TOKEN}")
-
-  if [[ -n "${WEBHOOK_SECRET_VALUE}" ]]; then
-    webhook_sig="$(printf '%s' "${webhook_payload}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET_VALUE}" -hex | awk '{print $NF}')"
+  if [[ -n "$WEBHOOK_SECRET_VALUE" ]]; then
+    webhook_sig="$(printf '%s' "$webhook_payload" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET_VALUE" -hex | awk '{print $NF}')"
     webhook_headers+=("x-webhook-signature: ${webhook_sig}")
   fi
-  if [[ -n "${PAYSTACK_SECRET_VALUE}" ]]; then
-    paystack_sig="$(printf '%s' "${webhook_payload}" | openssl dgst -sha512 -hmac "${PAYSTACK_SECRET_VALUE}" -hex | awk '{print $NF}')"
+  if [[ -n "$PAYSTACK_WEBHOOK_SECRET_VALUE" ]]; then
+    paystack_sig="$(printf '%s' "$webhook_payload" | openssl dgst -sha512 -hmac "$PAYSTACK_WEBHOOK_SECRET_VALUE" -hex | awk '{print $NF}')"
     webhook_headers+=("x-paystack-signature: ${paystack_sig}")
     webhook_headers+=("x-paystack-event-id: ${provider_event_id}")
   fi
 
-  run_step_request "payments.webhook_simulate" "200" "POST" "/webhooks/payments" "${webhook_payload}" "07_payments_webhook.json" "${webhook_headers[@]}" || true
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "marketplace.purchase_get" "200" "GET" "/marketplace/purchases/${PURCHASE_ID}" "" "08_marketplace_purchase_get.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-  purchase_status="$(extract_json_value "${RUN_DIR}/08_marketplace_purchase_get.json" '.data.status // .data.purchase.status // .status // .purchase.status // empty' | tr '[:upper:]' '[:lower:]')"
-  if [[ "${purchase_status}" == "paid" || "${purchase_status}" == "active" || "${purchase_status}" == "pending_payment" ]]; then
-    append_step "marketplace.purchase_status" true "ok" 0 "" "08_marketplace_purchase_get.json" "status=${purchase_status}"
-  else
-    append_step "marketplace.purchase_status" false "unexpected_status" 0 "" "08_marketplace_purchase_get.json" "status=${purchase_status:-missing}"
-    fail_fast="true"
+  call_http "POST" "/webhooks/payments" "$webhook_payload" "${webhook_headers[@]}"
+  step07_call="$CALL_JSON"
+  step07_status="$(jq -r '.status' <<<"$step07_call")"
+  step07_ok="false"
+  step07_note='Expected HTTP 200/202 from webhook simulation'
+  if [[ "$step07_status" == "200" || "$step07_status" == "202" ]]; then
+    step07_ok="true"
+    step07_note='Webhook simulation accepted'
   fi
-fi
-
-# FLOW D: Dispatch
-if [[ "${fail_fast}" == "false" ]]; then
-  quote_body='{"pickup":{"lat":6.455,"lng":3.384},"dropoff":{"lat":6.6018,"lng":3.3515},"service_level":"standard"}'
-  run_step_request "dispatch.quote" "200" "POST" "/dispatch/quote" "${quote_body}" "09_dispatch_quote.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-  if [[ "${fail_fast}" == "false" ]]; then
-    quote_price="$(extract_json_value "${RUN_DIR}/09_dispatch_quote.json" '.price_minor // empty')"
-    if [[ -z "${quote_price}" ]]; then
-      append_step "dispatch.quote_fields" false "parse_error" 0 "" "09_dispatch_quote.json" "missing price_minor"
-      fail_fast="true"
-    else
-      append_step "dispatch.quote_fields" true "ok" 0 "" "09_dispatch_quote.json" "price_minor=${quote_price}"
-    fi
-  fi
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  trip_body='{"pickup":{"lat":6.455,"lng":3.384,"address":"Lagos Island"},"dropoff":{"lat":6.6018,"lng":3.3515,"address":"Ikeja"},"notes":"smoke run"}'
-  run_step_request "dispatch.trip_create" "201" "POST" "/dispatch/trips" "${trip_body}" "10_dispatch_trip_create.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-  TRIP_ID="$(extract_json_value "${RUN_DIR}/10_dispatch_trip_create.json" '.trip.id // .data.trip.id // empty')"
-  if [[ -z "${TRIP_ID}" ]]; then
-    append_step "dispatch.extract_trip_id" false "parse_error" 0 "" "10_dispatch_trip_create.json" "trip id missing"
-    fail_fast="true"
-  else
-    append_step "dispatch.extract_trip_id" true "ok" 0 "" "10_dispatch_trip_create.json" "trip_id=${TRIP_ID}"
-  fi
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.status_searching" "200" "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"searching"}' "11_dispatch_status_searching.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  # provision a driver account via existing auth credentials endpoints.
-  driver_run_id="$(date -u +%s)"
-  driver_email="smoke.driver.${driver_run_id}@hailo.dev"
-  driver_password="Passw0rd!"
-  register_driver_body="$(jq -n --arg email "${driver_email}" --arg pass "${driver_password}" '{email:$email,password:$pass,role:"driver",display_name:"Smoke Driver"}')"
-  run_step_request "dispatch.driver_register" "201" "POST" "/auth/register" "${register_driver_body}" "12_dispatch_driver_register.json" "idempotency-key: smoke-driver-${driver_run_id}" || true
-  if [[ "${fail_fast}" == "false" ]]; then
-    login_driver_body="$(jq -n --arg email "${driver_email}" --arg pass "${driver_password}" '{email:$email,password:$pass}')"
-    run_step_request "dispatch.driver_login" "200" "POST" "/auth/login" "${login_driver_body}" "13_dispatch_driver_login.json" || true
-    DRIVER_ID="$(extract_json_value "${RUN_DIR}/13_dispatch_driver_login.json" '.user_id // .data.user_id // empty')"
-    if [[ -z "${DRIVER_ID}" ]]; then
-      append_step "dispatch.extract_driver_id" false "parse_error" 0 "" "13_dispatch_driver_login.json" "driver user_id missing"
-      fail_fast="true"
-    else
-      append_step "dispatch.extract_driver_id" true "ok" 0 "" "13_dispatch_driver_login.json" "driver_id=${DRIVER_ID}"
-    fi
-  fi
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  assign_body="$(jq -n --arg driver_id "${DRIVER_ID}" '{driver_id:$driver_id}')"
-  run_step_request "dispatch.assign" "200" "POST" "/dispatch/trips/${TRIP_ID}/assign" "${assign_body}" "14_dispatch_assign.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.status_enroute_pickup" "200" "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"enroute_pickup"}' "15_dispatch_status_enroute_pickup.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.status_picked_up" "200" "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"picked_up"}' "16_dispatch_status_picked_up.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.status_enroute_dropoff" "200" "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"enroute_dropoff"}' "17_dispatch_status_enroute_dropoff.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.status_delivered" "200" "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"delivered"}' "18_dispatch_status_delivered.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-fi
-if [[ "${fail_fast}" == "false" ]]; then
-  run_step_request "dispatch.trip_get" "200" "GET" "/dispatch/trips/${TRIP_ID}" "" "19_dispatch_trip_get.json" "authorization: Bearer ${ACCESS_TOKEN}" || true
-  delivered_status="$(extract_json_value "${RUN_DIR}/19_dispatch_trip_get.json" '.trip.status // .data.trip.status // empty' | tr '[:upper:]' '[:lower:]')"
-  if [[ "${delivered_status}" == "delivered" ]]; then
-    append_step "dispatch.delivered_assert" true "ok" 0 "" "19_dispatch_trip_get.json" "status=delivered"
-  else
-    append_step "dispatch.delivered_assert" false "unexpected_status" 0 "" "19_dispatch_trip_get.json" "status=${delivered_status:-missing}"
-    fail_fast="true"
-  fi
-fi
-
-# FLOW E: Admin
-if [[ -n "${ADMIN_TOKEN_VALUE}" ]]; then
-  if [[ "${fail_fast}" == "false" ]]; then
-    run_step_request "admin.metrics" "200" "GET" "/admin/metrics?limit=5" "" "20_admin_metrics.json" "x-admin-token: ${ADMIN_TOKEN_VALUE}" || true
-  fi
-  if [[ "${fail_fast}" == "false" ]]; then
-    run_step_request "admin.users" "200" "GET" "/admin/users?limit=5" "" "21_admin_users.json" "x-admin-token: ${ADMIN_TOKEN_VALUE}" || true
-  fi
-  if [[ "${fail_fast}" == "false" ]]; then
-    run_step_request "admin.trips" "200" "GET" "/admin/trips?limit=5" "" "22_admin_trips.json" "x-admin-token: ${ADMIN_TOKEN_VALUE}" || true
-  fi
+  step07_duration="$(jq -r '.duration_ms // 0' <<<"$step07_call")"
+  step07_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step07_call")"
+  step07_payload="$(jq -n --arg provider_event_id "$provider_event_id" --argjson call "$step07_call" '{provider_event_id:$provider_event_id,call:$call}')"
+  write_step "step_07_webhook_sim" "step_07_webhook_sim.json" "$step07_ok" "$step07_status" "$step07_note" "$step07_duration" "$step07_traces" "$step07_payload"
 else
-  append_step "admin.skipped" true "skipped" 0 "" "" "ADMIN_TOKEN not provided"
+  skip_reason='Webhook simulation skipped (requires non-production env, PAYMENTS_TEST_MODE=true, and purchase id)'
+  write_step "step_07_webhook_sim" "step_07_webhook_sim.json" "true" "skipped" "$skip_reason" "0" "[]" "$(jq -n --arg reason "$skip_reason" '{skipped:true,reason:$reason}')"
 fi
 
-steps_json="$(jq -s '.' "${STEPS_FILE}")"
-failures_json="$(jq -s '.' "${FAILURES_FILE}")"
-trace_ids_json="$(jq -s 'map(.trace_id) | map(select(. != "")) | unique' "${TRACE_IDS_FILE}")"
-overall_ok="true"
-if [[ "${fail_fast}" == "true" ]]; then
-  overall_ok="false"
+# Step 08: Purchase polling
+if [[ -n "$ACCESS_TOKEN" && -n "$PURCHASE_ID" ]]; then
+  poll_ops='[]'
+  poll_start="$(now_ms)"
+  deadline_ms=$(( poll_start + 45000 ))
+  final_status=''
+  terminal_outcome='timeout'
+  while true; do
+    call_http "GET" "/marketplace/purchases/${PURCHASE_ID}" "" "authorization: Bearer ${ACCESS_TOKEN}"
+    poll_call="$CALL_JSON"
+    poll_ops="$(jq -cn --argjson current "$poll_ops" --argjson op "$poll_call" '$current + [$op]')"
+    poll_http_status="$(jq -r '.status' <<<"$poll_call")"
+    final_status="$(jq -r 'if (.response|type)=="object" then ((.response.data.status // .response.data.purchase.status // .response.status // .response.purchase.status // "") | tostring | ascii_downcase) else "" end' <<<"$poll_call")"
+
+    if [[ "$poll_http_status" != "200" ]]; then
+      terminal_outcome='http_error'
+      break
+    fi
+    if [[ "$final_status" == "paid" || "$final_status" == "active" ]]; then
+      terminal_outcome='paid'
+      break
+    fi
+    if [[ "$final_status" == "failed" || "$final_status" == "canceled" || "$final_status" == "cancelled" ]]; then
+      terminal_outcome='failed'
+      break
+    fi
+
+    now="$(now_ms)"
+    if (( now >= deadline_ms )); then
+      terminal_outcome='timeout'
+      break
+    fi
+    sleep 3
+  done
+
+  step08_ok="false"
+  step08_status="$terminal_outcome"
+  step08_note="Purchase status=${final_status:-unknown}"
+  if [[ "$terminal_outcome" == "paid" ]]; then
+    step08_ok="true"
+    step08_status="ok"
+    step08_note="Purchase reached terminal paid state (${final_status})"
+  fi
+
+  step08_duration="$(( $(now_ms) - poll_start ))"
+  step08_traces="$(jq -c '[.[].trace_id // empty] | map(select(length>0)) | unique' <<<"$poll_ops")"
+  step08_payload="$(jq -n --arg purchase_id "$PURCHASE_ID" --arg final_status "$final_status" --arg terminal_outcome "$terminal_outcome" --argjson attempts "$poll_ops" '{purchase_id:$purchase_id,final_status:$final_status,terminal_outcome:$terminal_outcome,attempts:$attempts}')"
+  write_step "step_08_purchase_get" "step_08_purchase_get.json" "$step08_ok" "$step08_status" "$step08_note" "$step08_duration" "$step08_traces" "$step08_payload"
+else
+  write_step "step_08_purchase_get" "step_08_purchase_get.json" "false" "prerequisite_missing" "Requires access token and purchase id" "0" "[]" '{"error":"missing_prerequisites"}'
 fi
 
-total_duration_ms="$(jq -s '[.[] | (.duration_ms // 0)] | add // 0' "${STEPS_FILE}")"
+# Step 09: Dispatch quote
+if [[ -n "$ACCESS_TOKEN" ]]; then
+  quote_body='{"pickup":{"lat":6.455,"lng":3.384},"dropoff":{"lat":6.6018,"lng":3.3515},"service_level":"standard"}'
+  call_http "POST" "/dispatch/quote" "$quote_body" "authorization: Bearer ${ACCESS_TOKEN}"
+  step09_call="$CALL_JSON"
+  step09_status="$(jq -r '.status' <<<"$step09_call")"
+  price_minor="$(jq -r 'if (.response|type)=="object" then (.response.price_minor // empty) else empty end' <<<"$step09_call")"
+  distance_km="$(jq -r 'if (.response|type)=="object" then (.response.distance_km // empty) else empty end' <<<"$step09_call")"
+  step09_ok="false"
+  step09_note='Expected HTTP 200 with distance_km, duration_min_est, price_minor, currency'
+  has_required_fields="$(jq -r 'if (.response|type)=="object" then ((.response.distance_km != null) and (.response.duration_min_est != null) and (.response.price_minor != null) and ((.response.currency // "") | tostring | length > 0)) else false end' <<<"$step09_call")"
+  if [[ "$step09_status" == "200" && "$has_required_fields" == "true" ]]; then
+    step09_ok="true"
+    step09_note="Quote validated (price_minor=${price_minor}, distance_km=${distance_km})"
+  fi
+  step09_duration="$(jq -r '.duration_ms // 0' <<<"$step09_call")"
+  step09_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step09_call")"
+  step09_payload="$(jq -n --argjson call "$step09_call" '{call:$call}')"
+  write_step "step_09_quote" "step_09_quote.json" "$step09_ok" "$step09_status" "$step09_note" "$step09_duration" "$step09_traces" "$step09_payload"
+else
+  write_step "step_09_quote" "step_09_quote.json" "false" "missing_auth" "Access token unavailable" "0" "[]" '{"error":"missing_access_token"}'
+fi
 
-jq -n \
-  --argjson ok "${overall_ok}" \
-  --arg base_url "${BASE_URL}" \
-  --arg env "${TARGET_ENV}" \
-  --arg run_dir "${RUN_DIR}" \
+# Step 10: Trip create
+if [[ -n "$ACCESS_TOKEN" ]]; then
+  trip_body='{"pickup":{"lat":6.455,"lng":3.384,"address":"Lagos Island"},"dropoff":{"lat":6.6018,"lng":3.3515,"address":"Ikeja"},"notes":"smoke run"}'
+  call_http "POST" "/dispatch/trips" "$trip_body" "authorization: Bearer ${ACCESS_TOKEN}"
+  step10_call="$CALL_JSON"
+  step10_status="$(jq -r '.status' <<<"$step10_call")"
+  TRIP_ID="$(jq -r 'if (.response|type)=="object" then (.response.trip.id // .response.data.trip.id // empty) else empty end' <<<"$step10_call")"
+  step10_ok="false"
+  step10_note='Expected HTTP 201 and trip id'
+  if [[ "$step10_status" == "201" && -n "$TRIP_ID" ]]; then
+    step10_ok="true"
+    step10_note="Created trip_id=${TRIP_ID}"
+  fi
+  step10_duration="$(jq -r '.duration_ms // 0' <<<"$step10_call")"
+  step10_traces="$(jq -c '[.trace_id // empty] | map(select(length>0))' <<<"$step10_call")"
+  step10_payload="$(jq -n --arg trip_id "$TRIP_ID" --argjson call "$step10_call" '{trip_id:$trip_id,call:$call}')"
+  write_step "step_10_trip_create" "step_10_trip_create.json" "$step10_ok" "$step10_status" "$step10_note" "$step10_duration" "$step10_traces" "$step10_payload"
+else
+  write_step "step_10_trip_create" "step_10_trip_create.json" "false" "missing_auth" "Access token unavailable" "0" "[]" '{"error":"missing_access_token"}'
+fi
+
+# Step 11: Trip status + assignment + delivery verify
+if [[ -n "$ACCESS_TOKEN" && -n "$TRIP_ID" ]]; then
+  trip_ops='[]'
+  trip_status_start="$(now_ms)"
+  trip_step_ok="true"
+  trip_note='Trip reached delivered state'
+  assign_supported='unknown'
+
+  trip_add_op() {
+    local op_json="$1"
+    trip_ops="$(jq -cn --argjson current "$trip_ops" --argjson op "$op_json" '$current + [$op]')"
+  }
+
+  # created -> searching
+  call_http "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"searching"}' "authorization: Bearer ${ACCESS_TOKEN}"
+  status_searching_call="$CALL_JSON"
+  trip_add_op "$status_searching_call"
+  if [[ "$(jq -r '.status' <<<"$status_searching_call")" != "200" ]]; then
+    trip_step_ok="false"
+    trip_note='Failed to transition trip to searching'
+  fi
+
+  DRIVER_ID="$TEST_DRIVER_ID_VALUE"
+  if [[ "$trip_step_ok" == "true" && -z "$DRIVER_ID" ]]; then
+    driver_stamp="$(date -u +%s)"
+    driver_email="smoke.driver.${driver_stamp}@hailo.dev"
+    driver_password='Passw0rd!'
+    register_body="$(jq -n --arg email "$driver_email" --arg pass "$driver_password" '{email:$email,password:$pass,role:"driver",display_name:"Smoke Driver"}')"
+    call_http "POST" "/auth/register" "$register_body" "idempotency-key: smoke-driver-${driver_stamp}"
+    driver_register_call="$CALL_JSON"
+    trip_add_op "$driver_register_call"
+    register_status="$(jq -r '.status' <<<"$driver_register_call")"
+    if [[ "$register_status" != "201" ]]; then
+      trip_step_ok="false"
+      trip_note='Failed to create smoke driver account'
+    else
+      DRIVER_ID="$(jq -r 'if (.response|type)=="object" then (.response.user_id // .response.data.user_id // .response.user.id // empty) else empty end' <<<"$driver_register_call")"
+    fi
+
+    if [[ "$trip_step_ok" == "true" && -z "$DRIVER_ID" ]]; then
+      trip_step_ok="false"
+      trip_note='Driver creation succeeded but user_id was missing'
+    fi
+  fi
+
+  if [[ "$trip_step_ok" == "true" ]]; then
+    assign_body="$(jq -n --arg driver_id "$DRIVER_ID" '{driver_id:$driver_id}')"
+    call_http "POST" "/dispatch/trips/${TRIP_ID}/assign" "$assign_body" "authorization: Bearer ${ACCESS_TOKEN}"
+    assign_call="$CALL_JSON"
+    trip_add_op "$assign_call"
+    assign_status="$(jq -r '.status' <<<"$assign_call")"
+
+    if [[ "$assign_status" == "200" ]]; then
+      assign_supported='true'
+    elif [[ "$assign_status" == "404" || "$assign_status" == "405" ]]; then
+      assign_supported='false'
+      call_http "POST" "/dispatch/trips/${TRIP_ID}/status" '{"status":"assigned"}' "authorization: Bearer ${ACCESS_TOKEN}"
+      status_assigned_call="$CALL_JSON"
+      trip_add_op "$status_assigned_call"
+      if [[ "$(jq -r '.status' <<<"$status_assigned_call")" != "200" ]]; then
+        trip_step_ok="false"
+        trip_note='Assign endpoint unavailable and fallback status transition failed'
+      fi
+    else
+      trip_step_ok="false"
+      trip_note='Assign call failed unexpectedly'
+    fi
+  fi
+
+  for transition in enroute_pickup picked_up enroute_dropoff delivered; do
+    if [[ "$trip_step_ok" != "true" ]]; then
+      break
+    fi
+    transition_body="$(jq -n --arg status "$transition" '{status:$status}')"
+    call_http "POST" "/dispatch/trips/${TRIP_ID}/status" "$transition_body" "authorization: Bearer ${ACCESS_TOKEN}"
+    transition_call="$CALL_JSON"
+    trip_add_op "$transition_call"
+    if [[ "$(jq -r '.status' <<<"$transition_call")" != "200" ]]; then
+      trip_step_ok="false"
+      trip_note="Failed transition to ${transition}"
+      break
+    fi
+  done
+
+  if [[ "$trip_step_ok" == "true" ]]; then
+    call_http "GET" "/dispatch/trips/${TRIP_ID}" "" "authorization: Bearer ${ACCESS_TOKEN}"
+    trip_get_call="$CALL_JSON"
+    trip_add_op "$trip_get_call"
+    if [[ "$(jq -r '.status' <<<"$trip_get_call")" != "200" ]]; then
+      trip_step_ok="false"
+      trip_note='Failed to fetch trip after transitions'
+    else
+      final_trip_status="$(jq -r 'if (.response|type)=="object" then ((.response.trip.status // .response.data.trip.status // "") | tostring | ascii_downcase) else "" end' <<<"$trip_get_call")"
+      if [[ "$final_trip_status" != "delivered" ]]; then
+        trip_step_ok="false"
+        trip_note="Trip final status is ${final_trip_status:-missing}, expected delivered"
+      fi
+    fi
+  fi
+
+  step11_ok="$(json_bool "$trip_step_ok")"
+  step11_status='ok'
+  if [[ "$step11_ok" != "true" ]]; then
+    step11_status='trip_flow_failed'
+  fi
+  step11_duration="$(( $(now_ms) - trip_status_start ))"
+  step11_traces="$(jq -c '[.[].trace_id // empty] | map(select(length>0)) | unique' <<<"$trip_ops")"
+  step11_payload="$(jq -n --arg trip_id "$TRIP_ID" --arg assign_supported "$assign_supported" --arg note "$trip_note" --argjson operations "$trip_ops" '{trip_id:$trip_id,assign_supported:$assign_supported,note:$note,operations:$operations}')"
+  write_step "step_11_trip_status" "step_11_trip_status.json" "$step11_ok" "$step11_status" "$trip_note" "$step11_duration" "$step11_traces" "$step11_payload"
+else
+  write_step "step_11_trip_status" "step_11_trip_status.json" "false" "prerequisite_missing" "Requires access token and trip id" "0" "[]" '{"error":"missing_prerequisites"}'
+fi
+# Step 12: Admin metrics/users/trips (+ optional audit check)
+admin_ops='[]'
+admin_status='skipped'
+admin_ok='true'
+admin_note='Admin flow skipped (no admin access available)'
+
+admin_add_op() {
+  local op_json="$1"
+  admin_ops="$(jq -cn --argjson current "$admin_ops" --argjson op "$op_json" '$current + [$op]')"
+}
+
+run_admin_with_token='false'
+if [[ "$ADMIN_TOKEN_ENABLED_VALUE" == "true" && -n "$ADMIN_TOKEN_VALUE" ]]; then
+  run_admin_with_token='true'
+fi
+
+if [[ "$run_admin_with_token" == "true" ]]; then
+  call_http "GET" "/admin/metrics" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
+  admin_metrics_call="$CALL_JSON"
+  admin_add_op "$admin_metrics_call"
+  metrics_status="$(jq -r '.status' <<<"$admin_metrics_call")"
+  if [[ "$metrics_status" == "200" ]]; then
+    call_http "GET" "/admin/users?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
+    admin_users_call="$CALL_JSON"
+    admin_add_op "$admin_users_call"
+    call_http "GET" "/admin/trips?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
+    admin_trips_call="$CALL_JSON"
+    admin_add_op "$admin_trips_call"
+    call_http "GET" "/admin/audit?limit=5" "" "x-admin-token: ${ADMIN_TOKEN_VALUE}"
+    admin_audit_call="$CALL_JSON"
+    admin_add_op "$admin_audit_call"
+
+    if [[ "$(jq -r '.status' <<<"$admin_users_call")" == "200" && "$(jq -r '.status' <<<"$admin_trips_call")" == "200" ]]; then
+      admin_status='ok'
+      admin_ok='true'
+      admin_note='Admin metrics/users/trips checks passed'
+    else
+      admin_status='admin_flow_failed'
+      admin_ok='false'
+      admin_note='Admin metrics succeeded but users/trips checks failed'
+    fi
+  else
+    admin_status='admin_flow_failed'
+    admin_ok='false'
+    admin_note='Admin metrics request failed with admin token'
+  fi
+elif [[ -n "$ACCESS_TOKEN" ]]; then
+  call_http "GET" "/admin/metrics" "" "authorization: Bearer ${ACCESS_TOKEN}"
+  bearer_admin_metrics_call="$CALL_JSON"
+  admin_add_op "$bearer_admin_metrics_call"
+  bearer_metrics_status="$(jq -r '.status' <<<"$bearer_admin_metrics_call")"
+  if [[ "$bearer_metrics_status" == "200" ]]; then
+    call_http "GET" "/admin/users?limit=5" "" "authorization: Bearer ${ACCESS_TOKEN}"
+    bearer_admin_users_call="$CALL_JSON"
+    admin_add_op "$bearer_admin_users_call"
+    call_http "GET" "/admin/trips?limit=5" "" "authorization: Bearer ${ACCESS_TOKEN}"
+    bearer_admin_trips_call="$CALL_JSON"
+    admin_add_op "$bearer_admin_trips_call"
+
+    if [[ "$(jq -r '.status' <<<"$bearer_admin_users_call")" == "200" && "$(jq -r '.status' <<<"$bearer_admin_trips_call")" == "200" ]]; then
+      admin_status='ok'
+      admin_ok='true'
+      admin_note='Admin endpoints succeeded via bearer token'
+    else
+      admin_status='admin_flow_failed'
+      admin_ok='false'
+      admin_note='Admin bearer token flow failed for users/trips endpoints'
+    fi
+  elif [[ "$bearer_metrics_status" == "401" || "$bearer_metrics_status" == "403" ]]; then
+    admin_status='skipped'
+    admin_ok='true'
+    admin_note='Admin endpoints unavailable for current bearer token (non-admin)'
+  else
+    admin_status='admin_flow_failed'
+    admin_ok='false'
+    admin_note='Admin metrics request failed unexpectedly'
+  fi
+fi
+
+step12_duration="$(jq -r '[.[].duration_ms // 0] | add // 0' <<<"$admin_ops")"
+step12_traces="$(jq -c '[.[].trace_id // empty] | map(select(length>0)) | unique' <<<"$admin_ops")"
+step12_payload="$(jq -n --arg note "$admin_note" --argjson operations "$admin_ops" '{note:$note,operations:$operations}')"
+write_step "step_12_admin_metrics" "step_12_admin_metrics.json" "$admin_ok" "$admin_status" "$admin_note" "$step12_duration" "$step12_traces" "$step12_payload"
+
+steps_json="$(jq -s '.' "$STEPS_FILE")"
+failures_json="$(jq -s '.' "$FAILURES_FILE")"
+trace_ids_json="$(jq -s '[.[] | .trace_ids[]?] | map(select(type=="string" and length>0)) | unique' "$STEPS_FILE")"
+total_duration_ms="$(jq -s '[.[] | (.duration_ms // 0)] | add // 0' "$STEPS_FILE")"
+
+summary_json="$(jq -n \
+  --argjson ok "$OVERALL_OK" \
+  --arg base_url "$BASE_URL" \
+  --arg env "$TARGET_ENV" \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --argjson total_duration_ms "${total_duration_ms}" \
-  --argjson steps "${steps_json}" \
-  --argjson failures "${failures_json}" \
-  --argjson trace_ids "${trace_ids_json}" \
-  '{ok:$ok,base_url:$base_url,env:$env,generated_at:$generated_at,total_duration_ms:$total_duration_ms,steps:$steps,failures:$failures,trace_ids:$trace_ids,artifact_dir:$run_dir}' \
-  >"${RUN_DIR}/summary.json"
+  --arg artifact_dir "$RUN_DIR" \
+  --argjson total_duration_ms "$total_duration_ms" \
+  --argjson steps "$steps_json" \
+  --argjson failures "$failures_json" \
+  --argjson trace_ids "$trace_ids_json" \
+  '{ok:$ok,base_url:$base_url,env:$env,generated_at:$generated_at,total_duration_ms:$total_duration_ms,steps:$steps,failures:$failures,trace_ids:$trace_ids,artifact_dir:$artifact_dir}')"
+printf '%s\n' "$summary_json" >"${RUN_DIR}/summary.json"
 
-if [[ "${overall_ok}" == "true" ]]; then
+if [[ "$OVERALL_OK" == "true" ]]; then
   echo "PASS: smoke e2e completed"
   echo "summary: ${RUN_DIR}/summary.json"
   exit 0

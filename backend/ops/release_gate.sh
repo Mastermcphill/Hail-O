@@ -24,6 +24,12 @@ Options:
 Environment variable fallbacks:
   BASE_URL, STAGING_BASE_URL, REQUIRED_MIGRATION_HEAD,
   RELEASE_GATE_REQUIRE_PARITY.
+
+Smoke envs:
+  TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN)
+  TEST_PHONE_E164 (or E2E_PHONE_E164)
+  TEST_OTP (or E2E_OTP_CODE)
+  PAYMENTS_TEST_MODE
 EOF
 }
 
@@ -180,9 +186,15 @@ if [[ "${ADMIN_TOKEN_ENABLED_VALUE}" != "true" ]]; then
   fail "set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks"
 fi
 
-if [[ -z "${E2E_ACCESS_TOKEN:-}" ]]; then
-  require_env E2E_PHONE_E164
-  require_env E2E_OTP_CODE
+TEST_ACCESS_TOKEN_VALUE="${TEST_ACCESS_TOKEN:-${E2E_ACCESS_TOKEN:-}}"
+TEST_PHONE_VALUE="${TEST_PHONE_E164:-${E2E_PHONE_E164:-}}"
+TEST_OTP_VALUE="${TEST_OTP:-${E2E_OTP_CODE:-}}"
+PAYMENTS_TEST_MODE_VALUE="$(normalize_bool "${PAYMENTS_TEST_MODE:-false}")"
+
+if [[ -z "${TEST_ACCESS_TOKEN_VALUE// }" ]]; then
+  if [[ -z "${TEST_PHONE_VALUE// }" || -z "${TEST_OTP_VALUE// }" ]]; then
+    fail "set TEST_ACCESS_TOKEN (or E2E_ACCESS_TOKEN) OR provide TEST_PHONE_E164/TEST_OTP (or E2E_* equivalents)"
+  fi
 fi
 
 TARGET_LABEL="$ENV_NAME"
@@ -217,8 +229,20 @@ fi
 
 echo "[release-gate] running smoke_e2e.sh against ${SMOKE_BASE}"
 (
-  export E2E_ADMIN_TOKEN="$ADMIN_TOKEN_VALUE"
-  "${ROOT_DIR}/ops/smoke_e2e.sh" --base="${SMOKE_BASE}" --env="${SMOKE_ENV}"
+  smoke_cmd=(
+    "${ROOT_DIR}/ops/smoke_e2e.sh"
+    "--base=${SMOKE_BASE}"
+    "--env=${SMOKE_ENV}"
+    "--admin-token=${ADMIN_TOKEN_VALUE}"
+    "--admin-token-enabled=${ADMIN_TOKEN_ENABLED_VALUE}"
+    "--payments-test-mode=${PAYMENTS_TEST_MODE_VALUE}"
+  )
+  if [[ -n "${TEST_ACCESS_TOKEN_VALUE// }" ]]; then
+    smoke_cmd+=("--access-token=${TEST_ACCESS_TOKEN_VALUE}")
+  else
+    smoke_cmd+=("--test-phone=${TEST_PHONE_VALUE}" "--test-otp=${TEST_OTP_VALUE}")
+  fi
+  "${smoke_cmd[@]}"
 )
 
 echo "RELEASE GATE: PASS"

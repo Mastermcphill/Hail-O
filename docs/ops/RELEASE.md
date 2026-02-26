@@ -5,6 +5,8 @@ This document defines the enforced release-gate flow for backend shipping.
 ## Gate Scripts
 - Bash: `backend/ops/release_gate.sh`
 - PowerShell: `backend/ops/release_gate.ps1`
+- Smoke (Bash): `backend/ops/smoke_e2e.sh`
+- Smoke (PowerShell): `backend/ops/smoke_e2e.ps1`
 
 Both scripts perform:
 1. Required env key checks (production is stricter).
@@ -43,6 +45,39 @@ Optional migration-head assertion:
 - Smoke writes artifacts to:
   - `backend/ops/test_artifacts/e2e/<timestamp>/`
 - Gate consumes smoke exit code and keeps generated artifact files for debugging.
+- Artifact contract:
+  - `step_01_health.json`
+  - `step_02_ready.json`
+  - `step_03_auth.json`
+  - `step_04_offers.json`
+  - `step_05_purchase_create.json`
+  - `step_06_intent_create.json`
+  - `step_07_webhook_sim.json` (staging/test mode only, otherwise skipped)
+  - `step_08_purchase_get.json`
+  - `step_09_quote.json`
+  - `step_10_trip_create.json`
+  - `step_11_trip_status.json`
+  - `step_12_admin_metrics.json`
+  - `summary.json`
+
+## Run Smoke Locally
+- Bash:
+  - `bash backend/ops/smoke_e2e.sh --base=https://<staging> --env=staging --admin-token=<token> --admin-token-enabled=true --test-phone=<e164> --test-otp=<code> --payments-test-mode=true`
+- PowerShell:
+  - `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -BaseUrl https://<staging> -EnvName staging -AdminToken <token> -AdminTokenEnabled true -TestPhoneE164 <e164> -TestOtp <code> -PaymentsTestMode true`
+- Dry-run mode (CI helper):
+  - Bash: `bash backend/ops/smoke_e2e.sh --base=https://example.invalid --dry-run`
+  - PowerShell: `powershell -ExecutionPolicy Bypass -File backend/ops/smoke_e2e.ps1 -BaseUrl https://example.invalid -DryRun`
+
+## Render Usage
+- Configure release command or deploy hook to run:
+  - staging: `bash backend/ops/release_gate.sh --env=staging --base=https://<staging>`
+  - production: `bash backend/ops/release_gate.sh --env=prod --base=https://<prod> --staging-base=https://<staging>`
+- Ensure one auth path is configured for smoke:
+  - `TEST_ACCESS_TOKEN` (preferred), or
+  - `TEST_PHONE_E164` + `TEST_OTP` (staging/dev OTP path)
+- Optional:
+  - `PAYMENTS_TEST_MODE=true` enables simulated webhook step in non-production smoke.
 
 ## Required Runtime Env
 See `docs/ops/ENV_KEYS.md` for full inventory. At minimum, release gate expects:
