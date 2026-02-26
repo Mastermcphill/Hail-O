@@ -244,6 +244,35 @@ void main() {
     expect(body['otp_ready'], isTrue);
   });
 
+  test('/ready defaults to Redis bypass when REDIS_ENABLED is unset', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    await db.execute('DROP TABLE IF EXISTS schema_migrations');
+    await db.execute(
+      'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+    );
+    await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+    final handler = _buildHandler(
+      db: db,
+      dbHealthCheck: () async => true,
+      buildInfo: const <String, Object?>{
+        'commit': 'ready-test',
+        'migration_head': 25,
+      },
+      environmentMap: const <String, String>{},
+    );
+
+    final response = await _request(handler, '/ready');
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+    expect(body['ready'], isTrue);
+    expect(body['redis_enabled'], isFalse);
+    expect(body['redis_configured'], isFalse);
+    expect(body['redis_ready'], isFalse);
+  });
+
   test(
     '/ready returns redis_ready=false when redis is disabled and ok remains true',
     () async {

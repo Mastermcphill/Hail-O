@@ -202,6 +202,26 @@ void main() {
     );
   });
 
+  test(
+    'does not require redis url in production when REDIS_ENABLED is unset',
+    () {
+      expect(
+        () => validateProductionConfig(
+          environment: 'production',
+          usePostgres: false,
+          envMap: const <String, String>{
+            'JWT_SECRET': 'super-secret',
+            'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+            'OTP_PROVIDER': 'termii',
+            'TERMII_API_KEY': 'termii-key',
+            'TERMII_SENDER_ID': 'HAILO',
+          },
+        ),
+        returnsNormally,
+      );
+    },
+  );
+
   test('accepts complete strict config', () {
     expect(
       () => validateProductionConfig(

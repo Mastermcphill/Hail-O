@@ -1,5 +1,11 @@
 import 'redis_client.dart';
 
+typedef RedisClientFactory =
+    RedisQueueClient Function(
+      String redisUrl, {
+      void Function(String line)? warningSink,
+    });
+
 class RedisManager {
   const RedisManager._({
     required this.enabled,
@@ -14,20 +20,22 @@ class RedisManager {
   static Future<RedisManager> fromEnvironment(
     Map<String, String> env, {
     void Function(String line)? warningSink,
+    RedisClientFactory? clientFactory,
   }) async {
     final redisEnabled = _parseBool(env['REDIS_ENABLED']);
     final redisUrl = (env['REDIS_URL'] ?? '').trim();
     final redisConfigured = redisUrl.isNotEmpty;
+    final buildClient = clientFactory ?? RedisClient.new;
 
-    if (!redisEnabled || !redisConfigured) {
-      return RedisManager._(
-        enabled: false,
-        configured: redisConfigured,
-        client: null,
-      );
+    if (!redisEnabled) {
+      return RedisManager._(enabled: false, configured: false, client: null);
     }
 
-    final redis = RedisClient(redisUrl: redisUrl, warningSink: warningSink);
+    if (!redisConfigured) {
+      throw StateError('REDIS_ENABLED=true requires REDIS_URL');
+    }
+
+    final redis = buildClient(redisUrl, warningSink: warningSink);
     try {
       await redis.connect();
       return RedisManager._(enabled: true, configured: true, client: redis);
