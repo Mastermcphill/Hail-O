@@ -5,6 +5,7 @@ import '../models/billing_invoice.dart';
 import '../models/offer.dart';
 import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
+import '../models/payment_intent.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/purchase_snapshot.dart';
@@ -196,6 +197,22 @@ class MarketplaceRepositoryMock implements MarketplaceRepository {
       return null;
     }
     return purchaseId;
+  }
+
+  @override
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    final purchase = _purchaseById[purchaseId];
+    return MarketplacePaymentIntent(
+      id: 'pi_${newRequestId().replaceAll('-', '')}',
+      purchaseId: purchaseId,
+      status: 'pending',
+      amountMinor: purchase?.totalPriceMinor ?? 0,
+      currency: 'NGN',
+      provider: 'manual',
+    );
   }
 
   @override

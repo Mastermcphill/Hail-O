@@ -4,6 +4,7 @@ import 'package:hailo_core/features/marketplace/data/marketplace_repository.dart
 import 'package:hailo_core/features/marketplace/models/offer.dart';
 import 'package:hailo_core/features/marketplace/models/org_summary.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
+import 'package:hailo_core/features/marketplace/models/payment_intent.dart';
 import 'package:hailo_core/features/marketplace/models/pricing_breakdown.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_snapshot.dart';
@@ -195,6 +196,20 @@ class _FakeRepository implements MarketplaceRepository {
     required String idempotencyKey,
   }) async {
     return 'purchase_1';
+  }
+
+  @override
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) async {
+    return MarketplacePaymentIntent(
+      id: 'pi_1',
+      purchaseId: purchaseId,
+      status: 'pending',
+      amountMinor: 1000,
+      currency: 'NGN',
+      provider: 'manual',
+    );
   }
 
   @override

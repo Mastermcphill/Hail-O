@@ -13,6 +13,7 @@ import '../models/offer.dart';
 import '../models/org_summary.dart';
 import '../models/outbox_item.dart';
 import '../models/paywall_copy.dart';
+import '../models/payment_intent.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/purchase_snapshot.dart';
@@ -40,6 +41,7 @@ class MarketplaceController extends ChangeNotifier {
   List<MarketplacePurchaseSnapshot> _activeOrgPurchases =
       <MarketplacePurchaseSnapshot>[];
   PurchaseReceipt? _activeReceipt;
+  MarketplacePaymentIntent? _activePaymentIntent;
   MarketplacePurchaseSnapshot? _purchase;
 
   String _activeOrgId = 'org_demo';
@@ -88,6 +90,7 @@ class MarketplaceController extends ChangeNotifier {
   List<MarketplacePurchaseSnapshot> get activeOrgPurchases =>
       _activeOrgPurchases;
   PurchaseReceipt? get activeReceipt => _activeReceipt;
+  MarketplacePaymentIntent? get activePaymentIntent => _activePaymentIntent;
   MarketplacePurchaseSnapshot? get purchase => _purchase;
 
   bool get loadingOffers => _loadingOffers;
@@ -465,6 +468,7 @@ class MarketplaceController extends ChangeNotifier {
         selection: selection,
         purchaseId: purchaseId,
       );
+      await _tryCreatePaymentIntent(purchaseId);
       await _finalizeCheckoutSuccess(
         offerId: offerId,
         idempotencyKey: idempotencyKey,
@@ -477,6 +481,7 @@ class MarketplaceController extends ChangeNotifier {
       if (idempotencyKey != null) {
         final restored = await _tryRestoreCheckout(idempotencyKey);
         if (restored != null && restored.isNotEmpty) {
+          await _tryCreatePaymentIntent(restored);
           await _finalizeCheckoutSuccess(
             offerId: offerId,
             idempotencyKey: idempotencyKey,
@@ -519,6 +524,7 @@ class MarketplaceController extends ChangeNotifier {
         idempotencyKey: key,
         purchaseId: restored,
       );
+      await _tryCreatePaymentIntent(restored);
       await _tryHydrateReceipt(restored);
       return restored;
     } catch (error) {
@@ -555,6 +561,7 @@ class MarketplaceController extends ChangeNotifier {
         selection,
         idempotencyKey: key,
       );
+      await _tryCreatePaymentIntent(purchaseId);
       await _finalizeCheckoutSuccess(
         offerId: offerId,
         idempotencyKey: key,
@@ -1187,7 +1194,10 @@ class MarketplaceController extends ChangeNotifier {
     _pendingCheckoutOfferId = offerId;
     _pendingCheckoutIdempotencyKey = null;
     _errorMessage = null;
-    _infoBanner = null;
+    if (_activePaymentIntent == null ||
+        _activePaymentIntent!.purchaseId != purchaseId) {
+      _infoBanner = null;
+    }
   }
 
   void _setLocalReceiptFromSelection({
@@ -1203,7 +1213,7 @@ class MarketplaceController extends ChangeNotifier {
       offerTitle: offerTitle,
       seatCount: selection.seatCount,
       totalPriceMinor: basePrice * selection.seatCount,
-      status: 'CONFIRMED',
+      status: 'PENDING_PAYMENT',
       createdAt: DateTime.now().toUtc(),
       assignments: selection.assignments,
     );
@@ -1215,6 +1225,10 @@ class MarketplaceController extends ChangeNotifier {
       final receipt = await _repository.fetchPurchaseReceipt(purchaseId);
       if (receipt != null) {
         _activeReceipt = receipt;
+        if (_activePaymentIntent != null &&
+            _activePaymentIntent!.purchaseId != receipt.purchaseId) {
+          _activePaymentIntent = null;
+        }
         _seatCount = _clampSeatCount(receipt.seatCount);
         _assignments = receipt.assignments;
         _syncAssignmentsToSeatCount();
@@ -1222,6 +1236,25 @@ class MarketplaceController extends ChangeNotifier {
         await _localStore.cachePurchase(_purchase!);
       }
     } catch (_) {}
+  }
+
+  Future<void> _tryCreatePaymentIntent(String purchaseId) async {
+    try {
+      final intent = await _repository.createPaymentIntent(
+        purchaseId: purchaseId,
+      );
+      if (intent == null) {
+        return;
+      }
+      _activePaymentIntent = intent;
+      if (intent.isPending) {
+        _infoBanner = 'Pending payment';
+      }
+    } catch (error) {
+      _infoBanner =
+          'Purchase created. Payment intent is pending initialization.';
+      _errorMessage = error.toString();
+    }
   }
 
   void _upsertInvoice(BillingInvoice invoice) {

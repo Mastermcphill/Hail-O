@@ -4,6 +4,7 @@ import '../models/billing_invoice.dart';
 import '../models/offer.dart';
 import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
+import '../models/payment_intent.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/purchase_snapshot.dart';
@@ -173,6 +174,28 @@ class MarketplaceRepositoryHttp implements MarketplaceRepository {
       throw _mapError(
         error,
         fallbackMessage: 'Unable to create checkout at this time.',
+      );
+    }
+  }
+
+  @override
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        MarketplaceEndpoints.paymentIntents,
+        body: <String, dynamic>{'purchase_id': purchaseId},
+      );
+      final payload = _toMap(extractEnvelopeData(response));
+      if (payload.isEmpty) {
+        return null;
+      }
+      return MarketplacePaymentIntent.fromMap(payload, purchaseId: purchaseId);
+    } catch (error) {
+      throw _mapError(
+        error,
+        fallbackMessage: 'Unable to create payment intent right now.',
       );
     }
   }

@@ -47,6 +47,10 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
     return Consumer<MarketplaceController>(
       builder: (context, controller, child) {
         final receipt = _resolveReceipt(controller.activeReceipt);
+        final paymentIntent = controller.activePaymentIntent;
+        final showPaymentIntent =
+            paymentIntent != null &&
+            paymentIntent.purchaseId == widget.purchaseId;
 
         if (controller.loadingReceipt && receipt == null) {
           return const Center(child: CircularProgressIndicator());
@@ -113,10 +117,34 @@ class _MarketplaceReceiptScreenState extends State<MarketplaceReceiptScreen> {
                       'Created',
                       _createdAtFormat.format(receipt.createdAt.toLocal()),
                     ),
+                    if (showPaymentIntent) ...<Widget>[
+                      _row('Payment intent', paymentIntent.id),
+                      _row('Payment status', paymentIntent.status),
+                    ],
                   ],
                 ),
               ),
             ),
+            if (showPaymentIntent && paymentIntent.isPending) ...<Widget>[
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.hourglass_top_rounded),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Pending payment: complete payment to activate this purchase.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             FilledButton(
               key: const Key('marketplace_receipt_timeline_button'),

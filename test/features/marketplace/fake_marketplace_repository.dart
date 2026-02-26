@@ -4,6 +4,7 @@ import 'package:hailo_core/features/marketplace/models/billing_invoice.dart';
 import 'package:hailo_core/features/marketplace/models/offer.dart';
 import 'package:hailo_core/features/marketplace/models/org_summary.dart';
 import 'package:hailo_core/features/marketplace/models/paywall_copy.dart';
+import 'package:hailo_core/features/marketplace/models/payment_intent.dart';
 import 'package:hailo_core/features/marketplace/models/pricing_breakdown.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_receipt.dart';
 import 'package:hailo_core/features/marketplace/models/purchase_snapshot.dart';
@@ -203,6 +204,24 @@ class FakeMarketplaceRepository implements MarketplaceRepository {
     purchases[snapshot.purchaseId] = snapshot;
     purchases['idem:$idempotencyKey'] = snapshot;
     return snapshot.purchaseId;
+  }
+
+  @override
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) async {
+    final snapshot = purchases[purchaseId];
+    if (snapshot == null) {
+      return null;
+    }
+    return MarketplacePaymentIntent(
+      id: 'pi_$purchaseId',
+      purchaseId: purchaseId,
+      status: 'pending',
+      amountMinor: snapshot.totalAmount,
+      currency: snapshot.currency,
+      provider: 'manual',
+    );
   }
 
   @override

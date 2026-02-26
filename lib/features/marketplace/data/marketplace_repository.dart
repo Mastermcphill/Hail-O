@@ -3,6 +3,7 @@ import '../../../core/api/api_config.dart';
 import '../models/offer.dart';
 import '../models/org_summary.dart';
 import '../models/paywall_copy.dart';
+import '../models/payment_intent.dart';
 import '../models/pricing_breakdown.dart';
 import '../models/purchase_receipt.dart';
 import '../models/purchase_snapshot.dart';
@@ -48,6 +49,12 @@ abstract class MarketplaceRepository {
     SeatSelection selection, {
     required String idempotencyKey,
   });
+
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) async {
+    return null;
+  }
 
   Future<String?> restorePurchaseByIdempotencyKey(String idempotencyKey);
 
@@ -250,6 +257,18 @@ class MarketplaceRepositorySwitching implements MarketplaceRepository {
         selection,
         idempotencyKey: idempotencyKey,
       ),
+    );
+  }
+
+  @override
+  Future<MarketplacePaymentIntent?> createPaymentIntent({
+    required String purchaseId,
+  }) {
+    return _execute(
+      httpCall: () =>
+          _httpRepository.createPaymentIntent(purchaseId: purchaseId),
+      mockCall: () =>
+          _mockRepository.createPaymentIntent(purchaseId: purchaseId),
     );
   }
 

@@ -22,6 +22,7 @@ class MarketplaceEndpoints {
   static const applyReferral = '/marketplace/apply-referral';
 
   static const purchases = '/marketplace/purchases';
+  static const paymentIntents = '/payments/intents';
   static String purchase(String purchaseId) =>
       '/marketplace/purchases/$purchaseId';
   static String purchaseSeats(String purchaseId) =>
