@@ -1,0 +1,93 @@
+name: Deploy With Staging Gate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-with-staging-gate-main
+  cancel-in-progress: false
+
+env:
+  STAGING_BASE_URL: https://hail-o-api-staging.onrender.com
+
+jobs:
+  deploy_staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Trigger Render staging deploy
+        env:
+          RENDER_STAGING_DEPLOY_HOOK_URL: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${RENDER_STAGING_DEPLOY_HOOK_URL:-}" ]; then
+            echo "Missing required secret: RENDER_STAGING_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+          curl -fsS -X POST "$RENDER_STAGING_DEPLOY_HOOK_URL"
+
+      - name: Wait for staging readiness
+        env:
+          READY_TIMEOUT_SECONDS: "900"
+        run: |
+          start="$(date +%s)"
+          tmp_ready="$(mktemp)"
+
+          while true; do
+            status="$(curl -sS -o "$tmp_ready" -w "%{http_code}" "${STAGING_BASE_URL}/ready" || true)"
+            if [ "$status" = "404" ]; then
+              status="$(curl -sS -o "$tmp_ready" -w "%{http_code}" "${STAGING_BASE_URL}/api/ready" || true)"
+            fi
+
+            if [ "$status" = "200" ]; then
+              ok="$(jq -r '.ok // false' "$tmp_ready" 2>/dev/null || echo "false")"
+              ready="$(jq -r '.ready // .ok // false' "$tmp_ready" 2>/dev/null || echo "false")"
+              if [ "$ok" = "true" ] && [ "$ready" = "true" ]; then
+                echo "Staging ready check passed."
+                cat "$tmp_ready"
+                break
+              fi
+            fi
+
+            now="$(date +%s)"
+            elapsed="$((now - start))"
+            if [ "$elapsed" -ge "$READY_TIMEOUT_SECONDS" ]; then
+              echo "Timed out waiting for staging readiness after ${READY_TIMEOUT_SECONDS}s."
+              echo "Last readiness payload:"
+              cat "$tmp_ready" || true
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+  verify_staging:
+    needs: deploy_staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run staging release gate
+        env:
+          RELEASE_GATE_STRICT_LOCAL_AUTH: "false"
+        run: |
+          bash backend/ops/release_gate.sh --env=staging --base="${STAGING_BASE_URL}"
+
+  deploy_prod:
+    needs: verify_staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Render production deploy
+        env:
+          RENDER_PROD_DEPLOY_HOOK_URL: ${{ secrets.RENDER_PROD_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${RENDER_PROD_DEPLOY_HOOK_URL:-}" ]; then
+            echo "Missing required secret: RENDER_PROD_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+          curl -fsS -X POST "$RENDER_PROD_DEPLOY_HOOK_URL"
