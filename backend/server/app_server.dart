@@ -5,6 +5,7 @@ import '../infra/postgres_provider.dart';
 import '../infra/request_metrics.dart';
 import '../infra/token_service.dart';
 import '../modules/auth/auth_credentials_store.dart';
+import '../modules/auth/phone_auth_store.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import 'middleware/auth_middleware.dart';
 import 'middleware/cors_policy_middleware.dart';
@@ -46,6 +47,7 @@ class AppServer {
     this.runtimeConfigSnapshot = const <String, Object?>{},
     this.postgresProvider,
     this.authCredentialsStore,
+    this.phoneAuthStore,
     this.rideRequestMetadataStore,
     this.operationalRecordStore,
     this.environmentMap = const <String, String>{},
@@ -78,6 +80,7 @@ class AppServer {
   final Map<String, Object?> runtimeConfigSnapshot;
   final PostgresProvider? postgresProvider;
   final AuthCredentialsStore? authCredentialsStore;
+  final PhoneAuthStore? phoneAuthStore;
   final RideRequestMetadataStore? rideRequestMetadataStore;
   final OperationalRecordStore? operationalRecordStore;
   final Map<String, String> environmentMap;
@@ -87,6 +90,7 @@ class AppServer {
       db: db,
       tokenService: tokenService,
       authCredentialsStore: authCredentialsStore,
+      phoneAuthStore: phoneAuthStore,
       rideRequestMetadataStore: rideRequestMetadataStore,
       operationalRecordStore: operationalRecordStore,
       dbMode: dbMode,
@@ -102,6 +106,9 @@ class AppServer {
     final authPublicPaths = <String>{
       'auth/register',
       'auth/login',
+      'auth/otp/request',
+      'auth/otp/verify',
+      'auth/token/refresh',
       'health',
       'healthz',
       'api/healthz',

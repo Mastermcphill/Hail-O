@@ -16,7 +16,10 @@ import 'infra/sentry_observability.dart';
 import 'infra/token_service.dart';
 import 'modules/auth/auth_credentials_store.dart';
 import 'modules/auth/postgres_auth_credentials_store.dart';
+import 'modules/auth/postgres_phone_auth_store.dart';
 import 'modules/auth/sqlite_auth_credentials_store.dart';
+import 'modules/auth/sqlite_phone_auth_store.dart';
+import 'modules/auth/phone_auth_store.dart';
 import 'modules/rides/postgres_operational_record_store.dart';
 import 'modules/rides/postgres_ride_request_metadata_store.dart';
 import 'modules/rides/ride_request_metadata_store.dart';
@@ -182,6 +185,7 @@ Future<void> main() async {
       final migrationHeadVersion =
           BackendPostgresMigrator.migrationHeadVersion();
       late final AuthCredentialsStore authCredentialsStore;
+      late final PhoneAuthStore phoneAuthStore;
       late final RideRequestMetadataStore rideRequestMetadataStore;
       late final OperationalRecordStore operationalRecordStore;
 
@@ -192,11 +196,13 @@ Future<void> main() async {
           dbSchema: config.dbSchema,
         ).runPendingMigrations();
         authCredentialsStore = PostgresAuthCredentialsStore(provider);
+        phoneAuthStore = PostgresPhoneAuthStore(provider);
         rideRequestMetadataStore = PostgresRideRequestMetadataStore(provider);
         operationalRecordStore = PostgresOperationalRecordStore(provider);
       } else {
         final sqliteDatabase = sqliteDb!;
         authCredentialsStore = SqliteAuthCredentialsStore(sqliteDatabase);
+        phoneAuthStore = SqlitePhoneAuthStore(sqliteDatabase);
         rideRequestMetadataStore = SqliteRideRequestMetadataStore(
           sqliteDatabase,
         );
@@ -287,6 +293,7 @@ Future<void> main() async {
         runtimeConfigSnapshot: runtimeConfigSnapshot,
         postgresProvider: postgresProvider,
         authCredentialsStore: authCredentialsStore,
+        phoneAuthStore: phoneAuthStore,
         rideRequestMetadataStore: rideRequestMetadataStore,
         operationalRecordStore: operationalRecordStore,
         environmentMap: env,

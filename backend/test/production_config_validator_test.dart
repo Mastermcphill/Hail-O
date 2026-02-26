@@ -87,6 +87,9 @@ void main() {
           'ALLOWED_ORIGINS': 'https://app.hailo.dev',
           'SENTRY_ENABLED': 'false',
           'SENTRY_DSN': '',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
         },
       ),
       returnsNormally,
@@ -102,9 +105,58 @@ void main() {
           'JWT_SECRET': 'super-secret',
           'ALLOWED_ORIGINS': 'https://app.hailo.dev',
           'SENTRY_DSN': '',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
         },
       ),
       returnsNormally,
+    );
+  });
+
+  test('requires OTP provider config in production', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_DSN': 'https://public@sentry.io/1',
+        },
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.toString(),
+          'message',
+          contains('OTP_PROVIDER'),
+        ),
+      ),
+    );
+  });
+
+  test('rejects OTP dev bypass in production', () {
+    expect(
+      () => validateProductionConfig(
+        environment: 'production',
+        usePostgres: false,
+        envMap: const <String, String>{
+          'JWT_SECRET': 'super-secret',
+          'ALLOWED_ORIGINS': 'https://app.hailo.dev',
+          'SENTRY_DSN': 'https://public@sentry.io/1',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
+          'OTP_DEV_BYPASS': 'true',
+        },
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.toString(),
+          'message',
+          contains('OTP_DEV_BYPASS'),
+        ),
+      ),
     );
   });
 
@@ -118,6 +170,9 @@ void main() {
           'ALLOWED_ORIGINS': 'https://app.hailo.dev,https://admin.hailo.dev',
           'DATABASE_URL': 'postgres://hailo:secret@localhost:5432/hailo',
           'SENTRY_DSN': 'https://public@sentry.io/1',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-key',
+          'TERMII_SENDER_ID': 'HAILO',
         },
       ),
       returnsNormally,

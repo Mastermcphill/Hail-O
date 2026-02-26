@@ -26,6 +26,22 @@ void validateProductionConfig({
   final sentryDsn = _getOptionalTrimmed(envMap, 'SENTRY_DSN');
   final isProductionEnv =
       normalizedEnv == 'production' || normalizedEnv == 'prod';
+  final otpProvider = (_getOptionalTrimmed(envMap, 'OTP_PROVIDER') ?? '')
+      .toLowerCase();
+  final otpDevBypass = _parseBool(envMap['OTP_DEV_BYPASS']);
+  final termiiApiKey = _getOptionalTrimmed(envMap, 'TERMII_API_KEY');
+  final termiiSenderId = _getOptionalTrimmed(envMap, 'TERMII_SENDER_ID');
+  final otpProviderSupported =
+      otpProvider.isEmpty ||
+      otpProvider == 'termii' ||
+      otpProvider == 'none' ||
+      otpProvider == 'disabled';
+  if (!otpProviderSupported) {
+    missing.add('OTP_PROVIDER');
+  }
+  final hasOtpProviderConfig =
+      otpProvider == 'termii' && termiiApiKey != null && termiiSenderId != null;
+
   if (isProductionEnv) {
     if (sentryEnabled && sentryDsn == null) {
       missing.add('SENTRY_DSN');
@@ -33,6 +49,14 @@ void validateProductionConfig({
       stderr.writeln(
         'WARN: SENTRY_DSN not set; Sentry is disabled. Set SENTRY_ENABLED=true and SENTRY_DSN to enable error reporting.',
       );
+    }
+    if (!hasOtpProviderConfig) {
+      missing.add('OTP_PROVIDER');
+      missing.add('TERMII_API_KEY');
+      missing.add('TERMII_SENDER_ID');
+    }
+    if (otpDevBypass) {
+      missing.add('OTP_DEV_BYPASS');
     }
   } else if (sentryDsn == null) {
     missing.add('SENTRY_DSN');
@@ -50,7 +74,7 @@ void validateProductionConfig({
   }
 
   throw StateError(
-    'Missing required config for $normalizedEnv: ${missing.join(', ')}',
+    'Missing required config for $normalizedEnv: ${missing.toSet().join(', ')}',
   );
 }
 

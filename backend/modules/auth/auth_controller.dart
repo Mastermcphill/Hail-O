@@ -7,28 +7,48 @@ import '../../infra/audit_logger.dart';
 import '../../infra/request_context.dart';
 import '../../infra/token_service.dart';
 import '../../server/http_utils.dart';
+import 'phone_auth_service.dart';
 
 class AuthController {
   AuthController({
-    required AuthService authService,
+    AuthService? authService,
     required TokenService tokenService,
+    PhoneAuthService? phoneAuthService,
     AuditLogger? auditLogger,
   }) : _authService = authService,
        _tokenService = tokenService,
+       _phoneAuthService = phoneAuthService,
        _auditLogger = auditLogger ?? AuditLogger();
 
-  final AuthService _authService;
+  final AuthService? _authService;
   final TokenService _tokenService;
+  final PhoneAuthService? _phoneAuthService;
   final AuditLogger _auditLogger;
 
   Router get router {
     final router = Router();
-    router.post('/register', _register);
-    router.post('/login', _login);
+    if (_authService != null) {
+      router.post('/register', _register);
+      router.post('/login', _login);
+    }
+    if (_phoneAuthService != null) {
+      router.post('/otp/request', _requestOtp);
+      router.post('/otp/verify', _verifyOtp);
+      router.post('/token/refresh', _refreshToken);
+    }
     return router;
   }
 
   Future<Response> _register(Request request) async {
+    final authService = _authService;
+    if (authService == null) {
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      );
+    }
     final body = await readJsonBody(request);
     final email = (body['email'] as String?)?.trim() ?? '';
     final password = (body['password'] as String?) ?? '';
@@ -72,7 +92,7 @@ class AuthController {
     }
 
     try {
-      final result = await _authService.register(
+      final result = await authService.register(
         email: email,
         password: password,
         role: role,
@@ -103,11 +123,20 @@ class AuthController {
   }
 
   Future<Response> _login(Request request) async {
+    final authService = _authService;
+    if (authService == null) {
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      );
+    }
     final body = await readJsonBody(request);
     final email = (body['email'] as String?)?.trim() ?? '';
     final password = (body['password'] as String?) ?? '';
     try {
-      final login = await _authService.login(email: email, password: password);
+      final login = await authService.login(email: email, password: password);
       final token = _tokenService.issueToken(
         userId: (login['user_id'] as String?) ?? '',
         role: (login['role'] as String?) ?? UserRole.rider.dbValue,
@@ -129,6 +158,113 @@ class AuthController {
         reasonCode: error.runtimeType.toString(),
       );
       rethrow;
+    }
+  }
+
+  Future<Response> _requestOtp(Request request) async {
+    final phoneAuthService = _phoneAuthService;
+    if (phoneAuthService == null) {
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      );
+    }
+    final body = await readJsonBody(request);
+    final phoneE164 = (body['phone_e164'] as String?)?.trim() ?? '';
+    try {
+      final payload = await phoneAuthService.requestOtp(phoneE164: phoneE164);
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_request',
+        email: phoneE164,
+        success: true,
+      );
+      return jsonResponse(200, payload);
+    } on PhoneAuthFailure catch (error) {
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_request',
+        email: phoneE164,
+        success: false,
+        reasonCode: error.code,
+      );
+      return jsonErrorResponse(
+        request,
+        error.statusCode,
+        code: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> _verifyOtp(Request request) async {
+    final phoneAuthService = _phoneAuthService;
+    if (phoneAuthService == null) {
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      );
+    }
+    final body = await readJsonBody(request);
+    final phoneE164 = (body['phone_e164'] as String?)?.trim() ?? '';
+    final code = (body['code'] as String?)?.trim() ?? '';
+    try {
+      final payload = await phoneAuthService.verifyOtp(
+        phoneE164: phoneE164,
+        code: code,
+      );
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_verify',
+        email: phoneE164,
+        success: true,
+      );
+      return jsonResponse(200, payload);
+    } on PhoneAuthFailure catch (error) {
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_verify',
+        email: phoneE164,
+        success: false,
+        reasonCode: error.code,
+      );
+      return jsonErrorResponse(
+        request,
+        error.statusCode,
+        code: error.code,
+        message: error.message,
+      );
+    }
+  }
+
+  Future<Response> _refreshToken(Request request) async {
+    final phoneAuthService = _phoneAuthService;
+    if (phoneAuthService == null) {
+      return jsonErrorResponse(
+        request,
+        404,
+        code: 'route_not_found',
+        message: 'Route not found',
+      );
+    }
+    final body = await readJsonBody(request);
+    final refreshToken = (body['refresh_token'] as String?)?.trim() ?? '';
+    try {
+      final payload = await phoneAuthService.refreshAccessToken(
+        refreshToken: refreshToken,
+      );
+      return jsonResponse(200, payload);
+    } on PhoneAuthFailure catch (error) {
+      return jsonErrorResponse(
+        request,
+        error.statusCode,
+        code: error.code,
+        message: error.message,
+      );
     }
   }
 

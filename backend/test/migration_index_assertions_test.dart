@@ -32,6 +32,7 @@ void main() {
     final riskSql = sqlByName['016_risk_engine.sql'] ?? '';
     final paymentIntentsSql = sqlByName['017_payment_intents.sql'] ?? '';
     final webhookEventsSql = sqlByName['018_webhook_events.sql'] ?? '';
+    final phoneAuthSql = sqlByName['019_auth_phone_otp.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -252,6 +253,33 @@ void main() {
       ),
       isTrue,
       reason: 'webhook events dedupe index must exist',
+    );
+    expect(
+      phoneAuthSql.contains('CREATE TABLE IF NOT EXISTS users'),
+      isTrue,
+      reason: 'phone-auth users table must exist',
+    );
+    expect(
+      phoneAuthSql.contains('phone_e164 TEXT NOT NULL UNIQUE'),
+      isTrue,
+      reason: 'phone-auth users phone uniqueness must exist',
+    );
+    expect(
+      phoneAuthSql.contains('CREATE TABLE IF NOT EXISTS otp_challenges'),
+      isTrue,
+      reason: 'otp challenges table must exist',
+    );
+    expect(
+      phoneAuthSql.contains('CREATE TABLE IF NOT EXISTS refresh_tokens'),
+      isTrue,
+      reason: 'refresh tokens table must exist',
+    );
+    expect(
+      phoneAuthSql.contains(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash',
+      ),
+      isTrue,
+      reason: 'refresh token hash uniqueness must exist',
     );
   });
 }

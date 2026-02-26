@@ -8,6 +8,9 @@ const String _headerIdempotencyKey = 'idempotency-key';
 Middleware idempotencyMiddleware({
   Set<String> exemptWritePaths = const <String>{
     'auth/login',
+    'auth/otp/request',
+    'auth/otp/verify',
+    'auth/token/refresh',
     'webhooks/payments',
     'marketplace/purchases/restore',
   },

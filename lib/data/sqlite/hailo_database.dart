@@ -22,6 +22,7 @@ import 'migrations/m0016_operation_journal.dart';
 import 'migrations/m0017_rule_rollouts.dart';
 import 'migrations/m0018_auth_credentials.dart';
 import 'migrations/m0019_ride_request_metadata.dart';
+import 'migrations/m0020_phone_auth.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -49,6 +50,7 @@ class HailODatabase {
              M0017RuleRollouts(),
              M0018AuthCredentials(),
              M0019RideRequestMetadata(),
+             M0020PhoneAuth(),
            ];
 
   final String databaseName;
@@ -72,4 +74,3 @@ class HailODatabase {
     return open(databasePath: inMemoryDatabasePath);
   }
 }
-

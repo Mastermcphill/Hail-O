@@ -20,6 +20,9 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/admin/admin_users_controller.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/auth_controller.dart';
+import '../modules/auth/phone_auth_service.dart';
+import '../modules/auth/phone_auth_store.dart';
+import '../modules/auth/sqlite_phone_auth_store.dart';
 import '../modules/disputes/disputes_controller.dart';
 import '../modules/marketplace/billing_ledger_repository.dart';
 import '../modules/marketplace/in_memory_marketplace_offer_repository.dart';
@@ -55,6 +58,7 @@ Handler buildApiRouter({
   Map<String, String> environmentMap = const <String, String>{},
   bool metricsPublic = false,
   AuthCredentialsStore? authCredentialsStore,
+  PhoneAuthStore? phoneAuthStore,
   RideRequestMetadataStore? rideRequestMetadataStore,
   OperationalRecordStore? operationalRecordStore,
 }) {
@@ -65,9 +69,31 @@ Handler buildApiRouter({
   final authService = db == null
       ? null
       : AuthService(db, externalStore: authCredentialsStore);
-  final authController = authService == null
+  final resolvedPhoneAuthStore =
+      phoneAuthStore ?? (db == null ? null : SqlitePhoneAuthStore(db));
+  final otpProviderConfigured = (env['OTP_PROVIDER'] ?? '').trim().isNotEmpty;
+  final otpBypassConfigured = _parseBool(env['OTP_DEV_BYPASS']);
+  final enablePhoneAuth =
+      !_isProductionEnvironment(runtimeEnvironment) ||
+      otpProviderConfigured ||
+      otpBypassConfigured;
+  final phoneAuthService = resolvedPhoneAuthStore == null
       ? null
-      : AuthController(authService: authService, tokenService: tokenService);
+      : !enablePhoneAuth
+      ? null
+      : PhoneAuthService.fromEnvironment(
+          store: resolvedPhoneAuthStore,
+          tokenService: tokenService,
+          environment: runtimeEnvironment,
+          envMap: env,
+        );
+  final authController = authService == null && phoneAuthService == null
+      ? null
+      : AuthController(
+          authService: authService,
+          tokenService: tokenService,
+          phoneAuthService: phoneAuthService,
+        );
   final ridesController = db == null
       ? null
       : RidesController(
@@ -334,4 +360,18 @@ Response _versionHandler(Map<String, Object?> buildInfo) {
 bool _isTruthyQuery(String? value) {
   final normalized = value?.trim().toLowerCase() ?? '';
   return normalized == '1' || normalized == 'true' || normalized == 'yes';
+}
+
+bool _isProductionEnvironment(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized == 'production' || normalized == 'prod';
+}
+
+bool _parseBool(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return normalized == '1' ||
+      normalized == 'true' ||
+      normalized == 'yes' ||
+      normalized == 'y' ||
+      normalized == 'on';
 }

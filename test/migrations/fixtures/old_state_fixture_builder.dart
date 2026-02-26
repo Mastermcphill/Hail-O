@@ -19,6 +19,7 @@ import 'package:hailo_core/data/sqlite/migrations/m0016_operation_journal.dart';
 import 'package:hailo_core/data/sqlite/migrations/m0017_rule_rollouts.dart';
 import 'package:hailo_core/data/sqlite/migrations/m0018_auth_credentials.dart';
 import 'package:hailo_core/data/sqlite/migrations/m0019_ride_request_metadata.dart';
+import 'package:hailo_core/data/sqlite/migrations/m0020_phone_auth.dart';
 import 'package:hailo_core/sqlite_api.dart';
 
 List<Migration> allMigrations() {
@@ -42,6 +43,7 @@ List<Migration> allMigrations() {
     M0017RuleRollouts(),
     M0018AuthCredentials(),
     M0019RideRequestMetadata(),
+    M0020PhoneAuth(),
   ];
 }
 
