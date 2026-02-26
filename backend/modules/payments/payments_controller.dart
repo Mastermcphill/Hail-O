@@ -153,7 +153,7 @@ class PaymentsController {
     if (providedSignature.isEmpty) {
       return _error(
         request,
-        401,
+        _signatureFailureStatusCode(),
         errorCode: 'INVALID_WEBHOOK_SIGNATURE',
         message: 'Missing x-paystack-signature header',
       );
@@ -165,7 +165,7 @@ class PaymentsController {
     if (expectedSignature.toLowerCase() != providedSignature.toLowerCase()) {
       return _error(
         request,
-        401,
+        _signatureFailureStatusCode(),
         errorCode: 'INVALID_WEBHOOK_SIGNATURE',
         message: 'Webhook signature verification failed',
       );
@@ -202,7 +202,7 @@ class PaymentsController {
     if (providedSignature.isEmpty) {
       return _error(
         request,
-        401,
+        _signatureFailureStatusCode(),
         errorCode: 'INVALID_WEBHOOK_SIGNATURE',
         message: 'Missing x-webhook-signature header',
       );
@@ -214,7 +214,7 @@ class PaymentsController {
     if (expectedSignature.toLowerCase() != providedSignature.toLowerCase()) {
       return _error(
         request,
-        401,
+        _signatureFailureStatusCode(),
         errorCode: 'INVALID_WEBHOOK_SIGNATURE',
         message: 'Webhook signature verification failed',
       );
@@ -225,6 +225,10 @@ class PaymentsController {
   bool _isProductionEnvironment() {
     final normalized = _environment.trim().toLowerCase();
     return normalized == 'production' || normalized == 'prod';
+  }
+
+  int _signatureFailureStatusCode() {
+    return _isProductionEnvironment() ? 403 : 401;
   }
 
   Future<Response> _createIntent(Request request) async {

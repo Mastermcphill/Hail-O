@@ -142,6 +142,7 @@ void main() {
       db,
       environmentMap: const <String, String>{
         'ENV': 'test',
+        'ADMIN_TOKEN_ENABLED': 'true',
         'ADMIN_TOKEN': 'emergency-admin-token',
       },
     );
@@ -156,6 +157,31 @@ void main() {
     final body = await _decodeBody(response);
     expect(body['ok'], isTrue);
   });
+
+  test(
+    'ADMIN_TOKEN bypass is denied when ADMIN_TOKEN_ENABLED is false',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      final handler = _buildHandler(
+        db,
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'ADMIN_TOKEN': 'emergency-admin-token',
+        },
+      );
+
+      final response = await _request(
+        handler,
+        method: 'GET',
+        path: '/admin/health',
+        headers: const <String, String>{'admin_token': 'emergency-admin-token'},
+      );
+      expect(response.statusCode, 401);
+      final body = await _decodeBody(response);
+      expect(body['error_code'], 'UNAUTHORIZED');
+    },
+  );
 
   test('non-admin gets 403 for /admin/payments/reconcile', () async {
     final db = await HailODatabase().openInMemory();
@@ -307,6 +333,25 @@ void main() {
     expect(data.containsKey('skipped'), isTrue);
   });
 
+  test('admin retry alias endpoint works', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() async => db.close());
+    final handler = _buildHandler(db);
+
+    final adminJwt = TokenService(
+      secret: _kTestTokenSecret,
+    ).issueToken(userId: 'admin-user-1', role: 'admin');
+    final response = await _request(
+      handler,
+      method: 'POST',
+      path: '/admin/webhooks/retry_failed?limit=3',
+      token: adminJwt,
+    );
+    expect(response.statusCode, 200);
+    final body = await _decodeBody(response);
+    expect(body['ok'], isTrue);
+  });
+
   test(
     'disabled user is denied protected routes and enable restores access',
     () async {
@@ -415,6 +460,15 @@ void main() {
     expect(response.statusCode, 200);
     final body = await _decodeBody(response);
     expect(body['ok'], isTrue);
+    expect(body.containsKey('users_total'), isTrue);
+    expect(body.containsKey('trips_total'), isTrue);
+    expect(body.containsKey('trips_by_status'), isTrue);
+    expect(body.containsKey('purchases_total'), isTrue);
+    expect(body.containsKey('purchases_by_status'), isTrue);
+    expect(body.containsKey('payments_succeeded_24h'), isTrue);
+    expect(body.containsKey('payments_failed_24h'), isTrue);
+    expect(body.containsKey('webhook_failed_count'), isTrue);
+
     final counters = Map<String, Object?>.from(body['counters'] as Map);
     expect(counters.containsKey('users'), isTrue);
     expect(counters.containsKey('trips_by_status'), isTrue);

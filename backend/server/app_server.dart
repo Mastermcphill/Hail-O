@@ -96,6 +96,10 @@ class AppServer {
   Handler buildHandler() {
     final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
     final adminToken = (env['ADMIN_TOKEN'] ?? '').trim();
+    final adminTokenEnabled = _parseBool(env['ADMIN_TOKEN_ENABLED']);
+    final emergencyAdminMiddleware = adminTokenEnabled
+        ? adminEmergencyAccessMiddleware(adminToken: adminToken)
+        : _passthroughMiddleware;
     final router = buildApiRouter(
       db: db,
       tokenService: tokenService,
@@ -142,7 +146,7 @@ class AppServer {
         .addMiddleware(corsPolicyMiddleware(allowedOrigins: allowedOrigins))
         .addMiddleware(requestSizeMiddleware(maxBytes: maxRequestBodyBytes))
         .addMiddleware(idempotencyMiddleware())
-        .addMiddleware(adminEmergencyAccessMiddleware(adminToken: adminToken))
+        .addMiddleware(emergencyAdminMiddleware)
         .addMiddleware(
           authMiddleware(tokenService, publicPaths: authPublicPaths),
         )
@@ -178,4 +182,16 @@ class AppServer {
               : router,
         );
   }
+}
+
+final Middleware _passthroughMiddleware = (Handler innerHandler) =>
+    innerHandler;
+
+bool _parseBool(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return normalized == '1' ||
+      normalized == 'true' ||
+      normalized == 'yes' ||
+      normalized == 'y' ||
+      normalized == 'on';
 }

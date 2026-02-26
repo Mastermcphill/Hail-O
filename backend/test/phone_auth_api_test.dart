@@ -135,6 +135,44 @@ void main() {
     },
   );
 
+  test('OTP request is rate-limited per phone and returns 429', () async {
+    final db = await HailODatabase().openInMemory();
+    addTearDown(() => db.close());
+    final handler = _buildHandler(
+      db,
+      environmentMap: const <String, String>{
+        'ENV': 'test',
+        'OTP_DEV_BYPASS': 'true',
+        'OTP_DEV_BYPASS_CODE': '123456',
+        'OTP_RATE_LIMIT_WINDOW_SECONDS': '600',
+        'OTP_REQUEST_LIMIT_PER_IP': '50',
+        'OTP_REQUEST_LIMIT_PER_PHONE': '2',
+      },
+    );
+
+    const phone = '+15551239999';
+    final first = await _postJson(
+      handler,
+      '/auth/otp/request',
+      body: const <String, Object?>{'phone_e164': phone},
+    );
+    expect(first.statusCode, 200);
+    final second = await _postJson(
+      handler,
+      '/auth/otp/request',
+      body: const <String, Object?>{'phone_e164': phone},
+    );
+    expect(second.statusCode, 200);
+    final third = await _postJson(
+      handler,
+      '/auth/otp/request',
+      body: const <String, Object?>{'phone_e164': phone},
+    );
+    expect(third.statusCode, 429);
+    final body = await _decodeBody(third);
+    expect(body['error_code'], 'RATE_LIMITED');
+  });
+
   test('refresh works and revoked token fails', () async {
     final db = await HailODatabase().openInMemory();
     addTearDown(() => db.close());

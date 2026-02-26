@@ -90,6 +90,7 @@ class AdminController {
     router.get('/metrics', _adminMetrics);
     router.get('/payments/reconcile', _reconcilePaymentIntents);
     router.post('/payments/webhooks/retry', _retryPaymentWebhookProcessing);
+    router.post('/webhooks/retry_failed', _retryPaymentWebhookProcessing);
     router.get('/users', _listUsers);
     router.post('/users/<userId>/disable', _disableUser);
     router.post('/users/<userId>/enable', _enableUser);
@@ -240,9 +241,39 @@ class AdminController {
       db,
       table: 'payment_intents',
     );
+    final tripsTotal = tripsByStatus.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    final purchasesTotal = purchasesByStatus.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    final since24h = DateTime.now().toUtc().subtract(const Duration(hours: 24));
+    final paymentsSucceeded24h = await _countStatusSince(
+      db,
+      table: 'payment_intents',
+      statuses: const <String>{'succeeded', 'captured'},
+      sinceUtc: since24h,
+    );
+    final paymentsFailed24h = await _countStatusSince(
+      db,
+      table: 'payment_intents',
+      statuses: const <String>{'failed', 'canceled', 'cancelled', 'expired'},
+      sinceUtc: since24h,
+    );
+    final webhookFailedCount = await _countFailedWebhookEvents(db);
 
     return jsonResponse(200, <String, Object?>{
       'ok': true,
+      'users_total': usersTotal,
+      'trips_total': tripsTotal,
+      'trips_by_status': tripsByStatus,
+      'purchases_total': purchasesTotal,
+      'purchases_by_status': purchasesByStatus,
+      'payments_succeeded_24h': paymentsSucceeded24h,
+      'payments_failed_24h': paymentsFailed24h,
+      'webhook_failed_count': webhookFailedCount,
       'counters': <String, Object?>{
         'users': <String, Object?>{
           'total': usersTotal,
@@ -1681,6 +1712,72 @@ class AdminController {
       counts[key] = (row['count'] as num?)?.toInt() ?? 0;
     }
     return counts;
+  }
+
+  Future<int> _countStatusSince(
+    Database db, {
+    required String table,
+    required Set<String> statuses,
+    required DateTime sinceUtc,
+  }) async {
+    if (!await _tableExists(db, table) ||
+        !await _columnExists(db, table, 'status')) {
+      return 0;
+    }
+    final normalizedStatuses = statuses
+        .map((value) => value.trim().toLowerCase())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    if (normalizedStatuses.isEmpty) {
+      return 0;
+    }
+    final placeholders = List<String>.filled(
+      normalizedStatuses.length,
+      '?',
+    ).join(', ');
+    final whereParts = <String>['LOWER(status) IN ($placeholders)'];
+    final whereArgs = <Object>[...normalizedStatuses];
+    String? timeColumn;
+    if (await _columnExists(db, table, 'updated_at')) {
+      timeColumn = 'updated_at';
+    } else if (await _columnExists(db, table, 'created_at')) {
+      timeColumn = 'created_at';
+    }
+    if (timeColumn != null) {
+      whereParts.add('$timeColumn >= ?');
+      whereArgs.add(sinceUtc.toUtc().toIso8601String());
+    }
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM $table WHERE ${whereParts.join(' AND ')}',
+      whereArgs,
+    );
+    if (rows.isEmpty) {
+      return 0;
+    }
+    return (rows.first['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int> _countFailedWebhookEvents(Database db) async {
+    if (!await _tableExists(db, 'webhook_events')) {
+      return 0;
+    }
+    if (await _columnExists(db, 'webhook_events', 'processing_state')) {
+      return _countRowsWhere(
+        db,
+        'webhook_events',
+        where: 'LOWER(processing_state) = ?',
+        whereArgs: const <Object>['failed'],
+      );
+    }
+    if (await _columnExists(db, 'webhook_events', 'status')) {
+      return _countRowsWhere(
+        db,
+        'webhook_events',
+        where: 'LOWER(status) = ?',
+        whereArgs: const <Object>['failed'],
+      );
+    }
+    return 0;
   }
 
   Future<bool> _columnExists(

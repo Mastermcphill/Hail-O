@@ -39,6 +39,11 @@ This file is the operational inventory of environment variables used by backend 
 | `OTP_TTL_SECONDS` | Optional | dev, staging, prod | OTP challenge TTL. |
 | `OTP_MAX_ATTEMPTS` | Optional | dev, staging, prod | OTP verify attempt cap before lock. |
 | `OTP_LOCKOUT_SECONDS` | Optional | dev, staging, prod | OTP lock duration. |
+| `OTP_RATE_LIMIT_WINDOW_SECONDS` | Optional | dev, staging, prod | Sliding window for OTP endpoint throttles. |
+| `OTP_REQUEST_LIMIT_PER_IP` | Optional | dev, staging, prod | OTP request throttle per IP in the configured window. |
+| `OTP_REQUEST_LIMIT_PER_PHONE` | Optional | dev, staging, prod | OTP request throttle per phone in the configured window. |
+| `OTP_VERIFY_LIMIT_PER_IP` | Optional | dev, staging, prod | OTP verify throttle per IP in the configured window. |
+| `OTP_VERIFY_LIMIT_PER_PHONE` | Optional | dev, staging, prod | OTP verify throttle per phone in the configured window. |
 | `REFRESH_TOKEN_TTL_SECONDS` | Optional | dev, staging, prod | Phone-auth refresh token TTL. |
 | `TERMII_API_KEY` | Required if `OTP_PROVIDER=termii` | staging, prod | Termii API credential. |
 | `TERMII_SENDER_ID` | Required if `OTP_PROVIDER=termii` | staging, prod | Termii sender identifier. |
@@ -90,7 +95,8 @@ This file is the operational inventory of environment variables used by backend 
 
 | Key | Required | Environments | Purpose |
 | --- | --- | --- | --- |
-| `ADMIN_TOKEN` | Optional (high sensitivity) | staging, prod | Emergency admin bypass token. |
+| `ADMIN_TOKEN_ENABLED` | Optional (default false) | staging, prod | Explicitly enables `ADMIN_TOKEN` emergency bypass. |
+| `ADMIN_TOKEN` | Optional (high sensitivity) | staging, prod | Emergency admin bypass token (effective only when `ADMIN_TOKEN_ENABLED=true`). |
 | `METRICS_PUBLIC` | Optional (default false) | dev, staging, prod | Expose metrics without admin auth. |
 | `ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT` | Optional | dev, staging | Enable admin Sentry smoke route. |
 | `SENTRY_ENABLED` | Optional | staging, prod | Sentry integration toggle. |
@@ -107,6 +113,7 @@ This file is the operational inventory of environment variables used by backend 
 | --- | --- | --- | --- |
 | `BASE_URL` | Yes for gate execution | staging, prod | Target base URL for `release_gate.*` / `smoke_e2e.*`. |
 | `STAGING_BASE_URL` | Required for prod gate | prod | Staging URL used when prod gate runs staging smoke. |
+| `ADMIN_TOKEN_ENABLED` | Required for admin-token smoke | staging, prod | Must be `true` when smoke/admin checks depend on `ADMIN_TOKEN`. |
 | `E2E_ADMIN_TOKEN` / `ADMIN_TOKEN` | Required for full smoke | staging, prod | Admin access token used for admin flow checks. |
 | `E2E_ACCESS_TOKEN` | Optional | staging, prod | Pre-provisioned bearer token for smoke auth flow. |
 | `E2E_PHONE_E164` | Required when `E2E_ACCESS_TOKEN` is unset | staging | Phone used for OTP auth path in smoke. |

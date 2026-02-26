@@ -178,8 +178,11 @@ void main() {
     final body = await _decodeBody(response);
     expect(body['ok'], isTrue);
     expect(body['ready'], isTrue);
+    expect(body['db'], isTrue);
     expect(body['db_ok'], isTrue);
     expect(body['migrations_ok'], isTrue);
+    expect(body['payments_ready'], isTrue);
+    expect(body['otp_ready'], isTrue);
     expect(body['expected_migration_head'], 25);
     expect(body['applied_migration_head'], 25);
   });
@@ -207,8 +210,11 @@ void main() {
     final body = await _decodeBody(response);
     expect(body['ok'], isFalse);
     expect(body['ready'], isFalse);
+    expect(body['db'], isTrue);
     expect(body['db_ok'], isTrue);
     expect(body['migrations_ok'], isFalse);
+    expect(body['payments_ready'], isTrue);
+    expect(body['otp_ready'], isTrue);
     expect(body['expected_migration_head'], 25);
     expect(body['applied_migration_head'], 24);
   });
@@ -231,8 +237,50 @@ void main() {
     final body = await _decodeBody(response);
     expect(body['ok'], isFalse);
     expect(body['ready'], isFalse);
+    expect(body['db'], isFalse);
     expect(body['db_ok'], isFalse);
+    expect(body['payments_ready'], isTrue);
+    expect(body['otp_ready'], isTrue);
   });
+
+  test(
+    '/ready returns 503 when paystack is enabled but webhook secret is missing',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() async => db.close());
+      await db.execute('DROP TABLE IF EXISTS schema_migrations');
+      await db.execute(
+        'CREATE TABLE schema_migrations(version INTEGER NOT NULL)',
+      );
+      await db.insert('schema_migrations', <String, Object?>{'version': 25});
+
+      final handler = _buildHandler(
+        db: db,
+        dbHealthCheck: () async => true,
+        buildInfo: const <String, Object?>{
+          'commit': 'ready-test',
+          'migration_head': 25,
+        },
+        environmentMap: const <String, String>{
+          'ENV': 'production',
+          'JWT_SECRET': 'prod-ready-secret',
+          'PAYMENTS_PROVIDER': 'paystack',
+          'PAYSTACK_SECRET_KEY': 'sk_live_ready_test',
+          'OTP_PROVIDER': 'termii',
+          'TERMII_API_KEY': 'termii-ready-key',
+          'TERMII_SENDER_ID': 'Hailo',
+        },
+      );
+
+      final response = await _request(handler, '/ready');
+      expect(response.statusCode, 503);
+      final body = await _decodeBody(response);
+      expect(body['ok'], isFalse);
+      expect(body['ready'], isFalse);
+      expect(body['payments_ready'], isFalse);
+      expect(body['otp_ready'], isTrue);
+    },
+  );
 }
 
 Handler _buildHandler({

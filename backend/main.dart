@@ -189,6 +189,9 @@ Future<void> main() async {
           'false';
       final metricsPublic =
           (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
+      final adminTokenEnabled =
+          (env['ADMIN_TOKEN_ENABLED'] ?? 'false').trim().toLowerCase() ==
+          'true';
       final enableSentrySmokeEndpoint =
           (env['ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT'] ?? 'false')
               .trim()
@@ -273,6 +276,7 @@ Future<void> main() async {
         'trust_proxy_headers': trustProxyHeaders,
         'metrics_public': metricsPublic,
         'metrics_protected': !metricsPublic,
+        'admin_token_enabled': adminTokenEnabled,
         'admin_enable_sentry_smoke_endpoint': enableSentrySmokeEndpoint,
         'db_pool_size': dbPoolSize,
         'db_query_timeout_ms': dbQueryTimeoutMs,

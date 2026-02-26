@@ -80,6 +80,30 @@ void main() {
       },
     );
 
+    test('invalid x-webhook-signature is forbidden in production', () async {
+      final handler = _buildHandler(
+        environment: 'production',
+        environmentMap: const <String, String>{
+          'ENV': 'production',
+          'PAYMENT_PROVIDER': 'manual',
+          'PAYMENTS_WEBHOOK_SECRET': 'webhook-secret-2',
+        },
+      );
+
+      final response = await _request(
+        handler,
+        method: 'POST',
+        path: '/webhooks/payments',
+        headers: const <String, String>{'x-webhook-signature': 'bad-signature'},
+        rawBody: jsonEncode(payload),
+      );
+
+      expect(response.statusCode, 403);
+      final envelope = await _decodeBody(response);
+      expect(envelope['ok'], isFalse);
+      expect(envelope['error_code'], 'INVALID_WEBHOOK_SIGNATURE');
+    });
+
     test('missing webhook secret is rejected in production', () async {
       final handler = _buildHandler(
         environment: 'production',
@@ -189,6 +213,33 @@ void main() {
       );
 
       expect(response.statusCode, 401);
+      final envelope = await _decodeBody(response);
+      expect(envelope['ok'], isFalse);
+      expect(envelope['error_code'], 'INVALID_WEBHOOK_SIGNATURE');
+    });
+
+    test('invalid x-paystack-signature is forbidden in production', () async {
+      final handler = _buildHandler(
+        environment: 'production',
+        environmentMap: const <String, String>{
+          'ENV': 'production',
+          'PAYMENT_PROVIDER': 'paystack',
+          'PAYSTACK_SECRET_KEY': 'sk_live_key',
+          'PAYSTACK_WEBHOOK_SECRET': 'paystack-webhook-secret-2',
+        },
+      );
+
+      final response = await _request(
+        handler,
+        method: 'POST',
+        path: '/webhooks/payments',
+        headers: const <String, String>{
+          'x-paystack-signature': 'invalid-signature',
+        },
+        rawBody: jsonEncode(payload),
+      );
+
+      expect(response.statusCode, 403);
       final envelope = await _decodeBody(response);
       expect(envelope['ok'], isFalse);
       expect(envelope['error_code'], 'INVALID_WEBHOOK_SIGNATURE');

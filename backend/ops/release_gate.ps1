@@ -196,6 +196,10 @@ $adminToken = if (-not [string]::IsNullOrWhiteSpace($env:E2E_ADMIN_TOKEN)) {
 if ([string]::IsNullOrWhiteSpace($adminToken)) {
   Fail("set E2E_ADMIN_TOKEN or ADMIN_TOKEN for admin flow smoke checks")
 }
+$adminTokenEnabled = To-Bool $env:ADMIN_TOKEN_ENABLED
+if (-not $adminTokenEnabled) {
+  Fail("set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks")
+}
 
 if ([string]::IsNullOrWhiteSpace($env:E2E_ACCESS_TOKEN)) {
   Require-Env "E2E_PHONE_E164"

@@ -35,9 +35,12 @@ Middleware observabilityMiddleware({
         jsonEncode(<String, Object?>{
           'trace_id': request.requestContext.traceId,
           'request_id': request.requestContext.traceId,
+          'path': path,
           'route': path,
           'method': request.method,
+          'status': response.statusCode,
           'status_code': response.statusCode,
+          'duration_ms': latencyMs,
           'latency_ms': latencyMs,
           'user_id': request.requestContext.userId,
           'idempotency_key': _hashIdempotencyKey(

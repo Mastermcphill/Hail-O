@@ -175,6 +175,10 @@ ADMIN_TOKEN_VALUE="${E2E_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}"
 if [[ -z "${ADMIN_TOKEN_VALUE// }" ]]; then
   fail "set E2E_ADMIN_TOKEN or ADMIN_TOKEN for admin flow smoke checks"
 fi
+ADMIN_TOKEN_ENABLED_VALUE="$(normalize_bool "${ADMIN_TOKEN_ENABLED:-}")"
+if [[ "${ADMIN_TOKEN_ENABLED_VALUE}" != "true" ]]; then
+  fail "set ADMIN_TOKEN_ENABLED=true when using ADMIN_TOKEN/E2E_ADMIN_TOKEN for admin smoke checks"
+fi
 
 if [[ -z "${E2E_ACCESS_TOKEN:-}" ]]; then
   require_env E2E_PHONE_E164

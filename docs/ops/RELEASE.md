@@ -49,6 +49,7 @@ See `docs/ops/ENV_KEYS.md` for full inventory. At minimum, release gate expects:
 - Staging:
   - `JWT_SECRET`
   - `PAYMENTS_PROVIDER` or `PAYMENT_PROVIDER`
+  - `ADMIN_TOKEN_ENABLED=true` (when using admin-token smoke path)
   - `E2E_ADMIN_TOKEN` or `ADMIN_TOKEN`
   - `E2E_ACCESS_TOKEN` OR (`E2E_PHONE_E164` + `E2E_OTP_CODE`)
 - Production (stricter):

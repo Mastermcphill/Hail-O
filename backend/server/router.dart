@@ -70,6 +70,10 @@ Handler buildApiRouter({
   final env = environmentMap.isEmpty ? Platform.environment : environmentMap;
   final runtimeEnvironment = (env['ENV'] ?? env['FLIPTRYBE_ENV'] ?? 'unknown')
       .trim();
+  final normalizedRuntimeEnvironment = runtimeEnvironment.trim().toLowerCase();
+  final strictEnvironment = _isStrictEnvironment(normalizedRuntimeEnvironment);
+  final essentialEnvReady =
+      !strictEnvironment || (env['JWT_SECRET'] ?? '').trim().isNotEmpty;
   final auditLogStore = AuditLogStore(
     sqliteDb: db,
     postgresProvider: postgresProvider,
@@ -90,6 +94,10 @@ Handler buildApiRouter({
       !_isProductionEnvironment(runtimeEnvironment) ||
       otpProviderConfigured ||
       otpBypassConfigured;
+  final otpReady = _otpConfigReady(
+    runtimeEnvironment: runtimeEnvironment,
+    env: env,
+  );
   final phoneAuthService = resolvedPhoneAuthStore == null
       ? null
       : !enablePhoneAuth
@@ -107,6 +115,33 @@ Handler buildApiRouter({
           tokenService: tokenService,
           phoneAuthService: phoneAuthService,
           analyticsEventStore: analyticsEventStore,
+          otpRateLimitWindow: Duration(
+            seconds: _readPositiveInt(
+              env,
+              'OTP_RATE_LIMIT_WINDOW_SECONDS',
+              defaultValue: 600,
+            ),
+          ),
+          otpRequestLimitPerIp: _readPositiveInt(
+            env,
+            'OTP_REQUEST_LIMIT_PER_IP',
+            defaultValue: 6,
+          ),
+          otpRequestLimitPerPhone: _readPositiveInt(
+            env,
+            'OTP_REQUEST_LIMIT_PER_PHONE',
+            defaultValue: 4,
+          ),
+          otpVerifyLimitPerIp: _readPositiveInt(
+            env,
+            'OTP_VERIFY_LIMIT_PER_IP',
+            defaultValue: 12,
+          ),
+          otpVerifyLimitPerPhone: _readPositiveInt(
+            env,
+            'OTP_VERIFY_LIMIT_PER_PHONE',
+            defaultValue: 8,
+          ),
         );
   final ridesController = db == null
       ? null
@@ -180,6 +215,10 @@ Handler buildApiRouter({
     webhookSecret: (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim(),
     paystackWebhookSecret: (env['PAYSTACK_WEBHOOK_SECRET'] ?? '').trim(),
     analyticsEventStore: analyticsEventStore,
+  );
+  final paymentsReady = _paymentsConfigReady(
+    runtimeEnvironment: runtimeEnvironment,
+    env: env,
   );
   final revenueService = MarketplaceRevenueService(
     postgresProvider: postgresProvider,
@@ -284,6 +323,9 @@ Handler buildApiRouter({
         sqliteDb: db,
         postgresProvider: postgresProvider,
         dbSchema: (env['DB_SCHEMA'] ?? 'public').trim(),
+        essentialEnvReady: essentialEnvReady,
+        paymentsReady: paymentsReady,
+        otpReady: otpReady,
       ),
     )
     ..get(
@@ -296,6 +338,9 @@ Handler buildApiRouter({
         sqliteDb: db,
         postgresProvider: postgresProvider,
         dbSchema: (env['DB_SCHEMA'] ?? 'public').trim(),
+        essentialEnvReady: essentialEnvReady,
+        paymentsReady: paymentsReady,
+        otpReady: otpReady,
       ),
     )
     ..get('/version', (request) => _versionHandler(buildInfo))
@@ -358,6 +403,9 @@ Future<Response> _readyHandler(
   required Database? sqliteDb,
   required PostgresProvider? postgresProvider,
   required String dbSchema,
+  required bool essentialEnvReady,
+  required bool paymentsReady,
+  required bool otpReady,
 }) async {
   bool dbOk;
   try {
@@ -384,18 +432,24 @@ Future<Response> _readyHandler(
     migrationsMatch = appliedMigrationHead == expectedMigrationHead;
   }
 
-  final isReady = dbOk && (migrationsMatch ?? true);
+  final migrationsOk = migrationsMatch ?? true;
+  final isReady =
+      dbOk && migrationsOk && essentialEnvReady && paymentsReady && otpReady;
   final payload = <String, Object?>{
     'ok': isReady,
     'service': 'hail-o-backend',
     'db_mode': dbMode,
+    'db': dbOk,
     'db_ok': dbOk,
+    'migrations_ok': migrationsOk,
+    'essential_env_ready': essentialEnvReady,
+    'payments_ready': paymentsReady,
+    'otp_ready': otpReady,
     'ready': isReady,
     if (expectedMigrationHead != null)
       'expected_migration_head': expectedMigrationHead,
     if (appliedMigrationHead != null)
       'applied_migration_head': appliedMigrationHead,
-    if (migrationsMatch != null) 'migrations_ok': migrationsMatch,
   };
   final traceId = request.requestContext.traceId.trim();
   if (traceId.isNotEmpty) {
@@ -546,6 +600,65 @@ bool _isProductionEnvironment(String value) {
   return normalized == 'production' || normalized == 'prod';
 }
 
+bool _isStrictEnvironment(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized == 'production' ||
+      normalized == 'prod' ||
+      normalized == 'staging';
+}
+
+bool _paymentsConfigReady({
+  required String runtimeEnvironment,
+  required Map<String, String> env,
+}) {
+  final provider = (env['PAYMENTS_PROVIDER'] ?? env['PAYMENT_PROVIDER'] ?? '')
+      .trim()
+      .toLowerCase();
+  if (provider.isEmpty || provider == 'none' || provider == 'disabled') {
+    return true;
+  }
+  final strict = _isStrictEnvironment(runtimeEnvironment);
+  switch (provider) {
+    case 'manual':
+      if (!strict) {
+        return true;
+      }
+      return (env['PAYMENTS_WEBHOOK_SECRET'] ?? '').trim().isNotEmpty;
+    case 'paystack':
+      return (env['PAYSTACK_SECRET_KEY'] ?? '').trim().isNotEmpty &&
+          (env['PAYSTACK_WEBHOOK_SECRET'] ?? '').trim().isNotEmpty;
+    case 'stripe':
+      return (env['STRIPE_WEBHOOK_SECRET'] ?? '').trim().isNotEmpty;
+    default:
+      return false;
+  }
+}
+
+bool _otpConfigReady({
+  required String runtimeEnvironment,
+  required Map<String, String> env,
+}) {
+  final normalizedEnv = runtimeEnvironment.trim().toLowerCase();
+  final provider = (env['OTP_PROVIDER'] ?? '').trim().toLowerCase();
+  final bypassEnabled = _parseBool(env['OTP_DEV_BYPASS']);
+  final isProduction = _isProductionEnvironment(normalizedEnv);
+  if (provider == 'termii') {
+    final apiKey = (env['TERMII_API_KEY'] ?? '').trim();
+    final senderId = (env['TERMII_SENDER_ID'] ?? '').trim();
+    if (apiKey.isEmpty || senderId.isEmpty) {
+      return false;
+    }
+    return !isProduction || !bypassEnabled;
+  }
+  if (provider.isEmpty || provider == 'none' || provider == 'disabled') {
+    if (isProduction) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 bool _parseBool(String? value) {
   final normalized = value?.trim().toLowerCase() ?? '';
   return normalized == '1' ||
@@ -553,4 +666,16 @@ bool _parseBool(String? value) {
       normalized == 'yes' ||
       normalized == 'y' ||
       normalized == 'on';
+}
+
+int _readPositiveInt(
+  Map<String, String> env,
+  String key, {
+  required int defaultValue,
+}) {
+  final parsed = int.tryParse((env[key] ?? '').trim());
+  if (parsed == null || parsed <= 0) {
+    return defaultValue;
+  }
+  return parsed;
 }

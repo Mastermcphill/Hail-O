@@ -10,6 +10,98 @@ import '../../infra/token_service.dart';
 import '../../server/http_utils.dart';
 import 'phone_auth_service.dart';
 
+class _OtpRateLimitBucket {
+  _OtpRateLimitBucket({required this.windowStartUtc, required this.count});
+
+  DateTime windowStartUtc;
+  int count;
+}
+
+class _OtpRateLimiter {
+  _OtpRateLimiter({
+    required this.window,
+    required this.requestLimitPerIp,
+    required this.requestLimitPerPhone,
+    required this.verifyLimitPerIp,
+    required this.verifyLimitPerPhone,
+    DateTime Function()? nowUtc,
+  }) : _nowUtc = nowUtc ?? (() => DateTime.now().toUtc());
+
+  final Duration window;
+  final int requestLimitPerIp;
+  final int requestLimitPerPhone;
+  final int verifyLimitPerIp;
+  final int verifyLimitPerPhone;
+  final DateTime Function() _nowUtc;
+
+  final Map<String, _OtpRateLimitBucket> _requestIpBuckets =
+      <String, _OtpRateLimitBucket>{};
+  final Map<String, _OtpRateLimitBucket> _requestPhoneBuckets =
+      <String, _OtpRateLimitBucket>{};
+  final Map<String, _OtpRateLimitBucket> _verifyIpBuckets =
+      <String, _OtpRateLimitBucket>{};
+  final Map<String, _OtpRateLimitBucket> _verifyPhoneBuckets =
+      <String, _OtpRateLimitBucket>{};
+
+  bool allowOtpRequest({required String clientIp, required String phoneE164}) {
+    final now = _nowUtc();
+    final ipKey = clientIp.trim().isEmpty ? 'unknown' : clientIp.trim();
+    final phoneKey = _normalizePhoneKey(phoneE164);
+    if (!_consume(_requestIpBuckets, ipKey, now, requestLimitPerIp)) {
+      return false;
+    }
+    if (!_consume(_requestPhoneBuckets, phoneKey, now, requestLimitPerPhone)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool allowOtpVerify({required String clientIp, required String phoneE164}) {
+    final now = _nowUtc();
+    final ipKey = clientIp.trim().isEmpty ? 'unknown' : clientIp.trim();
+    final phoneKey = _normalizePhoneKey(phoneE164);
+    if (!_consume(_verifyIpBuckets, ipKey, now, verifyLimitPerIp)) {
+      return false;
+    }
+    if (!_consume(_verifyPhoneBuckets, phoneKey, now, verifyLimitPerPhone)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _consume(
+    Map<String, _OtpRateLimitBucket> buckets,
+    String key,
+    DateTime now,
+    int limit,
+  ) {
+    if (limit <= 0) {
+      return true;
+    }
+    final bucket = buckets.putIfAbsent(
+      key,
+      () => _OtpRateLimitBucket(windowStartUtc: now, count: 0),
+    );
+    if (now.difference(bucket.windowStartUtc) >= window) {
+      bucket.windowStartUtc = now;
+      bucket.count = 0;
+    }
+    if (bucket.count >= limit) {
+      return false;
+    }
+    bucket.count += 1;
+    return true;
+  }
+
+  String _normalizePhoneKey(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return 'empty';
+    }
+    return normalized;
+  }
+}
+
 class AuthController {
   AuthController({
     AuthService? authService,
@@ -17,17 +109,34 @@ class AuthController {
     PhoneAuthService? phoneAuthService,
     AuditLogger? auditLogger,
     AnalyticsEventStore? analyticsEventStore,
+    Duration otpRateLimitWindow = const Duration(minutes: 10),
+    int otpRequestLimitPerIp = 6,
+    int otpRequestLimitPerPhone = 4,
+    int otpVerifyLimitPerIp = 12,
+    int otpVerifyLimitPerPhone = 8,
+    DateTime Function()? nowUtc,
   }) : _authService = authService,
        _tokenService = tokenService,
        _phoneAuthService = phoneAuthService,
        _auditLogger = auditLogger ?? AuditLogger(),
-       _analyticsEventStore = analyticsEventStore;
+       _analyticsEventStore = analyticsEventStore,
+       _otpRateLimiter = phoneAuthService == null
+           ? null
+           : _OtpRateLimiter(
+               window: otpRateLimitWindow,
+               requestLimitPerIp: otpRequestLimitPerIp,
+               requestLimitPerPhone: otpRequestLimitPerPhone,
+               verifyLimitPerIp: otpVerifyLimitPerIp,
+               verifyLimitPerPhone: otpVerifyLimitPerPhone,
+               nowUtc: nowUtc,
+             );
 
   final AuthService? _authService;
   final TokenService _tokenService;
   final PhoneAuthService? _phoneAuthService;
   final AuditLogger _auditLogger;
   final AnalyticsEventStore? _analyticsEventStore;
+  final _OtpRateLimiter? _otpRateLimiter;
 
   Router get router {
     final router = Router();
@@ -177,6 +286,26 @@ class AuthController {
     }
     final body = await readJsonBody(request);
     final phoneE164 = (body['phone_e164'] as String?)?.trim() ?? '';
+    final limiter = _otpRateLimiter;
+    if (limiter != null &&
+        !limiter.allowOtpRequest(
+          clientIp: _extractClientIp(request),
+          phoneE164: phoneE164,
+        )) {
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_request',
+        email: phoneE164,
+        success: false,
+        reasonCode: 'rate_limited',
+      );
+      return jsonErrorResponse(
+        request,
+        429,
+        code: 'rate_limited',
+        message: 'Too many OTP requests. Try again later.',
+      );
+    }
     try {
       final payload = await phoneAuthService.requestOtp(phoneE164: phoneE164);
       _auditLogger.authAttempt(
@@ -220,6 +349,26 @@ class AuthController {
     final body = await readJsonBody(request);
     final phoneE164 = (body['phone_e164'] as String?)?.trim() ?? '';
     final code = (body['code'] as String?)?.trim() ?? '';
+    final limiter = _otpRateLimiter;
+    if (limiter != null &&
+        !limiter.allowOtpVerify(
+          clientIp: _extractClientIp(request),
+          phoneE164: phoneE164,
+        )) {
+      _auditLogger.authAttempt(
+        traceId: request.requestContext.traceId,
+        action: 'otp_verify',
+        email: phoneE164,
+        success: false,
+        reasonCode: 'rate_limited',
+      );
+      return jsonErrorResponse(
+        request,
+        429,
+        code: 'rate_limited',
+        message: 'Too many OTP verification attempts. Try again later.',
+      );
+    }
     try {
       final payload = await phoneAuthService.verifyOtp(
         phoneE164: phoneE164,
@@ -292,5 +441,17 @@ class AuthController {
       return UserRole.fleetOwner;
     }
     return UserRole.rider;
+  }
+
+  String _extractClientIp(Request request) {
+    final forwarded = (request.headers['x-forwarded-for'] ?? '').trim();
+    if (forwarded.isNotEmpty) {
+      return forwarded.split(',').first.trim();
+    }
+    final realIp = (request.headers['x-real-ip'] ?? '').trim();
+    if (realIp.isNotEmpty) {
+      return realIp;
+    }
+    return 'unknown';
   }
 }
