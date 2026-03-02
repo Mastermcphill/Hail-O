@@ -22,9 +22,8 @@ import '../models/settlement_result.dart';
 import '../models/wallet.dart';
 import '../models/wallet_ledger_entry.dart';
 import 'ride_lifecycle_guard_service.dart';
-import '../../services/autosave_service.dart';
-import '../../services/moneybox_service.dart';
 import 'finance_utils.dart';
+import '../../services/payout_autosave_service.dart';
 
 export '../models/settlement_result.dart'
     show SettlementResult, SettlementTrigger;
@@ -32,20 +31,15 @@ export '../models/settlement_result.dart'
 class RideSettlementService {
   RideSettlementService(
     this.db, {
-    AutosaveService? autosaveService,
+    PayoutAutosaveService? payoutAutosaveService,
     DateTime Function()? nowUtc,
-  }) : _autosaveService =
-           autosaveService ??
-           AutosaveService(
-             db,
-             moneyBoxService: MoneyBoxService(db, nowUtc: nowUtc),
-             nowUtc: nowUtc,
-           ),
+  }) : _payoutAutosaveService =
+           payoutAutosaveService ?? PayoutAutosaveService(db, nowUtc: nowUtc),
        _nowUtc = nowUtc ?? (() => DateTime.now().toUtc()),
        _idempotencyStore = IdempotencyDao(db);
 
   final Database db;
-  final AutosaveService _autosaveService;
+  final PayoutAutosaveService _payoutAutosaveService;
   final DateTime Function() _nowUtc;
   final IdempotencyStore _idempotencyStore;
 
@@ -183,22 +177,27 @@ class RideSettlementService {
         final recipientWalletType = hasFleetOwner
             ? WalletType.fleetOwner
             : WalletType.driverA;
+        final payoutRecordId = 'payout:$escrowId';
 
         var commissionSavedMinor = 0;
         var commissionRemainderMinor = commissionGrossMinor;
         if (commissionGrossMinor > 0) {
-          final autosaveResult = await _autosaveService
-              .applyOnConfirmedCommissionCreditWithExecutor(
-                executor: txn,
-                ownerId: recipientOwnerId,
-                destinationWalletType: recipientWalletType,
-                grossAmountMinor: commissionGrossMinor,
-                sourceKind: AutosaveService.confirmedCommissionCredit,
-                referenceId: rideId,
-                idempotencyKey: '$idempotencyKey:commission_credit',
-              );
+          final payoutAutosaveResult = hasFleetOwner
+              ? const <String, Object?>{
+                  'ok': true,
+                  'handled_externally': false,
+                  'saved_minor': 0,
+                  'main_minor': 0,
+                }
+              : await _payoutAutosaveService.applyOnPayoutWithExecutor(
+                  executor: txn,
+                  userId: driverId,
+                  payoutLedgerId: payoutRecordId,
+                  payoutMinor: commissionGrossMinor,
+                  tripId: rideId,
+                );
 
-          if (autosaveResult['ok'] != true) {
+          if (payoutAutosaveResult['ok'] != true) {
             return SettlementResult.error(
               rideId: rideId,
               escrowId: escrowId,
@@ -206,11 +205,26 @@ class RideSettlementService {
             );
           }
 
-          commissionSavedMinor =
-              (autosaveResult['saved_minor'] as num?)?.toInt() ?? 0;
-          commissionRemainderMinor =
-              (autosaveResult['remainder_minor'] as num?)?.toInt() ??
-              commissionGrossMinor;
+          final handledExternally =
+              payoutAutosaveResult['handled_externally'] == true;
+          if (handledExternally) {
+            commissionSavedMinor =
+                (payoutAutosaveResult['saved_minor'] as num?)?.toInt() ?? 0;
+            commissionRemainderMinor =
+                (payoutAutosaveResult['main_minor'] as num?)?.toInt() ??
+                commissionGrossMinor;
+          } else {
+            commissionRemainderMinor = await _postWalletCreditTx(
+              txn,
+              ownerId: recipientOwnerId,
+              walletType: recipientWalletType,
+              amountMinor: commissionGrossMinor,
+              kind: PayoutAutosaveService.internalCommissionCredit,
+              referenceId: rideId,
+              idempotencyScope: _scopeSettleOnEscrowRelease,
+              idempotencyKey: '$idempotencyKey:commission_credit',
+            );
+          }
         }
 
         final driverAllowanceMinor = hasFleetOwner && commissionGrossMinor > 0
@@ -261,7 +275,7 @@ class RideSettlementService {
 
         await payoutDao.insert(
           PayoutRecord(
-            id: 'payout:$escrowId',
+            id: payoutRecordId,
             rideId: rideId,
             escrowId: escrowId,
             trigger: trigger.dbValue,

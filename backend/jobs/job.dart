@@ -107,6 +107,7 @@ class QueueJob {
 class QueueJobTypes {
   static const String processWebhookEvent = 'process_webhook_event';
   static const String reconcilePayment = 'reconcile_payment';
+  static const String autosaveMaturitySweep = 'autosave_maturity_sweep';
   static const String sendOtp = 'send_otp';
   static const String analyticsFlush = 'analytics_flush';
 }
@@ -116,4 +117,3 @@ class QueueNames {
   static const String delayed = 'queue:delayed';
   static const String dead = 'queue:dead';
 }
-

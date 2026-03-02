@@ -29,6 +29,7 @@ import 'migrations/m0023_dispatch_trip_assignments.dart';
 import 'migrations/m0024_audit_logs.dart';
 import 'migrations/m0025_admin_moderation_metrics.dart';
 import 'migrations/m0026_analytics_events.dart';
+import 'migrations/m0027_payout_autosave.dart';
 
 class HailODatabase {
   HailODatabase({
@@ -63,6 +64,7 @@ class HailODatabase {
              M0024AuditLogs(),
              M0025AdminModerationMetrics(),
              M0026AnalyticsEvents(),
+             M0027PayoutAutosave(),
            ];
 
   final String databaseName;

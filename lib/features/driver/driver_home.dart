@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api/api_client.dart';
+import 'driver_autosave_panel.dart';
+
 class DriverHome extends StatelessWidget {
-  const DriverHome({super.key});
+  const DriverHome({super.key, required this.apiClient});
+
+  final ApiClient apiClient;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
@@ -63,6 +67,8 @@ class DriverHome extends StatelessWidget {
                 },
                 child: const Text('Ride Ops (paste ride id)'),
               ),
+              const SizedBox(height: 18),
+              DriverAutosavePanel(apiClient: apiClient),
             ],
           ),
         ),

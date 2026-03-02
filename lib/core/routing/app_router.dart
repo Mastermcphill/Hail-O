@@ -271,7 +271,7 @@ class AppRouter {
             ),
             GoRoute(
               path: '/driver',
-              builder: (context, state) => const DriverHome(),
+              builder: (context, state) => DriverHome(apiClient: _apiClient),
             ),
             GoRoute(
               path: '/driver/route-chain',

@@ -13,4 +13,7 @@ class MockBackendStore {
       <String, List<String>>{};
   static final Map<String, Map<String, dynamic>> purchasesById =
       <String, Map<String, dynamic>>{};
+  static Map<String, dynamic>? autosaveStatus;
+  static final List<Map<String, dynamic>> autosaveLedger =
+      <Map<String, dynamic>>[];
 }

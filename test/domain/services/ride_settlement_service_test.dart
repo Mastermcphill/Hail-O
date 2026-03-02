@@ -3,8 +3,7 @@ import 'package:hailo_core/data/sqlite/hailo_database.dart';
 import 'package:hailo_core/domain/models/wallet.dart';
 import 'package:hailo_core/domain/services/escrow_service.dart';
 import 'package:hailo_core/domain/services/ride_settlement_service.dart';
-import 'package:hailo_core/services/autosave_service.dart';
-import 'package:hailo_core/services/moneybox_service.dart';
+import 'package:hailo_core/services/payout_autosave_service.dart';
 import 'package:hailo_core/services/wallet_scheduler.dart';
 import 'package:hailo_core/services/wallet_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -26,15 +25,14 @@ void main() {
         addTearDown(db.close);
 
         final walletService = WalletService(db, nowUtc: () => now);
-        final moneyBoxService = MoneyBoxService(db, nowUtc: () => now);
-        final autosaveService = AutosaveService(
+        final payoutAutosaveService = PayoutAutosaveService(
           db,
-          moneyBoxService: moneyBoxService,
+          transferProvider: _TestTransferProvider(),
           nowUtc: () => now,
         );
         final settlementService = RideSettlementService(
           db,
-          autosaveService: autosaveService,
+          payoutAutosaveService: payoutAutosaveService,
           nowUtc: () => now,
         );
         final escrowService = EscrowService(
@@ -65,10 +63,21 @@ void main() {
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),
         });
-        await moneyBoxService.ensureAccount(
-          ownerId: 'driver_happy',
+        await payoutAutosaveService.configurePlan(
+          userId: 'driver_happy',
+          autosaveEnabled: true,
           tier: 2,
           autosavePercent: 25,
+          mainBank: const AutosaveBankDestination(
+            accountNumber: '0001112223',
+            bankCode: '058',
+            name: 'Main Dest',
+          ),
+          savingsBank: const AutosaveBankDestination(
+            accountNumber: '4445556667',
+            bankCode: '033',
+            name: 'Savings Dest',
+          ),
         );
 
         final released = await escrowService.releaseOnManualOverride(
@@ -93,17 +102,29 @@ void main() {
           ownerId: 'driver_happy',
           walletType: WalletType.driverB,
         );
-        expect(walletA, 6000);
+        expect(walletA, 0);
         expect(walletB, 1000);
 
-        final accountRows = await db.query(
-          'moneybox_accounts',
-          columns: <String>['principal_minor'],
-          where: 'owner_id = ?',
+        final autosavePlanRows = await db.query(
+          'autosave_plans',
+          columns: <String>['total_autosaved_minor'],
+          where: 'user_id = ?',
           whereArgs: <Object>['driver_happy'],
           limit: 1,
         );
-        expect(accountRows.first['principal_minor'], 2000);
+        expect(autosavePlanRows.first['total_autosaved_minor'], 2000);
+
+        final transferRows = await db.query(
+          'payout_transfers',
+          where: 'payout_ledger_id = ?',
+          whereArgs: const <Object>['payout:escrow_happy'],
+          orderBy: 'kind ASC',
+        );
+        expect(transferRows, hasLength(2));
+        expect(transferRows.first['kind'], 'MAIN');
+        expect(transferRows.first['amount_minor'], 6000);
+        expect(transferRows.last['kind'], 'SAVINGS');
+        expect(transferRows.last['amount_minor'], 2000);
 
         final payoutRows = await db.query(
           'payout_records',
@@ -183,15 +204,14 @@ void main() {
         addTearDown(db.close);
 
         final walletService = WalletService(db, nowUtc: () => now);
-        final moneyBoxService = MoneyBoxService(db, nowUtc: () => now);
-        final autosaveService = AutosaveService(
+        final payoutAutosaveService = PayoutAutosaveService(
           db,
-          moneyBoxService: moneyBoxService,
+          transferProvider: _TestTransferProvider(),
           nowUtc: () => now,
         );
         final settlementService = RideSettlementService(
           db,
-          autosaveService: autosaveService,
+          payoutAutosaveService: payoutAutosaveService,
           nowUtc: () => now,
         );
         final escrowService = EscrowService(
@@ -211,10 +231,21 @@ void main() {
           premiumMarkupMinor: 0,
           totalFareMinor: 10000,
         );
-        await moneyBoxService.ensureAccount(
-          ownerId: 'driver_idem',
+        await payoutAutosaveService.configurePlan(
+          userId: 'driver_idem',
+          autosaveEnabled: true,
           tier: 2,
           autosavePercent: 10,
+          mainBank: const AutosaveBankDestination(
+            accountNumber: '0001112223',
+            bankCode: '058',
+            name: 'Main Dest',
+          ),
+          savingsBank: const AutosaveBankDestination(
+            accountNumber: '4445556667',
+            bankCode: '033',
+            name: 'Savings Dest',
+          ),
         );
 
         final first = await escrowService.releaseOnManualOverride(
@@ -235,22 +266,25 @@ void main() {
           ownerId: 'driver_idem',
           walletType: WalletType.driverA,
         );
-        expect(walletA, 7200);
+        expect(walletA, 0);
 
-        final walletLedgerRows = await db.query(
-          'wallet_ledger',
-          where: 'reference_id = ? AND kind = ?',
-          whereArgs: <Object>[
-            'ride_idem',
-            AutosaveService.confirmedCommissionCredit,
-          ],
+        final splitLedgerRows = await db.query(
+          'autosave_ledger',
+          where: 'entry_type = ?',
+          whereArgs: const <Object>['AUTOSAVE_SPLIT'],
+        );
+        final transferRows = await db.query(
+          'payout_transfers',
+          where: 'payout_ledger_id = ?',
+          whereArgs: const <Object>['payout:escrow_idem'],
         );
         final payoutRows = await db.query(
           'payout_records',
           where: 'ride_id = ?',
           whereArgs: <Object>['ride_idem'],
         );
-        expect(walletLedgerRows.length, 1);
+        expect(splitLedgerRows.length, 1);
+        expect(transferRows.length, 2);
         expect(payoutRows.length, 1);
       },
     );
@@ -625,4 +659,38 @@ Future<void> _seedRiderRideAndEscrow(
     'status': 'held',
     'created_at': now.toIso8601String(),
   }, conflictAlgorithm: ConflictAlgorithm.replace);
+}
+
+class _TestTransferProvider extends SettlementTransferProvider {
+  @override
+  Future<SettlementTransferRecipientResult> createTransferRecipient({
+    required String accountNumber,
+    required String bankCode,
+    required String name,
+  }) async {
+    final suffix = accountNumber.substring(accountNumber.length - 4);
+    final code = bankCode == '058' ? 'rcpt_main_$suffix' : 'rcpt_save_$suffix';
+    return SettlementTransferRecipientResult(
+      recipientCode: code,
+      raw: <String, Object?>{'name': name},
+    );
+  }
+
+  @override
+  Future<SettlementTransferResult> initiateTransfer({
+    required String recipientCode,
+    required int amountMinor,
+    required String reference,
+    required String reason,
+  }) async {
+    return SettlementTransferResult(
+      transferCode: 'trf_${reference.replaceAll(':', '_')}',
+      status: 'SUCCESS',
+      raw: <String, Object?>{
+        'recipient_code': recipientCode,
+        'amount_minor': amountMinor,
+        'reason': reason,
+      },
+    );
+  }
 }

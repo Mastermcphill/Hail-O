@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ import '../../lib/domain/services/ride_api_flow_service.dart';
 import '../../lib/domain/services/ride_settlement_service.dart';
 import '../../lib/domain/services/ride_snapshot_service.dart';
 import '../../lib/domain/services/wallet_reversal_service.dart';
+import '../../lib/services/payout_autosave_service.dart';
 import '../infra/analytics_event_store.dart';
 import '../infra/audit_log_store.dart';
 import '../infra/redis_client.dart';
@@ -50,6 +52,7 @@ import '../modules/routes/routes_controller.dart';
 import '../modules/rides/ride_request_metadata_store.dart';
 import '../modules/rides/rides_controller.dart';
 import '../modules/settlement/settlement_controller.dart';
+import '../modules/settlement/settlement_transfer_provider.dart';
 import '../modules/payments/payment_service.dart' as payments;
 import '../modules/payments/payments_controller.dart';
 import 'http_utils.dart';
@@ -153,12 +156,38 @@ Handler buildApiRouter({
           ),
           redisClient: redisClient,
         );
+  final autosaveExitFeeRate =
+      double.tryParse((env['AUTOSAVE_EXIT_FEE_RATE'] ?? '0.02').trim()) ?? 0.02;
+  final autosaveExitFeeCapMinor =
+      int.tryParse((env['AUTOSAVE_EXIT_FEE_CAP_MINOR'] ?? '1000000').trim()) ??
+      1000000;
+  final settlementTransferProvider = settlementTransferProviderFromEnvironment(
+    env,
+  );
+  final payoutAutosaveService = db == null
+      ? null
+      : PayoutAutosaveService(
+          db,
+          transferProvider: settlementTransferProvider,
+          exitFeeRate: autosaveExitFeeRate,
+          exitFeeCapMinor: autosaveExitFeeCapMinor,
+        );
+  final rideSettlementService = db == null
+      ? null
+      : RideSettlementService(
+          db,
+          payoutAutosaveService: payoutAutosaveService!,
+        );
+  final escrowService = db == null
+      ? null
+      : EscrowService(db, rideSettlementService: rideSettlementService!);
   final ridesController = db == null
       ? null
       : RidesController(
           db: db,
           rideApiFlowService: RideApiFlowService(
             db,
+            rideSettlementService: rideSettlementService!,
             externalMetadataStore: rideRequestMetadataStore,
             externalOperationalStore: operationalRecordStore,
           ),
@@ -179,8 +208,9 @@ Handler buildApiRouter({
   final settlementController = db == null
       ? null
       : SettlementController(
-          rideSettlementService: RideSettlementService(db),
-          escrowService: EscrowService(db),
+          rideSettlementService: rideSettlementService!,
+          escrowService: escrowService!,
+          payoutAutosaveService: payoutAutosaveService!,
         );
   final disputesController = db == null
       ? null
@@ -236,6 +266,28 @@ Handler buildApiRouter({
   queueJobRegistry?.register(QueueJobTypes.reconcilePayment, (_) async {
     await paymentService.retryPendingWebhooks(limit: 1);
   });
+  queueJobRegistry?.register(QueueJobTypes.autosaveMaturitySweep, (_) async {
+    final autosaveService = payoutAutosaveService;
+    if (autosaveService == null) {
+      return;
+    }
+    await autosaveService.runMaturitySweep();
+    final processor = queueJobProcessor;
+    if (processor != null) {
+      await processor.enqueueJob(
+        QueueJobTypes.autosaveMaturitySweep,
+        runAtUtc: _nextAutosaveSweepTime(_nowUtcUtc()),
+      );
+    }
+  });
+  if (queueJobProcessor != null && payoutAutosaveService != null) {
+    unawaited(
+      queueJobProcessor.enqueueJob(
+        QueueJobTypes.autosaveMaturitySweep,
+        runAtUtc: _nextAutosaveSweepTime(_nowUtcUtc()),
+      ),
+    );
+  }
   final paymentsController = PaymentsController(
     paymentService: paymentService,
     environment: runtimeEnvironment,
@@ -392,7 +444,18 @@ Handler buildApiRouter({
     ..mount('/payments/', paymentsController.intentsRouter.call)
     ..mount('/api/orgs', orgApiHandler)
     ..mount('/webhooks/', paymentsController.webhookRouter.call)
-    ..mount('/admin/', adminController.router.call);
+    ..mount('/admin/', adminController.router.call)
+    ..all('/api/wallet', (request) => _custodyDisabled(request))
+    ..all('/api/wallet/<ignored|.*>', (request, _) => _custodyDisabled(request))
+    ..all('/api/moneybox', (request) => _custodyDisabled(request))
+    ..all(
+      '/api/moneybox/<ignored|.*>',
+      (request, _) => _custodyDisabled(request),
+    )
+    ..all('/wallet', (request) => _custodyDisabled(request))
+    ..all('/wallet/<ignored|.*>', (request, _) => _custodyDisabled(request))
+    ..all('/moneybox', (request) => _custodyDisabled(request))
+    ..all('/moneybox/<ignored|.*>', (request, _) => _custodyDisabled(request));
   if (authController != null) {
     router.mount('/auth/', authController.router.call);
   }
@@ -411,6 +474,7 @@ Handler buildApiRouter({
     router.mount('/rides/', ridesController.router.call);
   }
   if (settlementController != null) {
+    router.mount('/api/settlement/', settlementController.router.call);
     router.mount('/settlement/', settlementController.router.call);
   }
   if (disputesController != null) {
@@ -641,6 +705,25 @@ Response _versionHandler(Map<String, Object?> buildInfo) {
     'build': buildInfo,
   });
 }
+
+Response _custodyDisabled(Request request) {
+  return jsonErrorResponse(
+    request,
+    410,
+    code: 'wallet_custody_disabled',
+    message: 'Stored balance custody is disabled. Use settlement autosave.',
+  );
+}
+
+DateTime _nextAutosaveSweepTime(DateTime nowUtc) {
+  final base = DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day, 3);
+  if (nowUtc.isBefore(base)) {
+    return base;
+  }
+  return base.add(const Duration(days: 1));
+}
+
+DateTime _nowUtcUtc() => DateTime.now().toUtc();
 
 bool _isTruthyQuery(String? value) {
   final normalized = value?.trim().toLowerCase() ?? '';

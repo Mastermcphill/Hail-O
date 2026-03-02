@@ -26,6 +26,11 @@ class ApiPaths {
   static String rideSeats(String rideId) => '/rides/$rideId/seats';
   static String rideSeatsSelect(String rideId) => '/rides/$rideId/seats/select';
 
+  static const autosaveStatus = '/settlement/autosave/status';
+  static const autosaveConfigure = '/settlement/autosave/configure';
+  static const autosaveDisable = '/settlement/autosave/disable';
+  static const autosaveLedger = '/settlement/autosave/ledger';
+
   static const marketplaceOffers = '/marketplace/offers';
   static String marketplaceOfferPaywall(String offerId) =>
       '/marketplace/offers/${Uri.encodeComponent(offerId)}/paywall';

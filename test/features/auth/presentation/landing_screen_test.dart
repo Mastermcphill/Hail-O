@@ -8,19 +8,19 @@ void main() {
     final router = _routerForTest();
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Sign in'));
     await tester.pumpAndSettle();
 
     expect(find.text('Login target'), findsOneWidget);
   });
 
-  testWidgets('create account button routes to signup', (
+  testWidgets('get started button routes to signup', (
     WidgetTester tester,
   ) async {
     final router = _routerForTest();
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Create account'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Get Started'));
     await tester.pumpAndSettle();
 
     expect(find.text('Signup target'), findsOneWidget);

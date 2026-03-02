@@ -42,6 +42,7 @@ void main() {
         sqlByName['024_admin_moderation_metrics.sql'] ?? '';
     final webhookRetrySql = sqlByName['025_webhook_events_retry.sql'] ?? '';
     final analyticsEventsSql = sqlByName['026_analytics_events.sql'] ?? '';
+    final autosaveSql = sqlByName['027_payout_autosave.sql'] ?? '';
 
     expect(
       authSql.contains('CREATE INDEX IF NOT EXISTS idx_auth_credentials_email'),
@@ -432,6 +433,33 @@ void main() {
       ),
       isTrue,
       reason: 'analytics events user timeline index must exist',
+    );
+    expect(
+      autosaveSql.contains('CREATE TABLE IF NOT EXISTS autosave_plans'),
+      isTrue,
+      reason: 'autosave plans table must exist',
+    );
+    expect(
+      autosaveSql.contains('CREATE TABLE IF NOT EXISTS autosave_ledger'),
+      isTrue,
+      reason: 'autosave ledger table must exist',
+    );
+    expect(
+      autosaveSql.contains('CREATE TABLE IF NOT EXISTS payout_transfers'),
+      isTrue,
+      reason: 'payout transfers table must exist',
+    );
+    expect(
+      autosaveSql.contains(
+        'CREATE INDEX IF NOT EXISTS idx_autosave_plans_status_maturity',
+      ),
+      isTrue,
+      reason: 'autosave maturity index must exist',
+    );
+    expect(
+      autosaveSql.contains('provider_reference TEXT NOT NULL UNIQUE'),
+      isTrue,
+      reason: 'payout transfer provider reference must be unique',
     );
   });
 }

@@ -885,6 +885,12 @@ class ApiClient {
     if (endpointPath == '/me/next-of-kin') {
       return true;
     }
+    if (endpointPath == ApiPaths.autosaveStatus ||
+        endpointPath == ApiPaths.autosaveConfigure ||
+        endpointPath == ApiPaths.autosaveDisable ||
+        endpointPath == ApiPaths.autosaveLedger) {
+      return true;
+    }
     if (endpointPath == '/routes' || endpointPath == '/routes/match') {
       return true;
     }
@@ -906,6 +912,80 @@ class ApiClient {
   }) async {
     final uri = Uri.parse(path);
     final endpointPath = uri.path;
+
+    if (endpointPath == ApiPaths.autosaveStatus && method == 'GET') {
+      return MockBackendStore.autosaveStatus ??
+          <String, dynamic>{
+            'ok': true,
+            'configured': false,
+            'status': 'NOT_CONFIGURED',
+            'bonus_eligible': false,
+            'totals': <String, dynamic>{
+              'total_autosaved_minor': 0,
+              'total_bonus_minor': 0,
+              'total_exit_fees_minor': 0,
+            },
+            'masked_destinations': <String, dynamic>{},
+          };
+    }
+    if (endpointPath == ApiPaths.autosaveConfigure && method == 'POST') {
+      final payload = body ?? <String, dynamic>{};
+      MockBackendStore.autosaveStatus = <String, dynamic>{
+        'ok': true,
+        'configured': true,
+        'status': 'ACTIVE',
+        'tier': _readInt(payload['tier']),
+        'autosave_percent': _readInt(payload['autosave_percent']),
+        'started_at': DateTime.now().toUtc().toIso8601String(),
+        'maturity_at': DateTime.now()
+            .toUtc()
+            .add(const Duration(days: 30))
+            .toIso8601String(),
+        'bonus_rate': 0.0,
+        'bonus_eligible': true,
+        'totals': <String, dynamic>{
+          'total_autosaved_minor': 0,
+          'total_bonus_minor': 0,
+          'total_exit_fees_minor': 0,
+        },
+        'masked_destinations': <String, dynamic>{
+          'main': <String, dynamic>{'masked_account_number': '****2223'},
+          'savings': <String, dynamic>{'masked_account_number': '****6667'},
+        },
+      };
+      MockBackendStore.autosaveLedger.insert(0, <String, dynamic>{
+        'id': MockBackendStore.autosaveLedger.length + 1,
+        'entry_type': 'PLAN_OPEN',
+        'amount_minor': 0,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      });
+      return MockBackendStore.autosaveStatus!;
+    }
+    if (endpointPath == ApiPaths.autosaveDisable && method == 'POST') {
+      final current =
+          MockBackendStore.autosaveStatus ??
+          <String, dynamic>{
+            'ok': true,
+            'configured': false,
+            'status': 'NOT_CONFIGURED',
+          };
+      current['status'] = 'PAUSED';
+      current['bonus_eligible'] = false;
+      MockBackendStore.autosaveStatus = current;
+      MockBackendStore.autosaveLedger.insert(0, <String, dynamic>{
+        'id': MockBackendStore.autosaveLedger.length + 1,
+        'entry_type': 'PLAN_PAUSE',
+        'amount_minor': 0,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      });
+      return current;
+    }
+    if (endpointPath == ApiPaths.autosaveLedger && method == 'GET') {
+      return <String, dynamic>{
+        'ok': true,
+        'ledger': MockBackendStore.autosaveLedger,
+      };
+    }
 
     if (endpointPath == '/me/next-of-kin') {
       if (method == 'GET') {

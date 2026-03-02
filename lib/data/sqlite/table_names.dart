@@ -47,4 +47,7 @@ class TableNames {
   static const String offlineRegions = 'offline_regions';
   static const String offlineDownloadEvents = 'offline_download_events';
   static const String routePolylines = 'route_polylines';
+  static const String autosavePlans = 'autosave_plans';
+  static const String autosaveLedger = 'autosave_ledger';
+  static const String payoutTransfers = 'payout_transfers';
 }
