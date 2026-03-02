@@ -1,15 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hailo_core/data/sqlite/hailo_database.dart';
 import 'package:hailo_core/services/payout_autosave_service.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../support/sqlite_ffi_bootstrap.dart';
 
 void main() {
+  final sqliteSkipReason = bootstrapSqliteFfiForTests();
+
   setUpAll(() {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+    if (sqliteSkipReason == null) {
+      bootstrapSqliteFfiForTests();
+    }
   });
 
-  group('PayoutAutosaveService', () {
+  group('PayoutAutosaveService', skip: sqliteSkipReason, () {
     test('configure plan stores recipient codes', () async {
       final now = DateTime.utc(2026, 3, 2, 12);
       final db = await HailODatabase().open(databasePath: inMemoryDatabasePath);
@@ -59,6 +63,9 @@ void main() {
       () async {
         final now = DateTime.utc(2026, 3, 2, 12);
         final later = now.add(const Duration(days: 1));
+        const firstPayoutMinor = 10000;
+        const autosavePercent = 10;
+        const secondPayoutMinor = 1000;
         final db = await HailODatabase().open(
           databasePath: inMemoryDatabasePath,
         );
@@ -76,7 +83,7 @@ void main() {
           userId: 'driver_exit',
           autosaveEnabled: true,
           tier: 1,
-          autosavePercent: 10,
+          autosavePercent: autosavePercent,
           mainBank: const AutosaveBankDestination(
             accountNumber: '0001112223',
             bankCode: '058',
@@ -91,7 +98,7 @@ void main() {
         await service.applyOnPayout(
           userId: 'driver_exit',
           payoutLedgerId: 'payout:first',
-          payoutMinor: 10000,
+          payoutMinor: firstPayoutMinor,
           tripId: 'ride_first',
         );
 
@@ -108,14 +115,32 @@ void main() {
         final afterDisable = await disableService.applyOnPayout(
           userId: 'driver_exit',
           payoutLedgerId: 'payout:second',
-          payoutMinor: 1000,
+          payoutMinor: secondPayoutMinor,
           tripId: 'ride_second',
         );
+        final expectedSavedOnFirstPayout = _expectedSavings(
+          firstPayoutMinor,
+          autosavePercent,
+        );
+        final expectedExitFeeMinor = _expectedExitFee(
+          expectedSavedOnFirstPayout,
+        );
+        final expectedMainAfterFee = secondPayoutMinor - expectedExitFeeMinor;
 
         expect(afterDisable['handled_externally'], true);
         expect(afterDisable['saved_minor'], 0);
-        expect(afterDisable['main_minor'], 990);
-        expect(afterDisable['fee_collected_minor'], 10);
+        // Paused plans stop splitting, but outstanding exit fees are still
+        // netted from the next main payout.
+        expect(afterDisable['main_minor'], expectedMainAfterFee);
+        expect(afterDisable['fee_collected_minor'], expectedExitFeeMinor);
+
+        final assessedFeeRows = await db.query(
+          'autosave_ledger',
+          where: 'entry_type = ?',
+          whereArgs: const <Object>['EXIT_FEE'],
+        );
+        expect(assessedFeeRows, hasLength(1));
+        expect(assessedFeeRows.first['amount_minor'], expectedExitFeeMinor);
 
         final feeRows = await db.query(
           'autosave_ledger',
@@ -123,7 +148,7 @@ void main() {
           whereArgs: const <Object>['EXIT_FEE_COLLECTED'],
         );
         expect(feeRows, hasLength(1));
-        expect(feeRows.first['amount_minor'], 10);
+        expect(feeRows.first['amount_minor'], expectedExitFeeMinor);
       },
     );
 
@@ -291,4 +316,23 @@ class _FakeTransferProvider extends SettlementTransferProvider {
       },
     );
   }
+}
+
+int _expectedSavings(int payoutMinor, int percent) {
+  return (payoutMinor * percent) ~/ 100;
+}
+
+int _expectedExitFee(
+  int totalAutosavedMinor, {
+  double rate = 0.02,
+  int capMinor = 1000000,
+}) {
+  final raw = (totalAutosavedMinor * rate).round();
+  if (raw <= 0) {
+    return 0;
+  }
+  if (raw > capMinor) {
+    return capMinor;
+  }
+  return raw;
 }

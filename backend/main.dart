@@ -95,269 +95,30 @@ Future<void> main() async {
   await runZonedGuarded(
     () async {
       final env = Platform.environment;
-      final config = BackendRuntimeConfig.fromEnvironment();
       final environment = (env['ENV'] ?? 'development').trim();
-      validateProductionConfig(
-        environment: environment,
-        usePostgres: config.usePostgres,
-        envMap: env,
-      );
-      final dbRuntime = await openBackendDatabaseRuntime(
-        config: config,
-        env: env,
-      );
-      final bool usePostgres = dbRuntime.usePostgres;
-      final int dbPoolSize = dbRuntime.dbPoolSize;
-      final int dbQueryTimeoutMs = dbRuntime.dbQueryTimeoutMs;
-      final Database? sqliteDb = dbRuntime.sqliteDb;
-      final PostgresProvider? postgresProvider = dbRuntime.postgresProvider;
-      final requestMetrics = RequestMetrics();
       final requestIdleTimeoutSeconds =
           int.tryParse((env['REQUEST_IDLE_TIMEOUT_SECONDS'] ?? '30').trim()) ??
           30;
-      final requestMaxBodyBytes =
-          int.tryParse((env['REQUEST_MAX_BODY_BYTES'] ?? '262144').trim()) ??
-          262144;
-      final rateLimitEnabled =
-          (env['RATE_LIMIT_ENABLED'] ?? 'true').trim().toLowerCase() != 'false';
-      final rateLimitWindowSeconds =
-          int.tryParse((env['RATE_LIMIT_WINDOW_SEC'] ?? '').trim()) ??
-          int.tryParse((env['RATE_LIMIT_WINDOW_SECONDS'] ?? '60').trim()) ??
-          60;
-      final rateLimitMaxRequestsPerIp =
-          int.tryParse((env['RATE_LIMIT_PER_IP_PER_MIN'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_MAX_REQUESTS_PER_IP'] ?? '60').trim(),
-          ) ??
-          60;
-      final rateLimitMaxRequestsPerUser =
-          int.tryParse((env['RATE_LIMIT_PER_USER_PER_MIN'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_MAX_REQUESTS_PER_USER'] ?? '120').trim(),
-          ) ??
-          120;
-      final rateLimitAuthMaxRequestsPerIp =
-          int.tryParse((env['RATE_LIMIT_BURST'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_AUTH_PER_IP_PER_MIN'] ?? '12').trim(),
-          ) ??
-          12;
-      final rateLimitAuthMaxRequestsPerUser =
-          int.tryParse(
-            (env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '24').trim(),
-          ) ??
-          24;
-      final rateLimitMarketplaceReadPerIp =
-          int.tryParse(
-            (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '120').trim(),
-          ) ??
-          120;
-      final rateLimitMarketplaceReadPerUser =
-          int.tryParse(
-            (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '240').trim(),
-          ) ??
-          240;
-      final rateLimitMarketplaceWritePerIp =
-          int.tryParse(
-            (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '40').trim(),
-          ) ??
-          40;
-      final rateLimitMarketplaceWritePerUser =
-          int.tryParse(
-            (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '80').trim(),
-          ) ??
-          80;
-      final rateLimitWebhookPerIp =
-          int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '300').trim()) ??
-          300;
-      final rateLimitWebhookPerUser =
-          int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_USER'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_WEBHOOK_MAX_REQUESTS_PER_USER'] ?? '').trim(),
-          ) ??
-          rateLimitMaxRequestsPerUser;
-      final rateLimitAdminPerIp =
-          int.tryParse((env['RATE_LIMIT_ADMIN_PER_IP'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_IP'] ?? '30').trim(),
-          ) ??
-          30;
-      final rateLimitAdminPerUser =
-          int.tryParse((env['RATE_LIMIT_ADMIN_PER_USER'] ?? '').trim()) ??
-          int.tryParse(
-            (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_USER'] ?? '60').trim(),
-          ) ??
-          60;
-      final trustProxyHeaders =
-          (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() !=
-          'false';
-      final metricsPublic =
-          (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
-      final adminTokenEnabled =
-          (env['ADMIN_TOKEN_ENABLED'] ?? 'false').trim().toLowerCase() ==
-          'true';
-      final enableSentrySmokeEndpoint =
-          (env['ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT'] ?? 'false')
-              .trim()
-              .toLowerCase() ==
-          'true';
-      final migrationHeadVersion =
-          BackendPostgresMigrator.migrationHeadVersion();
-      final redisManager = await RedisManager.fromEnvironment(
-        env,
-        warningSink: stderr.writeln,
-      );
-      final RedisQueueClient? redisClient = redisManager.client;
-      QueueJobRegistry? queueJobRegistry;
-      QueueJobProcessor? queueJobProcessor;
-      if (redisManager.enabled && redisClient != null) {
-        queueJobRegistry = QueueJobRegistry();
-        queueJobProcessor = QueueJobProcessor(
-          redisClient: redisClient,
-          registry: queueJobRegistry,
-          warningSink: stderr.writeln,
-        );
-      }
-      late final AuthCredentialsStore authCredentialsStore;
-      late final PhoneAuthStore phoneAuthStore;
-      late final RideRequestMetadataStore rideRequestMetadataStore;
-      late final OperationalRecordStore operationalRecordStore;
-
-      if (usePostgres) {
-        final provider = postgresProvider!;
-        await BackendPostgresMigrator(
-          postgresProvider: provider,
-          dbSchema: config.dbSchema,
-        ).runPendingMigrations();
-        authCredentialsStore = PostgresAuthCredentialsStore(provider);
-        phoneAuthStore = PostgresPhoneAuthStore(provider);
-        rideRequestMetadataStore = PostgresRideRequestMetadataStore(provider);
-        operationalRecordStore = PostgresOperationalRecordStore(provider);
-      } else {
-        final sqliteDatabase = sqliteDb!;
-        authCredentialsStore = SqliteAuthCredentialsStore(sqliteDatabase);
-        phoneAuthStore = SqlitePhoneAuthStore(sqliteDatabase);
-        rideRequestMetadataStore = SqliteRideRequestMetadataStore(
-          sqliteDatabase,
-        );
-        operationalRecordStore = const SqliteOperationalRecordStore();
-      }
-
-      Future<bool> dbHealthCheck() async {
-        try {
-          if (usePostgres) {
-            final rows = await postgresProvider!.withConnection(
-              (connection) => connection.query('SELECT 1'),
-            );
-            return rows.isNotEmpty;
-          }
-          final rows = await sqliteDb!.rawQuery('SELECT 1');
-          return rows.isNotEmpty;
-        } catch (_) {
-          return false;
-        }
-      }
-
-      final tokenService = TokenService.fromEnvironment();
-      final allowedOrigins = parseAllowedOrigins(env['ALLOWED_ORIGINS']);
-      final buildInfo = <String, Object?>{
-        'version': env['RENDER_GIT_TAG'] ?? env['BUILD_VERSION'] ?? 'local',
-        'commit': env['RENDER_GIT_COMMIT'] ?? 'local',
-        'runtime': 'dart_vm',
-        'runtime_marker': env['STARTUP_RUNTIME_MARKER'] ?? 'unknown',
-        'dart_version': env['DART_SDK_VERSION'] ?? 'unknown',
-        'db_schema': config.dbSchema,
-        'migration_head': migrationHeadVersion,
-      };
-      final runtimeConfigSnapshot = <String, Object?>{
-        'environment': environment,
-        'db_mode': config.dbMode.name,
-        'db_schema': config.dbSchema,
-        'cors_enabled': allowedOrigins.isNotEmpty,
-        'allowed_origins_count': allowedOrigins.length,
-        'rate_limit_enabled': rateLimitEnabled,
-        'rate_limit_window_seconds': rateLimitWindowSeconds,
-        'rate_limit_window_sec': rateLimitWindowSeconds,
-        'rate_limit_max_requests_per_ip': rateLimitMaxRequestsPerIp,
-        'rate_limit_max_requests_per_user': rateLimitMaxRequestsPerUser,
-        'rate_limit_auth_per_ip_per_min': rateLimitAuthMaxRequestsPerIp,
-        'rate_limit_burst': rateLimitAuthMaxRequestsPerIp,
-        'rate_limit_auth_per_user_per_min': rateLimitAuthMaxRequestsPerUser,
-        'rate_limit_marketplace_read_per_ip': rateLimitMarketplaceReadPerIp,
-        'rate_limit_marketplace_read_per_user': rateLimitMarketplaceReadPerUser,
-        'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
-        'rate_limit_marketplace_write_per_user':
-            rateLimitMarketplaceWritePerUser,
-        'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
-        'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
-        'rate_limit_admin_per_ip': rateLimitAdminPerIp,
-        'rate_limit_admin_per_user': rateLimitAdminPerUser,
-        'trust_proxy_headers': trustProxyHeaders,
-        'metrics_public': metricsPublic,
-        'metrics_protected': !metricsPublic,
-        'admin_token_enabled': adminTokenEnabled,
-        'admin_enable_sentry_smoke_endpoint': enableSentrySmokeEndpoint,
-        'db_pool_size': dbPoolSize,
-        'db_query_timeout_ms': dbQueryTimeoutMs,
-        'request_idle_timeout_seconds': requestIdleTimeoutSeconds,
-        'request_max_body_bytes': requestMaxBodyBytes,
-        'redis_enabled': redisManager.enabled,
-        'redis_configured': redisManager.configured,
-        'redis_client_connected': redisClient != null,
-      };
-      final handler = AppServer(
-        db: sqliteDb,
-        tokenService: tokenService,
-        dbMode: config.dbMode.name,
+      final requestedHost = (env['HOST'] ?? '0.0.0.0').trim();
+      final host = _resolveBindHost(
         environment: environment,
-        requestMetrics: requestMetrics,
-        metricsPublic: metricsPublic,
-        allowedOrigins: allowedOrigins,
-        dbHealthCheck: dbHealthCheck,
-        buildInfo: buildInfo,
-        rateLimitEnabled: rateLimitEnabled,
-        rateLimitWindow: Duration(seconds: rateLimitWindowSeconds),
-        maxRequestsPerIp: rateLimitMaxRequestsPerIp,
-        maxRequestsPerUser: rateLimitMaxRequestsPerUser,
-        maxAuthRequestsPerIp: rateLimitAuthMaxRequestsPerIp,
-        maxAuthRequestsPerUser: rateLimitAuthMaxRequestsPerUser,
-        maxMarketplaceReadRequestsPerIp: rateLimitMarketplaceReadPerIp,
-        maxMarketplaceReadRequestsPerUser: rateLimitMarketplaceReadPerUser,
-        maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
-        maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
-        maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
-        maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
-        maxAdminRequestsPerIp: rateLimitAdminPerIp,
-        maxAdminRequestsPerUser: rateLimitAdminPerUser,
-        trustProxyHeaders: trustProxyHeaders,
-        maxRequestBodyBytes: requestMaxBodyBytes,
-        enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
-        runtimeConfigSnapshot: runtimeConfigSnapshot,
-        postgresProvider: postgresProvider,
-        authCredentialsStore: authCredentialsStore,
-        phoneAuthStore: phoneAuthStore,
-        rideRequestMetadataStore: rideRequestMetadataStore,
-        operationalRecordStore: operationalRecordStore,
-        environmentMap: env,
-        redisClient: redisClient,
-        queueJobRegistry: queueJobRegistry,
-        queueJobProcessor: queueJobProcessor,
-      ).buildHandler();
+        requestedHost: requestedHost,
+      );
+      final port = int.tryParse((env['PORT'] ?? '').trim()) ?? 8080;
+      var currentHandler = _bootstrapStartupHandler();
+      FutureOr<Response> delegatingHandler(Request request) =>
+          currentHandler(request);
 
-      const host = '0.0.0.0';
-      final port = int.parse(Platform.environment['PORT'] ?? '8080');
       stderr.writeln(
         "BIND: host=$host port=$port envPORT=${Platform.environment['PORT']}",
       );
-      stdout.writeln(
-        'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
-      );
-      stdout.writeln(
-        'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser admin_ip=$rateLimitAdminPerIp admin_user=$rateLimitAdminPerUser trust_proxy_headers=$trustProxyHeaders',
-      );
+      stderr.writeln('BOOTSTRAP: binding early on $host:$port');
+
       late final HttpServer server;
       try {
-        server = await io.serve(handler, host, port);
+        server = await _defaultServerBinder(host, port);
+        _defaultServeRequests(server, delegatingHandler);
+        stderr.writeln('BOOTSTRAP: serving /api/healthz while initializing');
         stderr.writeln('LISTENING: http://$host:$port');
       } catch (error, stackTrace) {
         stderr.writeln('BIND FAILED: $error');
@@ -385,13 +146,271 @@ Future<void> main() async {
             'reason': error.toString(),
           }),
         );
-        queueJobProcessor?.stop();
         await server.close(force: true);
-        await redisManager.close();
         await DbProvider.instance.close();
         rethrow;
       }
+
+      RedisManager? redisManager;
+      QueueJobProcessor? queueJobProcessor;
+
       try {
+        final config = BackendRuntimeConfig.fromEnvironment();
+        validateProductionConfig(
+          environment: environment,
+          usePostgres: config.usePostgres,
+          envMap: env,
+        );
+        final dbRuntime = await openBackendDatabaseRuntime(
+          config: config,
+          env: env,
+        );
+        final bool usePostgres = dbRuntime.usePostgres;
+        final int dbPoolSize = dbRuntime.dbPoolSize;
+        final int dbQueryTimeoutMs = dbRuntime.dbQueryTimeoutMs;
+        final Database? sqliteDb = dbRuntime.sqliteDb;
+        final PostgresProvider? postgresProvider = dbRuntime.postgresProvider;
+        final requestMetrics = RequestMetrics();
+        final requestMaxBodyBytes =
+            int.tryParse((env['REQUEST_MAX_BODY_BYTES'] ?? '262144').trim()) ??
+            262144;
+        final rateLimitEnabled =
+            (env['RATE_LIMIT_ENABLED'] ?? 'true').trim().toLowerCase() !=
+            'false';
+        final rateLimitWindowSeconds =
+            int.tryParse((env['RATE_LIMIT_WINDOW_SEC'] ?? '').trim()) ??
+            int.tryParse((env['RATE_LIMIT_WINDOW_SECONDS'] ?? '60').trim()) ??
+            60;
+        final rateLimitMaxRequestsPerIp =
+            int.tryParse((env['RATE_LIMIT_PER_IP_PER_MIN'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_MAX_REQUESTS_PER_IP'] ?? '60').trim(),
+            ) ??
+            60;
+        final rateLimitMaxRequestsPerUser =
+            int.tryParse((env['RATE_LIMIT_PER_USER_PER_MIN'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_MAX_REQUESTS_PER_USER'] ?? '120').trim(),
+            ) ??
+            120;
+        final rateLimitAuthMaxRequestsPerIp =
+            int.tryParse((env['RATE_LIMIT_BURST'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_AUTH_PER_IP_PER_MIN'] ?? '12').trim(),
+            ) ??
+            12;
+        final rateLimitAuthMaxRequestsPerUser =
+            int.tryParse(
+              (env['RATE_LIMIT_AUTH_PER_USER_PER_MIN'] ?? '24').trim(),
+            ) ??
+            24;
+        final rateLimitMarketplaceReadPerIp =
+            int.tryParse(
+              (env['RATE_LIMIT_MARKETPLACE_READ_PER_IP'] ?? '120').trim(),
+            ) ??
+            120;
+        final rateLimitMarketplaceReadPerUser =
+            int.tryParse(
+              (env['RATE_LIMIT_MARKETPLACE_READ_PER_USER'] ?? '240').trim(),
+            ) ??
+            240;
+        final rateLimitMarketplaceWritePerIp =
+            int.tryParse(
+              (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_IP'] ?? '40').trim(),
+            ) ??
+            40;
+        final rateLimitMarketplaceWritePerUser =
+            int.tryParse(
+              (env['RATE_LIMIT_MARKETPLACE_WRITE_PER_USER'] ?? '80').trim(),
+            ) ??
+            80;
+        final rateLimitWebhookPerIp =
+            int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_IP'] ?? '300').trim()) ??
+            300;
+        final rateLimitWebhookPerUser =
+            int.tryParse((env['RATE_LIMIT_WEBHOOK_PER_USER'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_WEBHOOK_MAX_REQUESTS_PER_USER'] ?? '').trim(),
+            ) ??
+            rateLimitMaxRequestsPerUser;
+        final rateLimitAdminPerIp =
+            int.tryParse((env['RATE_LIMIT_ADMIN_PER_IP'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_IP'] ?? '30').trim(),
+            ) ??
+            30;
+        final rateLimitAdminPerUser =
+            int.tryParse((env['RATE_LIMIT_ADMIN_PER_USER'] ?? '').trim()) ??
+            int.tryParse(
+              (env['RATE_LIMIT_ADMIN_MAX_REQUESTS_PER_USER'] ?? '60').trim(),
+            ) ??
+            60;
+        final trustProxyHeaders =
+            (env['TRUST_PROXY_HEADERS'] ?? 'true').trim().toLowerCase() !=
+            'false';
+        final metricsPublic =
+            (env['METRICS_PUBLIC'] ?? 'false').trim().toLowerCase() == 'true';
+        final adminTokenEnabled =
+            (env['ADMIN_TOKEN_ENABLED'] ?? 'false').trim().toLowerCase() ==
+            'true';
+        final enableSentrySmokeEndpoint =
+            (env['ADMIN_ENABLE_SENTRY_SMOKE_ENDPOINT'] ?? 'false')
+                .trim()
+                .toLowerCase() ==
+            'true';
+        final migrationHeadVersion =
+            BackendPostgresMigrator.migrationHeadVersion();
+        redisManager = await RedisManager.fromEnvironment(
+          env,
+          warningSink: stderr.writeln,
+        );
+        final RedisQueueClient? redisClient = redisManager.client;
+        QueueJobRegistry? queueJobRegistry;
+        if (redisManager.enabled && redisClient != null) {
+          queueJobRegistry = QueueJobRegistry();
+          queueJobProcessor = QueueJobProcessor(
+            redisClient: redisClient,
+            registry: queueJobRegistry,
+            warningSink: stderr.writeln,
+          );
+        }
+        late final AuthCredentialsStore authCredentialsStore;
+        late final PhoneAuthStore phoneAuthStore;
+        late final RideRequestMetadataStore rideRequestMetadataStore;
+        late final OperationalRecordStore operationalRecordStore;
+
+        if (usePostgres) {
+          final provider = postgresProvider!;
+          await BackendPostgresMigrator(
+            postgresProvider: provider,
+            dbSchema: config.dbSchema,
+          ).runPendingMigrations();
+          authCredentialsStore = PostgresAuthCredentialsStore(provider);
+          phoneAuthStore = PostgresPhoneAuthStore(provider);
+          rideRequestMetadataStore = PostgresRideRequestMetadataStore(provider);
+          operationalRecordStore = PostgresOperationalRecordStore(provider);
+        } else {
+          final sqliteDatabase = sqliteDb!;
+          authCredentialsStore = SqliteAuthCredentialsStore(sqliteDatabase);
+          phoneAuthStore = SqlitePhoneAuthStore(sqliteDatabase);
+          rideRequestMetadataStore = SqliteRideRequestMetadataStore(
+            sqliteDatabase,
+          );
+          operationalRecordStore = const SqliteOperationalRecordStore();
+        }
+
+        Future<bool> dbHealthCheck() async {
+          try {
+            if (usePostgres) {
+              final rows = await postgresProvider!.withConnection(
+                (connection) => connection.query('SELECT 1'),
+              );
+              return rows.isNotEmpty;
+            }
+            final rows = await sqliteDb!.rawQuery('SELECT 1');
+            return rows.isNotEmpty;
+          } catch (_) {
+            return false;
+          }
+        }
+
+        final tokenService = TokenService.fromEnvironment();
+        final allowedOrigins = parseAllowedOrigins(env['ALLOWED_ORIGINS']);
+        final buildInfo = <String, Object?>{
+          'version': env['RENDER_GIT_TAG'] ?? env['BUILD_VERSION'] ?? 'local',
+          'commit': env['RENDER_GIT_COMMIT'] ?? 'local',
+          'runtime': 'dart_vm',
+          'runtime_marker': env['STARTUP_RUNTIME_MARKER'] ?? 'unknown',
+          'dart_version': env['DART_SDK_VERSION'] ?? 'unknown',
+          'db_schema': config.dbSchema,
+          'migration_head': migrationHeadVersion,
+        };
+        final runtimeConfigSnapshot = <String, Object?>{
+          'environment': environment,
+          'db_mode': config.dbMode.name,
+          'db_schema': config.dbSchema,
+          'cors_enabled': allowedOrigins.isNotEmpty,
+          'allowed_origins_count': allowedOrigins.length,
+          'rate_limit_enabled': rateLimitEnabled,
+          'rate_limit_window_seconds': rateLimitWindowSeconds,
+          'rate_limit_window_sec': rateLimitWindowSeconds,
+          'rate_limit_max_requests_per_ip': rateLimitMaxRequestsPerIp,
+          'rate_limit_max_requests_per_user': rateLimitMaxRequestsPerUser,
+          'rate_limit_auth_per_ip_per_min': rateLimitAuthMaxRequestsPerIp,
+          'rate_limit_burst': rateLimitAuthMaxRequestsPerIp,
+          'rate_limit_auth_per_user_per_min': rateLimitAuthMaxRequestsPerUser,
+          'rate_limit_marketplace_read_per_ip': rateLimitMarketplaceReadPerIp,
+          'rate_limit_marketplace_read_per_user':
+              rateLimitMarketplaceReadPerUser,
+          'rate_limit_marketplace_write_per_ip': rateLimitMarketplaceWritePerIp,
+          'rate_limit_marketplace_write_per_user':
+              rateLimitMarketplaceWritePerUser,
+          'rate_limit_webhook_per_ip': rateLimitWebhookPerIp,
+          'rate_limit_webhook_per_user': rateLimitWebhookPerUser,
+          'rate_limit_admin_per_ip': rateLimitAdminPerIp,
+          'rate_limit_admin_per_user': rateLimitAdminPerUser,
+          'trust_proxy_headers': trustProxyHeaders,
+          'metrics_public': metricsPublic,
+          'metrics_protected': !metricsPublic,
+          'admin_token_enabled': adminTokenEnabled,
+          'admin_enable_sentry_smoke_endpoint': enableSentrySmokeEndpoint,
+          'db_pool_size': dbPoolSize,
+          'db_query_timeout_ms': dbQueryTimeoutMs,
+          'request_idle_timeout_seconds': requestIdleTimeoutSeconds,
+          'request_max_body_bytes': requestMaxBodyBytes,
+          'redis_enabled': redisManager.enabled,
+          'redis_configured': redisManager.configured,
+          'redis_client_connected': redisClient != null,
+        };
+        final handler = AppServer(
+          db: sqliteDb,
+          tokenService: tokenService,
+          dbMode: config.dbMode.name,
+          environment: environment,
+          requestMetrics: requestMetrics,
+          metricsPublic: metricsPublic,
+          allowedOrigins: allowedOrigins,
+          dbHealthCheck: dbHealthCheck,
+          buildInfo: buildInfo,
+          rateLimitEnabled: rateLimitEnabled,
+          rateLimitWindow: Duration(seconds: rateLimitWindowSeconds),
+          maxRequestsPerIp: rateLimitMaxRequestsPerIp,
+          maxRequestsPerUser: rateLimitMaxRequestsPerUser,
+          maxAuthRequestsPerIp: rateLimitAuthMaxRequestsPerIp,
+          maxAuthRequestsPerUser: rateLimitAuthMaxRequestsPerUser,
+          maxMarketplaceReadRequestsPerIp: rateLimitMarketplaceReadPerIp,
+          maxMarketplaceReadRequestsPerUser: rateLimitMarketplaceReadPerUser,
+          maxMarketplaceWriteRequestsPerIp: rateLimitMarketplaceWritePerIp,
+          maxMarketplaceWriteRequestsPerUser: rateLimitMarketplaceWritePerUser,
+          maxWebhookRequestsPerIp: rateLimitWebhookPerIp,
+          maxWebhookRequestsPerUser: rateLimitWebhookPerUser,
+          maxAdminRequestsPerIp: rateLimitAdminPerIp,
+          maxAdminRequestsPerUser: rateLimitAdminPerUser,
+          trustProxyHeaders: trustProxyHeaders,
+          maxRequestBodyBytes: requestMaxBodyBytes,
+          enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,
+          runtimeConfigSnapshot: runtimeConfigSnapshot,
+          postgresProvider: postgresProvider,
+          authCredentialsStore: authCredentialsStore,
+          phoneAuthStore: phoneAuthStore,
+          rideRequestMetadataStore: rideRequestMetadataStore,
+          operationalRecordStore: operationalRecordStore,
+          environmentMap: env,
+          redisClient: redisClient,
+          queueJobRegistry: queueJobRegistry,
+          queueJobProcessor: queueJobProcessor,
+        ).buildHandler();
+        stdout.writeln(
+          'Hail-O startup: env=$environment db_mode=${config.dbMode.name} schema=${config.dbSchema} migration_head=$migrationHeadVersion metrics_public=$metricsPublic sentry_smoke_endpoint=$enableSentrySmokeEndpoint db_pool=$dbPoolSize db_timeout_ms=$dbQueryTimeoutMs idle_timeout_s=$requestIdleTimeoutSeconds max_body_bytes=$requestMaxBodyBytes',
+        );
+        stdout.writeln(
+          'Rate limit config: enabled=$rateLimitEnabled window_sec=$rateLimitWindowSeconds per_ip=$rateLimitMaxRequestsPerIp per_user=$rateLimitMaxRequestsPerUser auth_burst=$rateLimitAuthMaxRequestsPerIp auth_user=$rateLimitAuthMaxRequestsPerUser marketplace_read_ip=$rateLimitMarketplaceReadPerIp marketplace_read_user=$rateLimitMarketplaceReadPerUser marketplace_write_ip=$rateLimitMarketplaceWritePerIp marketplace_write_user=$rateLimitMarketplaceWritePerUser webhook_ip=$rateLimitWebhookPerIp webhook_user=$rateLimitWebhookPerUser admin_ip=$rateLimitAdminPerIp admin_user=$rateLimitAdminPerUser trust_proxy_headers=$trustProxyHeaders',
+        );
+        stderr.writeln(
+          'BOOTSTRAP: initialization complete; switching to real handler',
+        );
+        currentHandler = handler;
+
         if (queueJobProcessor != null) {
           unawaited(
             queueJobProcessor.run().catchError((Object error, StackTrace _) {
@@ -434,9 +453,13 @@ Future<void> main() async {
         for (final subscription in signalSubscriptions) {
           await subscription.cancel();
         }
+      } catch (error) {
+        queueJobProcessor?.stop();
+        await server.close(force: true);
+        rethrow;
       } finally {
         queueJobProcessor?.stop();
-        await redisManager.close();
+        await redisManager?.close();
         await DbProvider.instance.close();
       }
     },
@@ -515,7 +538,11 @@ Future<void> _verifyBindContract({required int port}) async {
 }
 
 Future<HttpServer> _defaultServerBinder(String host, int port) {
-  return HttpServer.bind(host, port);
+  final normalizedHost = host.trim();
+  if (normalizedHost.isEmpty || normalizedHost == '0.0.0.0') {
+    return HttpServer.bind(InternetAddress.anyIPv4, port);
+  }
+  return HttpServer.bind(normalizedHost, port);
 }
 
 void _defaultServeRequests(HttpServer server, Handler handler) {
@@ -545,4 +572,44 @@ class _ServerBindFailure implements Exception {
 
   @override
   String toString() => 'ServerBindFailure($error)';
+}
+
+Handler _bootstrapStartupHandler() {
+  return (Request request) {
+    final method = request.method.toUpperCase();
+    final path = request.url.path.trim();
+    final isHealthPath = path == 'api/healthz' || path == 'healthz';
+    if ((method == 'GET' || method == 'HEAD') && isHealthPath) {
+      final payload = <String, Object?>{
+        'ok': true,
+        'service': 'hail-o-backend',
+        'status': 'starting',
+      };
+      return Response.ok(
+        method == 'HEAD' ? '' : jsonEncode(payload),
+        headers: const <String, String>{'content-type': 'application/json'},
+      );
+    }
+
+    return Response.notFound(
+      method == 'HEAD' ? '' : 'Not Found',
+      headers: const <String, String>{'content-type': 'text/plain'},
+    );
+  };
+}
+
+String _resolveBindHost({
+  required String environment,
+  required String requestedHost,
+}) {
+  final normalizedRequested = requestedHost.trim();
+  final defaultHost = normalizedRequested.isEmpty
+      ? '0.0.0.0'
+      : normalizedRequested;
+  final normalizedEnvironment = environment.trim().toLowerCase();
+  if (normalizedEnvironment == 'production' ||
+      normalizedEnvironment == 'prod') {
+    return '0.0.0.0';
+  }
+  return defaultHost;
 }
