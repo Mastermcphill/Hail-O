@@ -21,8 +21,11 @@ class TokenStorage {
     String? refreshToken,
   }) async {
     final writes = <Future<void>>[saveToken(token), saveRole(role)];
-    if ((refreshToken ?? '').trim().isNotEmpty) {
-      writes.add(saveRefreshToken(refreshToken!.trim()));
+    final normalizedRefreshToken = (refreshToken ?? '').trim();
+    if (normalizedRefreshToken.isNotEmpty) {
+      writes.add(saveRefreshToken(normalizedRefreshToken));
+    } else {
+      writes.add(deleteRefreshToken());
     }
     await Future.wait<void>(writes);
   }

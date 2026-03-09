@@ -8,6 +8,7 @@ import '../../infra/audit_logger.dart';
 import '../../infra/redis_client.dart';
 import '../../infra/request_context.dart';
 import '../../infra/token_service.dart';
+import '../../server/client_ip.dart';
 import '../../server/http_utils.dart';
 import 'phone_auth_service.dart';
 
@@ -171,12 +172,14 @@ class AuthController {
     int otpVerifyLimitPerIp = 12,
     int otpVerifyLimitPerPhone = 8,
     RedisQueueClient? redisClient,
+    bool trustProxyHeaders = true,
     DateTime Function()? nowUtc,
   }) : _authService = authService,
        _tokenService = tokenService,
        _phoneAuthService = phoneAuthService,
        _auditLogger = auditLogger ?? AuditLogger(),
        _analyticsEventStore = analyticsEventStore,
+       _trustProxyHeaders = trustProxyHeaders,
        _otpRateLimiter = phoneAuthService == null
            ? null
            : _OtpRateLimiter(
@@ -194,6 +197,7 @@ class AuthController {
   final PhoneAuthService? _phoneAuthService;
   final AuditLogger _auditLogger;
   final AnalyticsEventStore? _analyticsEventStore;
+  final bool _trustProxyHeaders;
   final _OtpRateLimiter? _otpRateLimiter;
 
   Router get router {
@@ -347,7 +351,10 @@ class AuthController {
     final limiter = _otpRateLimiter;
     if (limiter != null &&
         !await limiter.allowOtpRequest(
-          clientIp: _extractClientIp(request),
+          clientIp: resolveClientIp(
+            request,
+            trustProxyHeaders: _trustProxyHeaders,
+          ),
           phoneE164: phoneE164,
         )) {
       _auditLogger.authAttempt(
@@ -410,7 +417,10 @@ class AuthController {
     final limiter = _otpRateLimiter;
     if (limiter != null &&
         !await limiter.allowOtpVerify(
-          clientIp: _extractClientIp(request),
+          clientIp: resolveClientIp(
+            request,
+            trustProxyHeaders: _trustProxyHeaders,
+          ),
           phoneE164: phoneE164,
         )) {
       _auditLogger.authAttempt(
@@ -499,17 +509,5 @@ class AuthController {
       return UserRole.fleetOwner;
     }
     return UserRole.rider;
-  }
-
-  String _extractClientIp(Request request) {
-    final forwarded = (request.headers['x-forwarded-for'] ?? '').trim();
-    if (forwarded.isNotEmpty) {
-      return forwarded.split(',').first.trim();
-    }
-    final realIp = (request.headers['x-real-ip'] ?? '').trim();
-    if (realIp.isNotEmpty) {
-      return realIp;
-    }
-    return 'unknown';
   }
 }

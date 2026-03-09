@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
@@ -354,7 +354,58 @@ void main() {
   });
 
   group('cors policy middleware', () {
-    test('allows configured origin and denies unknown origin', () async {
+    test(
+      'allows configured GET and POST origin traffic and denies unknown origin',
+      () async {
+        final handler = Pipeline()
+            .addMiddleware(
+              corsPolicyMiddleware(
+                allowedOrigins: const <String>{'https://app.hailo.test'},
+              ),
+            )
+            .addHandler((request) async => Response.ok('ok'));
+
+        final allowed = await handler(
+          Request(
+            'GET',
+            Uri.parse('http://localhost/health'),
+            headers: const <String, String>{'origin': 'https://app.hailo.test'},
+          ),
+        );
+        final allowedPost = await handler(
+          Request(
+            'POST',
+            Uri.parse('http://localhost/health'),
+            headers: const <String, String>{'origin': 'https://app.hailo.test'},
+            body: '{}',
+          ),
+        );
+        final denied = await handler(
+          Request(
+            'GET',
+            Uri.parse('http://localhost/health'),
+            headers: const <String, String>{'origin': 'https://evil.example'},
+          ),
+        );
+
+        expect(allowed.statusCode, 200);
+        expect(
+          allowed.headers['access-control-allow-origin'],
+          'https://app.hailo.test',
+        );
+        expect(allowedPost.statusCode, 200);
+        expect(
+          allowedPost.headers['access-control-allow-origin'],
+          'https://app.hailo.test',
+        );
+        expect(denied.statusCode, 403);
+        final body =
+            jsonDecode(await denied.readAsString()) as Map<String, dynamic>;
+        expect(body['error_code'], 'CORS_ORIGIN_DENIED');
+      },
+    );
+
+    test('OPTIONS preflight for PATCH succeeds with X-Request-ID', () async {
       final handler = Pipeline()
           .addMiddleware(
             corsPolicyMiddleware(
@@ -363,31 +414,72 @@ void main() {
           )
           .addHandler((request) async => Response.ok('ok'));
 
-      final allowed = await handler(
+      final response = await handler(
         Request(
-          'GET',
-          Uri.parse('http://localhost/health'),
-          headers: const <String, String>{'origin': 'https://app.hailo.test'},
-        ),
-      );
-      final denied = await handler(
-        Request(
-          'GET',
-          Uri.parse('http://localhost/health'),
-          headers: const <String, String>{'origin': 'https://evil.example'},
+          'OPTIONS',
+          Uri.parse('http://localhost/marketplace/purchases/123/seats'),
+          headers: const <String, String>{
+            'origin': 'https://app.hailo.test',
+            'access-control-request-method': 'PATCH',
+            'access-control-request-headers': 'x-request-id, content-type',
+          },
         ),
       );
 
-      expect(allowed.statusCode, 200);
+      expect(response.statusCode, 204);
       expect(
-        allowed.headers['access-control-allow-origin'],
+        response.headers['access-control-allow-origin'],
         'https://app.hailo.test',
       );
-      expect(denied.statusCode, 403);
-      final body =
-          jsonDecode(await denied.readAsString()) as Map<String, dynamic>;
-      expect(body['error_code'], 'CORS_ORIGIN_DENIED');
+      expect(
+        response.headers['access-control-allow-methods'],
+        contains('PATCH'),
+      );
+      expect(response.headers['access-control-allow-methods'], contains('GET'));
+      expect(
+        response.headers['access-control-allow-methods'],
+        contains('POST'),
+      );
+      expect(
+        response.headers['access-control-allow-headers'],
+        contains('X-Request-ID'),
+      );
     });
+
+    test(
+      'OPTIONS preflight for DELETE succeeds with X-Idempotency-Key',
+      () async {
+        final handler = Pipeline()
+            .addMiddleware(
+              corsPolicyMiddleware(
+                allowedOrigins: const <String>{'https://app.hailo.test'},
+              ),
+            )
+            .addHandler((request) async => Response.ok('ok'));
+
+        final response = await handler(
+          Request(
+            'OPTIONS',
+            Uri.parse('http://localhost/marketplace/coupons'),
+            headers: const <String, String>{
+              'origin': 'https://app.hailo.test',
+              'access-control-request-method': 'DELETE',
+              'access-control-request-headers': 'x-idempotency-key',
+            },
+          ),
+        );
+
+        expect(response.statusCode, 204);
+        expect(
+          response.headers['access-control-allow-methods'],
+          contains('DELETE'),
+        );
+        expect(
+          response.headers['access-control-allow-headers'],
+          contains('X-Idempotency-Key'),
+        );
+      },
+    );
   });
 
   group('security headers middleware', () {

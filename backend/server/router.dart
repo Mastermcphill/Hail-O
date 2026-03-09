@@ -65,6 +65,7 @@ Handler buildApiRouter({
   required Map<String, Object?> buildInfo,
   required RequestMetrics requestMetrics,
   required Map<String, Object?> runtimeConfigSnapshot,
+  bool trustProxyHeaders = true,
   bool enableSentrySmokeEndpoint = false,
   PostgresProvider? postgresProvider,
   Map<String, String> environmentMap = const <String, String>{},
@@ -155,6 +156,7 @@ Handler buildApiRouter({
             defaultValue: 8,
           ),
           redisClient: redisClient,
+          trustProxyHeaders: trustProxyHeaders,
         );
   final autosaveExitFeeRate =
       double.tryParse((env['AUTOSAVE_EXIT_FEE_RATE'] ?? '0.02').trim()) ?? 0.02;

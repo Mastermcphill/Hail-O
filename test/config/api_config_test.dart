@@ -71,4 +71,35 @@ void main() {
       expect(prod, 'https://tri-o-fliptrybe.onrender.com');
     });
   });
+
+  group('ApiConfig.resolveMockModeFor', () {
+    test('prod defaults to mock disabled', () {
+      final mockMode = ApiConfig.resolveMockModeFor(
+        environment: HailoEnvironment.prod,
+      );
+      expect(mockMode, isFalse);
+    });
+
+    test('staging defaults to mock disabled', () {
+      final mockMode = ApiConfig.resolveMockModeFor(
+        environment: HailoEnvironment.staging,
+      );
+      expect(mockMode, isFalse);
+    });
+
+    test('dev defaults to mock disabled', () {
+      final mockMode = ApiConfig.resolveMockModeFor(
+        environment: HailoEnvironment.dev,
+      );
+      expect(mockMode, isFalse);
+    });
+
+    test('explicit override enables mock mode outside prod', () {
+      final mockMode = ApiConfig.resolveMockModeFor(
+        environment: HailoEnvironment.dev,
+        mockModeOverride: 'true',
+      );
+      expect(mockMode, isTrue);
+    });
+  });
 }

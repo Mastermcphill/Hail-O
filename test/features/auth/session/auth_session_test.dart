@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hailo_core/core/api/api_client.dart';
+import 'package:hailo_core/core/api/api_errors.dart';
 import 'package:hailo_core/core/storage/token_storage.dart';
 import 'package:hailo_core/features/auth/session/auth_session.dart';
 import 'package:http/http.dart' as http;
@@ -61,6 +62,90 @@ void main() {
       expect(await storage.readRole(), 'rider');
     });
 
+    test(
+      'password login clears prior OTP refresh token and blocks stale refresh reuse',
+      () async {
+        final storage = InMemoryTokenStorage();
+        var refreshCalls = 0;
+        final apiClient = ApiClient(
+          tokenStorage: storage,
+          httpClient: MockClient((request) async {
+            if (request.url.path == '/auth/otp/verify') {
+              return http.Response(
+                jsonEncode(<String, Object?>{
+                  'ok': true,
+                  'access_token': 'otp-access-token-a',
+                  'refresh_token': 'otp-refresh-token-a',
+                  'user': <String, Object?>{'role': 'rider'},
+                }),
+                200,
+                headers: <String, String>{'content-type': 'application/json'},
+              );
+            }
+            if (request.url.path == '/auth/login') {
+              return http.Response(
+                jsonEncode(<String, Object?>{
+                  'ok': true,
+                  'token': 'password-login-token-b',
+                  'role': 'driver',
+                }),
+                200,
+                headers: <String, String>{'content-type': 'application/json'},
+              );
+            }
+            if (request.url.path == '/auth/token/refresh') {
+              refreshCalls += 1;
+              return http.Response(
+                jsonEncode(<String, Object?>{
+                  'ok': true,
+                  'access_token': 'unexpected-refresh-token',
+                }),
+                200,
+                headers: <String, String>{'content-type': 'application/json'},
+              );
+            }
+            if (request.url.path == '/protected') {
+              return http.Response(
+                jsonEncode(<String, Object?>{
+                  'ok': false,
+                  'code': 'unauthorized',
+                  'message': 'expired',
+                }),
+                401,
+                headers: <String, String>{'content-type': 'application/json'},
+              );
+            }
+            return http.Response('{}', 404);
+          }),
+        );
+        final session = AuthSession(
+          tokenStorage: storage,
+          apiClient: apiClient,
+        );
+
+        await session.verifyOtp(phoneE164: '+15550000001', code: '123456');
+        expect(await storage.readRefreshToken(), 'otp-refresh-token-a');
+
+        await session.login('account-b@example.com', 'password123');
+
+        expect(session.roleNormalized, 'driver');
+        expect(await storage.readToken(), 'password-login-token-b');
+        expect(await storage.readRefreshToken(), isNull);
+
+        await expectLater(
+          () => apiClient.get('/protected'),
+          throwsA(
+            isA<ApiException>().having(
+              (error) => error.statusCode,
+              'statusCode',
+              401,
+            ),
+          ),
+        );
+        expect(refreshCalls, 0);
+      },
+    );
+
     test('requireAdmin prevents non-admin login state mutation', () async {
       final storage = InMemoryTokenStorage();
       final apiClient = ApiClient(
@@ -97,7 +182,11 @@ void main() {
 
     test('logout clears session state and storage', () async {
       final storage = InMemoryTokenStorage();
-      await storage.saveAuth(token: 'active-token', role: 'driver');
+      await storage.saveAuth(
+        token: 'active-token',
+        role: 'driver',
+        refreshToken: 'refresh-token',
+      );
       final apiClient = ApiClient(
         tokenStorage: storage,
         httpClient: MockClient((_) async => http.Response('{}', 200)),
@@ -112,6 +201,7 @@ void main() {
       expect(session.token, isNull);
       expect(await storage.readToken(), isNull);
       expect(await storage.readRole(), isNull);
+      expect(await storage.readRefreshToken(), isNull);
     });
 
     test('init clears expired token and role', () async {
@@ -203,8 +293,11 @@ class InMemoryTokenStorage extends TokenStorage {
   }) async {
     await saveToken(token);
     await saveRole(role);
-    if ((refreshToken ?? '').trim().isNotEmpty) {
-      await saveRefreshToken(refreshToken!);
+    final normalizedRefreshToken = (refreshToken ?? '').trim();
+    if (normalizedRefreshToken.isNotEmpty) {
+      await saveRefreshToken(normalizedRefreshToken);
+    } else {
+      await deleteRefreshToken();
     }
   }
 

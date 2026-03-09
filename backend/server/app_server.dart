@@ -120,6 +120,7 @@ class AppServer {
       dbHealthCheck: dbHealthCheck,
       buildInfo: buildInfo,
       requestMetrics: requestMetrics,
+      trustProxyHeaders: trustProxyHeaders,
       metricsPublic: metricsPublic,
       runtimeConfigSnapshot: runtimeConfigSnapshot,
       enableSentrySmokeEndpoint: enableSentrySmokeEndpoint,

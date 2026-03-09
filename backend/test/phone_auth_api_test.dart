@@ -173,6 +173,188 @@ void main() {
     expect(body['error_code'], 'RATE_LIMITED');
   });
 
+  test(
+    'OTP request throttle ignores spoofed X-Forwarded-For when trust_proxy_headers=false',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() => db.close());
+      final handler = _buildHandler(
+        db,
+        trustProxyHeaders: false,
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'OTP_DEV_BYPASS': 'true',
+          'OTP_DEV_BYPASS_CODE': '123456',
+          'OTP_RATE_LIMIT_WINDOW_SECONDS': '600',
+          'OTP_REQUEST_LIMIT_PER_IP': '1',
+          'OTP_REQUEST_LIMIT_PER_PHONE': '50',
+        },
+      );
+
+      final first = await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551231001'},
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+      );
+      final second = await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551231002'},
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 429);
+    },
+  );
+
+  test(
+    'OTP request throttle uses forwarded IP when trust_proxy_headers=true',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() => db.close());
+      final handler = _buildHandler(
+        db,
+        trustProxyHeaders: true,
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'OTP_DEV_BYPASS': 'true',
+          'OTP_DEV_BYPASS_CODE': '123456',
+          'OTP_RATE_LIMIT_WINDOW_SECONDS': '600',
+          'OTP_REQUEST_LIMIT_PER_IP': '1',
+          'OTP_REQUEST_LIMIT_PER_PHONE': '50',
+        },
+      );
+
+      final first = await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551232001'},
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+      );
+      final second = await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551232002'},
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 200);
+    },
+  );
+
+  test(
+    'OTP verify throttle ignores spoofed X-Forwarded-For when trust_proxy_headers=false',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() => db.close());
+      final handler = _buildHandler(
+        db,
+        trustProxyHeaders: false,
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'OTP_DEV_BYPASS': 'true',
+          'OTP_DEV_BYPASS_CODE': '123456',
+          'OTP_RATE_LIMIT_WINDOW_SECONDS': '600',
+          'OTP_REQUEST_LIMIT_PER_IP': '50',
+          'OTP_REQUEST_LIMIT_PER_PHONE': '50',
+          'OTP_VERIFY_LIMIT_PER_IP': '1',
+          'OTP_VERIFY_LIMIT_PER_PHONE': '50',
+        },
+      );
+
+      await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551233001'},
+      );
+      await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551233002'},
+      );
+
+      final first = await _postJson(
+        handler,
+        '/auth/otp/verify',
+        body: const <String, Object?>{
+          'phone_e164': '+15551233001',
+          'code': '123456',
+        },
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+      );
+      final second = await _postJson(
+        handler,
+        '/auth/otp/verify',
+        body: const <String, Object?>{
+          'phone_e164': '+15551233002',
+          'code': '123456',
+        },
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 429);
+    },
+  );
+
+  test(
+    'OTP verify throttle uses forwarded IP when trust_proxy_headers=true',
+    () async {
+      final db = await HailODatabase().openInMemory();
+      addTearDown(() => db.close());
+      final handler = _buildHandler(
+        db,
+        trustProxyHeaders: true,
+        environmentMap: const <String, String>{
+          'ENV': 'test',
+          'OTP_DEV_BYPASS': 'true',
+          'OTP_DEV_BYPASS_CODE': '123456',
+          'OTP_RATE_LIMIT_WINDOW_SECONDS': '600',
+          'OTP_REQUEST_LIMIT_PER_IP': '50',
+          'OTP_REQUEST_LIMIT_PER_PHONE': '50',
+          'OTP_VERIFY_LIMIT_PER_IP': '1',
+          'OTP_VERIFY_LIMIT_PER_PHONE': '50',
+        },
+      );
+
+      await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551234001'},
+      );
+      await _postJson(
+        handler,
+        '/auth/otp/request',
+        body: const <String, Object?>{'phone_e164': '+15551234002'},
+      );
+
+      final first = await _postJson(
+        handler,
+        '/auth/otp/verify',
+        body: const <String, Object?>{
+          'phone_e164': '+15551234001',
+          'code': '123456',
+        },
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.10'},
+      );
+      final second = await _postJson(
+        handler,
+        '/auth/otp/verify',
+        body: const <String, Object?>{
+          'phone_e164': '+15551234002',
+          'code': '123456',
+        },
+        headers: const <String, String>{'x-forwarded-for': '198.51.100.11'},
+      );
+
+      expect(first.statusCode, 200);
+      expect(second.statusCode, 200);
+    },
+  );
+
   test('refresh works and revoked token fails', () async {
     final db = await HailODatabase().openInMemory();
     addTearDown(() => db.close());
@@ -223,6 +405,7 @@ void main() {
 
 Handler _buildHandler(
   Database db, {
+  bool trustProxyHeaders = true,
   Map<String, String> environmentMap = const <String, String>{
     'ENV': 'test',
     'OTP_DEV_BYPASS': 'true',
@@ -240,6 +423,7 @@ Handler _buildHandler(
     authCredentialsStore: SqliteAuthCredentialsStore(db),
     rideRequestMetadataStore: SqliteRideRequestMetadataStore(db),
     operationalRecordStore: const SqliteOperationalRecordStore(),
+    trustProxyHeaders: trustProxyHeaders,
     environmentMap: environmentMap,
   ).buildHandler();
 }
@@ -248,11 +432,12 @@ Future<Response> _postJson(
   Handler handler,
   String path, {
   required Map<String, Object?> body,
+  Map<String, String> headers = const <String, String>{},
 }) async {
   final request = shelf.Request(
     'POST',
     Uri.parse('http://localhost$path'),
-    headers: const <String, String>{'content-type': 'application/json'},
+    headers: <String, String>{'content-type': 'application/json', ...headers},
     body: jsonEncode(body),
   );
   return handler(request);

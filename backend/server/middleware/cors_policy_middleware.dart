@@ -15,12 +15,21 @@ Set<String> parseAllowedOrigins(String? value) {
 
 Middleware corsPolicyMiddleware({
   required Set<String> allowedOrigins,
-  Set<String> allowedMethods = const <String>{'GET', 'POST', 'OPTIONS'},
+  Set<String> allowedMethods = const <String>{
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+  },
   Set<String> allowedHeaders = const <String>{
     'Authorization',
-    'Idempotency-Key',
-    'X-Trace-Id',
     'Content-Type',
+    'Idempotency-Key',
+    'X-Idempotency-Key',
+    'X-Request-ID',
+    'X-Trace-ID',
   },
 }) {
   final methodsHeader = allowedMethods.join(', ');

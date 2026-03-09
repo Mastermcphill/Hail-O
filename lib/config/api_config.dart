@@ -35,19 +35,10 @@ class ApiConfig {
   static HailoEnvironment get environment => _resolveEnvironment();
   static String get environmentName => environment.name;
 
-  static bool get mockMode {
-    if (environment == HailoEnvironment.prod) {
-      return false;
-    }
-    final override = _mockModeOverride.trim().toLowerCase();
-    if (override == 'true') {
-      return true;
-    }
-    if (override == 'false') {
-      return false;
-    }
-    return environment != HailoEnvironment.prod;
-  }
+  static bool get mockMode => resolveMockModeFor(
+    environment: environment,
+    mockModeOverride: _mockModeOverride,
+  );
 
   static String get baseUrl {
     const baseOverride = String.fromEnvironment('BASE_URL', defaultValue: '');
@@ -143,6 +134,24 @@ class ApiConfig {
             return _developmentFallbackUrl;
         }
     }
+  }
+
+  @visibleForTesting
+  static bool resolveMockModeFor({
+    required HailoEnvironment environment,
+    String mockModeOverride = '',
+  }) {
+    if (environment == HailoEnvironment.prod) {
+      return false;
+    }
+    final normalizedOverride = mockModeOverride.trim().toLowerCase();
+    if (normalizedOverride == 'true') {
+      return true;
+    }
+    if (normalizedOverride == 'false') {
+      return false;
+    }
+    return false;
   }
 
   static String _normalize(String value) {

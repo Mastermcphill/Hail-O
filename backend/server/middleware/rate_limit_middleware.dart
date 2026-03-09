@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:shelf/shelf.dart';
 
 import '../../infra/redis_client.dart';
 import '../../infra/request_context.dart';
+import '../client_ip.dart';
 import '../http_utils.dart';
 
 typedef NowProvider = DateTime Function();
@@ -71,7 +70,7 @@ Middleware rateLimitMiddleware({
 
       final currentUtc = now();
       final userId = request.requestContext.userId?.trim() ?? '';
-      final ipKey = _extractClientIp(
+      final ipKey = resolveClientIp(
         request,
         trustProxyHeaders: trustProxyHeaders,
       );
@@ -203,26 +202,4 @@ String _canonicalPath(String path) {
     return trimmed.substring(4);
   }
   return trimmed;
-}
-
-String _extractClientIp(Request request, {required bool trustProxyHeaders}) {
-  if (trustProxyHeaders) {
-    final forwarded = request.headers['x-forwarded-for']?.trim() ?? '';
-    if (forwarded.isNotEmpty) {
-      return forwarded.split(',').first.trim();
-    }
-    final realIp = request.headers['x-real-ip']?.trim() ?? '';
-    if (realIp.isNotEmpty) {
-      return realIp;
-    }
-  }
-
-  final connectionInfo = request.context['shelf.io.connection_info'];
-  if (connectionInfo is HttpConnectionInfo) {
-    final address = connectionInfo.remoteAddress.address.trim();
-    if (address.isNotEmpty) {
-      return address;
-    }
-  }
-  return 'unknown';
 }
