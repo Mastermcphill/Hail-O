@@ -6,9 +6,8 @@ class ApiConfig {
   static const String _developmentAndroidEmulatorUrl = 'http://10.0.2.2:8080';
   static const String _developmentIosSimulatorUrl = 'http://localhost:8080';
   static const String _developmentFallbackUrl = 'http://localhost:8080';
-  static const String _stagingUrl =
-      'https://staging-tri-o-fliptrybe.onrender.com';
-  static const String _productionUrl = 'https://tri-o-fliptrybe.onrender.com';
+  static const String _stagingUrl = 'https://hail-o-api-staging.onrender.com';
+  static const String _productionUrl = 'https://hail-o-api.onrender.com';
 
   static const bool useProduction = bool.fromEnvironment(
     'HAILO_USE_PROD',

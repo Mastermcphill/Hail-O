@@ -67,8 +67,8 @@ void main() {
         isWeb: false,
         targetPlatform: TargetPlatform.android,
       );
-      expect(staging, 'https://staging-tri-o-fliptrybe.onrender.com');
-      expect(prod, 'https://tri-o-fliptrybe.onrender.com');
+      expect(staging, 'https://hail-o-api-staging.onrender.com');
+      expect(prod, 'https://hail-o-api.onrender.com');
     });
   });
 
