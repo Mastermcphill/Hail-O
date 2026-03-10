@@ -30,6 +30,7 @@ import '../modules/admin/admin_controller.dart';
 import '../modules/admin/admin_users_controller.dart';
 import '../modules/auth/auth_credentials_store.dart';
 import '../modules/auth/auth_controller.dart';
+import '../modules/auth/postgres_auth_service.dart';
 import '../modules/auth/phone_auth_service.dart';
 import '../modules/auth/phone_auth_store.dart';
 import '../modules/auth/sqlite_phone_auth_store.dart';
@@ -96,9 +97,11 @@ Handler buildApiRouter({
     postgresProvider: postgresProvider,
   );
 
-  final authService = db == null
-      ? null
-      : AuthService(db, externalStore: authCredentialsStore);
+  final authService = db != null
+      ? AuthService(db, externalStore: authCredentialsStore)
+      : postgresProvider != null
+      ? PostgresAuthService(postgresProvider)
+      : null;
   final resolvedPhoneAuthStore =
       phoneAuthStore ?? (db == null ? null : SqlitePhoneAuthStore(db));
   final otpProviderConfigured = (env['OTP_PROVIDER'] ?? '').trim().isNotEmpty;

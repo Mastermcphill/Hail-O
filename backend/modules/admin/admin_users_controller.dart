@@ -8,12 +8,12 @@ import '../../server/http_utils.dart';
 
 class AdminUsersController {
   AdminUsersController({
-    required AuthService authService,
+    required AuthAccountService authService,
     AuditLogger? auditLogger,
   }) : _authService = authService,
        _auditLogger = auditLogger ?? AuditLogger();
 
-  final AuthService _authService;
+  final AuthAccountService _authService;
   final AuditLogger _auditLogger;
 
   Future<Response> createUser(Request request) async {

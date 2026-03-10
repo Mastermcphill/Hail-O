@@ -161,7 +161,7 @@ class _OtpRateLimiter {
 
 class AuthController {
   AuthController({
-    AuthService? authService,
+    AuthAccountService? authService,
     required TokenService tokenService,
     PhoneAuthService? phoneAuthService,
     AuditLogger? auditLogger,
@@ -192,7 +192,7 @@ class AuthController {
                nowUtc: nowUtc,
              );
 
-  final AuthService? _authService;
+  final AuthAccountService? _authService;
   final TokenService _tokenService;
   final PhoneAuthService? _phoneAuthService;
   final AuditLogger _auditLogger;

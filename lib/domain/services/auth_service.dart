@@ -53,7 +53,24 @@ abstract class AuthCredentialsExternalStore {
   Future<ExternalAuthCredentialRecord?> findByEmail(String email);
 }
 
-class AuthService {
+abstract class AuthAccountService {
+  Future<Map<String, Object?>> register({
+    required String email,
+    required String password,
+    required UserRole role,
+    required String idempotencyKey,
+    String? displayName,
+    RegisterNextOfKinInput? nextOfKin,
+    String? referralCode,
+  });
+
+  Future<Map<String, Object?>> login({
+    required String email,
+    required String password,
+  });
+}
+
+class AuthService implements AuthAccountService {
   AuthService(
     this.db, {
     DateTime Function()? nowUtc,
@@ -72,6 +89,7 @@ class AuthService {
 
   static const String _scopeRegister = 'api.auth.register';
 
+  @override
   Future<Map<String, Object?>> register({
     required String email,
     required String password,
@@ -247,6 +265,7 @@ class AuthService {
     }
   }
 
+  @override
   Future<Map<String, Object?>> login({
     required String email,
     required String password,
