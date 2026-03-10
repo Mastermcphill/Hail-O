@@ -17,7 +17,16 @@ Future<void> main() async {
     );
   }
 
-  final provider = PostgresProvider(databaseUrl, dbSchema: config.dbSchema);
+  final migrationPoolSize =
+      int.tryParse(
+        (Platform.environment['MIGRATION_DB_POOL_SIZE'] ?? '1').trim(),
+      ) ??
+      1;
+  final provider = PostgresProvider(
+    databaseUrl,
+    poolSize: migrationPoolSize,
+    dbSchema: config.dbSchema,
+  );
   try {
     await BackendPostgresMigrator(
       postgresProvider: provider,

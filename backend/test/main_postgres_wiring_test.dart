@@ -11,6 +11,45 @@ import '../main.dart' as backend_main;
 import '../server/app_server.dart';
 
 void main() {
+  test('postgres runtime defaults to a single connection pool', () async {
+    var capturedPoolSize = 0;
+    var postgresCloseCalls = 0;
+    final fakePostgresProvider = _TrackingPostgresProvider(
+      onClose: () => postgresCloseCalls += 1,
+    );
+    final dbProvider = DbProvider.forTesting(
+      sqliteOpener: (_) async => _TrackingSqliteDatabase(onClose: () {}),
+      postgresProviderFactory:
+          (
+            _databaseUrl, {
+            poolSize = 4,
+            dbSchema = 'public',
+            statementTimeoutMs = 10000,
+          }) {
+            capturedPoolSize = poolSize;
+            return fakePostgresProvider;
+          },
+    );
+    final env = const <String, String>{
+      'BACKEND_DB_MODE': 'postgres',
+      'DATABASE_URL': 'postgres://hailo:secret@localhost:5432/hailo',
+    };
+    final config = BackendRuntimeConfig.fromEnvironmentMap(env);
+
+    final runtime = await backend_main.openBackendDatabaseRuntime(
+      config: config,
+      env: env,
+      dbProvider: dbProvider,
+    );
+
+    expect(runtime.usePostgres, isTrue);
+    expect(runtime.dbPoolSize, 1);
+    expect(capturedPoolSize, 1);
+
+    await dbProvider.close();
+    expect(postgresCloseCalls, 1);
+  });
+
   test(
     'postgres main wiring skips sqlite construction and sqlite close',
     () async {

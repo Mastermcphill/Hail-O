@@ -56,7 +56,7 @@ Future<BackendDatabaseRuntime> openBackendDatabaseRuntime({
   final provider = dbProvider ?? DbProvider.instance;
   final dbQueryTimeoutMs =
       int.tryParse((env['DB_QUERY_TIMEOUT_MS'] ?? '10000').trim()) ?? 10000;
-  final dbPoolSize = int.tryParse((env['DB_POOL_SIZE'] ?? '4').trim()) ?? 4;
+  final dbPoolSize = _resolveDbPoolSize(env, usePostgres: config.usePostgres);
   final dbHandle = await provider.open(
     databasePath: config.sqlitePath,
     dbMode: config.dbMode,
@@ -81,6 +81,16 @@ Future<BackendDatabaseRuntime> openBackendDatabaseRuntime({
     sqliteDb: sqliteDb,
     postgresProvider: postgresProvider,
   );
+}
+
+int _resolveDbPoolSize(Map<String, String> env, {required bool usePostgres}) {
+  final defaultPoolSize = usePostgres ? 1 : 4;
+  final configuredValue = (env['DB_POOL_SIZE'] ?? '$defaultPoolSize').trim();
+  final parsedValue = int.tryParse(configuredValue);
+  if (parsedValue == null || parsedValue <= 0) {
+    return defaultPoolSize;
+  }
+  return parsedValue;
 }
 
 Future<void> main() async {

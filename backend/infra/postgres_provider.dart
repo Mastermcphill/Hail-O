@@ -7,9 +7,14 @@ class PostgresProvider {
   PostgresProvider(
     this.databaseUrl, {
     int poolSize = 4,
+    int warmConnections = 1,
     String dbSchema = 'hailo_prod',
     int statementTimeoutMs = 10000,
   }) : _poolSize = poolSize > 0 ? poolSize : 1,
+       _warmConnectionCount = _normalizeWarmConnections(
+         poolSize: poolSize,
+         warmConnections: warmConnections,
+       ),
        dbSchema = _normalizeSchema(dbSchema),
        statementTimeoutMs = statementTimeoutMs > 0 ? statementTimeoutMs : 10000;
 
@@ -17,6 +22,7 @@ class PostgresProvider {
   final String dbSchema;
   final int statementTimeoutMs;
   final int _poolSize;
+  final int _warmConnectionCount;
   late final Pool _pool = Pool(_poolSize);
   final Queue<PostgreSQLConnection> _connectionQueue =
       Queue<PostgreSQLConnection>();
@@ -36,6 +42,19 @@ class PostgresProvider {
     return trimmed;
   }
 
+  static int _normalizeWarmConnections({
+    required int poolSize,
+    required int warmConnections,
+  }) {
+    final normalizedPoolSize = poolSize > 0 ? poolSize : 1;
+    if (warmConnections <= 0) {
+      return 0;
+    }
+    return warmConnections > normalizedPoolSize
+        ? normalizedPoolSize
+        : warmConnections;
+  }
+
   String get _quotedSchema => '"${dbSchema.replaceAll('"', '""')}"';
 
   Future<void> _initialize() async {
@@ -43,7 +62,7 @@ class PostgresProvider {
       return;
     }
 
-    final count = _poolSize;
+    final count = _warmConnectionCount;
     for (var index = 0; index < count; index++) {
       final connection = await _openConnection();
       _allConnections.add(connection);
@@ -84,7 +103,9 @@ class PostgresProvider {
   ) async {
     await _initialize();
     return _pool.withResource(() async {
-      final connection = _connectionQueue.removeFirst();
+      final connection = _connectionQueue.isEmpty
+          ? await _openAndTrackConnection()
+          : _connectionQueue.removeFirst();
       try {
         await connection.execute(
           'SET statement_timeout TO @timeout_ms',
@@ -98,6 +119,12 @@ class PostgresProvider {
         _connectionQueue.addLast(connection);
       }
     });
+  }
+
+  Future<PostgreSQLConnection> _openAndTrackConnection() async {
+    final connection = await _openConnection();
+    _allConnections.add(connection);
+    return connection;
   }
 
   Future<PostgreSQLConnection> open() {

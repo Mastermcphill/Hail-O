@@ -19,6 +19,9 @@ RUN chmod +x /app/backend/entrypoint.sh
 WORKDIR /app/backend
 
 RUN dart pub get
+RUN mkdir -p /app/backend/build
+RUN dart build cli --target bin/server.dart --output /app/backend/build
+RUN chmod +x /app/backend/build/bundle/bin/server
 
 ENV PORT=8080
 

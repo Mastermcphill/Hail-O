@@ -23,6 +23,8 @@ services:
         value: production
       - key: BACKEND_DB_MODE
         value: postgres
+      - key: DB_POOL_SIZE
+        value: "1"
       - key: DB_SCHEMA
         value: hailo_prod
       - key: DATABASE_URL
@@ -51,6 +53,8 @@ services:
         value: staging
       - key: BACKEND_DB_MODE
         value: postgres
+      - key: DB_POOL_SIZE
+        value: "1"
       - key: DB_SCHEMA
         value: hailo_staging
       - key: DATABASE_URL
