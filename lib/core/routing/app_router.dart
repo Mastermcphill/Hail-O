@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../observability/app_observability.dart';
 import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/auth/presentation/admin_login_screen.dart';
@@ -12,13 +11,13 @@ import '../../features/auth/presentation/boot_screen.dart';
 import '../../features/auth/presentation/landing_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
 import '../../features/auth/session/auth_session.dart';
+import '../../features/dispatch/data/dispatch_repository.dart';
+import '../../features/dispatch/ui/dispatch_trip_create_screen.dart';
+import '../../features/dispatch/ui/dispatch_trip_detail_screen.dart';
 import '../../features/driver/driver_home.dart';
 import '../../features/driver/driver_offer_screen.dart';
 import '../../features/driver/driver_ride_ops_screen.dart';
 import '../../features/driver/route_chain_screen.dart';
-import '../../features/dispatch/data/dispatch_repository.dart';
-import '../../features/dispatch/ui/dispatch_trip_create_screen.dart';
-import '../../features/dispatch/ui/dispatch_trip_detail_screen.dart';
 import '../../features/fleet/fleet_home.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/marketplace/marketplace_module.dart';
@@ -31,6 +30,7 @@ import '../../features/marketplace/ui/plan_change_preview_screen.dart';
 import '../../features/marketplace/ui/receipt_screen.dart';
 import '../../features/marketplace/ui/seats_screen.dart';
 import '../../features/marketplace/ui/timeline_screen.dart';
+import '../../features/rider/documents_screen.dart';
 import '../../features/rider/next_of_kin_screen.dart';
 import '../../features/rider/offers_screen.dart';
 import '../../features/rider/paywall_screen.dart';
@@ -39,9 +39,11 @@ import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
 import '../../features/rider/timeline_screen.dart';
-import '../../features/rider/documents_screen.dart';
 import '../../features/settings/about_screen.dart';
+import '../../theme/app_tokens.dart';
+import '../../widgets/premium_ui.dart';
 import '../api/api_client.dart';
+import '../observability/app_observability.dart';
 import 'role_routes.dart';
 
 class AppRouter {
@@ -58,19 +60,38 @@ class AppRouter {
           path: bootPath,
           builder: (context, state) => const BootScreen(),
         ),
-        GoRoute(path: '/', builder: (context, state) => const LandingScreen()),
         GoRoute(
-          path: '/login',
+          path: landingPath,
+          builder: (context, state) => const LandingScreen(),
+        ),
+        GoRoute(
+          path: loginPath,
           builder: (context, state) =>
               LoginScreen(nextPath: state.uri.queryParameters['next']),
         ),
         GoRoute(
-          path: '/signup',
-          builder: (context, state) =>
-              SignupScreen(nextPath: state.uri.queryParameters['next']),
+          path: signupPath,
+          builder: (context, state) => SignupScreen(
+            nextPath: state.uri.queryParameters['next'],
+            accountRole: PublicAccountRole.rider,
+          ),
         ),
         GoRoute(
-          path: '/admin-login',
+          path: driverApplicationPath,
+          builder: (context, state) => SignupScreen(
+            nextPath: state.uri.queryParameters['next'],
+            accountRole: PublicAccountRole.driver,
+          ),
+        ),
+        GoRoute(
+          path: fleetRegistrationPath,
+          builder: (context, state) => SignupScreen(
+            nextPath: state.uri.queryParameters['next'],
+            accountRole: PublicAccountRole.fleetOwner,
+          ),
+        ),
+        GoRoute(
+          path: internalAdminLoginPath,
           builder: (context, state) =>
               AdminLoginScreen(nextPath: state.uri.queryParameters['next']),
         ),
@@ -95,6 +116,18 @@ class AppRouter {
             GoRoute(
               path: '/rider',
               builder: (context, state) => const RiderHome(),
+            ),
+            GoRoute(
+              path: '/rider/trips',
+              builder: (context, state) => const RiderTripsScreen(),
+            ),
+            GoRoute(
+              path: '/rider/safety',
+              builder: (context, state) => const RiderSafetyScreen(),
+            ),
+            GoRoute(
+              path: '/rider/profile',
+              builder: (context, state) => const RiderProfileScreen(),
             ),
             GoRoute(
               path: '/rider/request',
@@ -274,7 +307,19 @@ class AppRouter {
             ),
             GoRoute(
               path: '/driver',
-              builder: (context, state) => DriverHome(apiClient: _apiClient),
+              builder: (context, state) => const DriverHome(),
+            ),
+            GoRoute(
+              path: '/driver/jobs',
+              builder: (context, state) => const DriverJobsScreen(),
+            ),
+            GoRoute(
+              path: '/driver/earnings',
+              builder: (context, state) => const DriverEarningsScreen(),
+            ),
+            GoRoute(
+              path: '/driver/profile',
+              builder: (context, state) => const DriverProfileScreen(),
             ),
             GoRoute(
               path: '/driver/route-chain',
@@ -308,6 +353,18 @@ class AppRouter {
             GoRoute(
               path: '/fleet',
               builder: (context, state) => const FleetHome(),
+            ),
+            GoRoute(
+              path: '/fleet/vehicles',
+              builder: (context, state) => const FleetVehiclesScreen(),
+            ),
+            GoRoute(
+              path: '/fleet/drivers',
+              builder: (context, state) => const FleetDriversScreen(),
+            ),
+            GoRoute(
+              path: '/fleet/operations',
+              builder: (context, state) => const FleetOperationsScreen(),
             ),
             GoRoute(
               path: '/admin',
@@ -367,7 +424,7 @@ class AppRouter {
 
     if (!_authSession.isAuthenticated) {
       if (path == bootPath) {
-        return _recordFirstRouteDecision(path, '/');
+        return _recordFirstRouteDecision(path, landingPath);
       }
       if (isPublicPath(path)) {
         return _recordFirstRouteDecision(path, null);
@@ -425,200 +482,504 @@ class RoleNavigationScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = _navigationItemsForRole(role);
-    final selectedIndex = _selectedIndexForPath(items, currentPath);
+    final normalizedRole = normalizeRole(role);
+    final items = _navigationItemsForRole(normalizedRole);
+    final sectionPath = _navigationSectionPath(currentPath, normalizedRole);
+    final selectedIndex = _selectedIndexForPath(items, sectionPath);
+    final isRootDestination = _isRootDestinationPath(
+      currentPath,
+      normalizedRole,
+    );
+    final showShellChrome = currentPath != '/settings/about';
+    final showBottomNavigation = showShellChrome && items.length > 1;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_titleForPath(currentPath)),
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'About',
-            icon: const Icon(Icons.info_outline),
-            onPressed: () => context.go('/settings/about'),
-          ),
-          IconButton(
-            tooltip: 'Logout',
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await authSession.logout();
-              if (!context.mounted) {
-                return;
-              }
-              context.go('/');
-            },
-          ),
-        ],
-      ),
-      body: child,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
-        onDestinationSelected: (index) {
-          final target = items[index].path;
-          if (isSelectedPath(currentPath, target)) {
-            return;
-          }
-          context.go(target);
-        },
-        destinations: <NavigationDestination>[
-          for (final item in items)
-            NavigationDestination(
-              icon: Icon(item.icon),
-              selectedIcon: Icon(item.icon),
-              label: item.label,
-            ),
-        ],
+    return BrandBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        extendBody: true,
+        appBar: showShellChrome
+            ? AppBar(
+                automaticallyImplyLeading: false,
+                toolbarHeight: 78,
+                titleSpacing: HailoSpacing.lg,
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      _shellEyebrowForRole(normalizedRole),
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        letterSpacing: 1.3,
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(_titleForPath(currentPath)),
+                  ],
+                ),
+                leadingWidth: isRootDestination ? 0 : 76,
+                leading: isRootDestination
+                    ? null
+                    : Padding(
+                        padding: const EdgeInsets.only(left: HailoSpacing.md),
+                        child: IconButton.filledTonal(
+                          tooltip: 'Back',
+                          onPressed: () => _handleBack(context, normalizedRole),
+                          icon: const Icon(Icons.arrow_back_rounded),
+                        ),
+                      ),
+                actions: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(right: HailoSpacing.md),
+                    child: PopupMenuButton<_ShellAction>(
+                      tooltip: 'More',
+                      position: PopupMenuPosition.under,
+                      onSelected: (_ShellAction action) async {
+                        switch (action) {
+                          case _ShellAction.about:
+                            context.go('/settings/about');
+                            break;
+                          case _ShellAction.signOut:
+                            await authSession.logout();
+                            if (!context.mounted) {
+                              return;
+                            }
+                            context.go(landingPath);
+                            break;
+                        }
+                      },
+                      itemBuilder: (context) => <PopupMenuEntry<_ShellAction>>[
+                        if (currentPath != '/settings/about')
+                          const PopupMenuItem<_ShellAction>(
+                            value: _ShellAction.about,
+                            child: ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Icons.info_outline_rounded),
+                              title: Text('About HAIL-O'),
+                            ),
+                          ),
+                        const PopupMenuItem<_ShellAction>(
+                          value: _ShellAction.signOut,
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.logout_rounded),
+                            title: Text('Sign out'),
+                          ),
+                        ),
+                      ],
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          borderRadius: HailoRadii.pill,
+                          border: Border.all(
+                            color: context.hailoTokens.outlineSoft,
+                          ),
+                        ),
+                        child: const Icon(Icons.more_horiz_rounded),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : null,
+        body: SafeArea(top: false, child: child),
+        bottomNavigationBar: showBottomNavigation
+            ? SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(
+                  HailoSpacing.md,
+                  0,
+                  HailoSpacing.md,
+                  HailoSpacing.md,
+                ),
+                child: PremiumPanel(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: HailoSpacing.xs,
+                    vertical: HailoSpacing.xs,
+                  ),
+                  borderRadius: HailoRadii.xl,
+                  child: NavigationBar(
+                    height: 72,
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    selectedIndex: selectedIndex,
+                    onDestinationSelected: (index) {
+                      final target = items[index].path;
+                      if (sectionPath == target) {
+                        return;
+                      }
+                      context.go(target);
+                    },
+                    destinations: <NavigationDestination>[
+                      for (final item in items)
+                        NavigationDestination(
+                          icon: Icon(item.icon),
+                          selectedIcon: Icon(item.selectedIcon ?? item.icon),
+                          label: item.label,
+                        ),
+                    ],
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
+
+  void _handleBack(BuildContext context, String normalizedRole) {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.maybePop();
+      return;
+    }
+    context.go(_fallbackBackPath(currentPath, normalizedRole));
+  }
 }
 
+enum _ShellAction { about, signOut }
+
 class _NavItem {
-  const _NavItem({required this.path, required this.label, required this.icon});
+  const _NavItem({
+    required this.path,
+    required this.label,
+    required this.icon,
+    this.selectedIcon,
+  });
 
   final String path;
   final String label;
   final IconData icon;
+  final IconData? selectedIcon;
 }
 
 List<_NavItem> _navigationItemsForRole(String role) {
-  final items = <_NavItem>[
-    const _NavItem(
-      path: '/health',
-      label: 'Health',
-      icon: Icons.health_and_safety_outlined,
-    ),
-  ];
-
   switch (normalizeRole(role)) {
     case 'driver':
-      items.add(
-        const _NavItem(
+      return const <_NavItem>[
+        _NavItem(
           path: '/driver',
-          label: 'Driver',
-          icon: Icons.local_taxi_outlined,
+          label: 'Home',
+          icon: Icons.dashboard_outlined,
+          selectedIcon: Icons.dashboard_rounded,
         ),
-      );
-      break;
+        _NavItem(
+          path: '/driver/jobs',
+          label: 'Trips',
+          icon: Icons.receipt_long_outlined,
+          selectedIcon: Icons.receipt_long_rounded,
+        ),
+        _NavItem(
+          path: '/driver/earnings',
+          label: 'Earnings',
+          icon: Icons.account_balance_wallet_outlined,
+          selectedIcon: Icons.account_balance_wallet_rounded,
+        ),
+        _NavItem(
+          path: '/driver/profile',
+          label: 'Profile',
+          icon: Icons.person_outline_rounded,
+          selectedIcon: Icons.person_rounded,
+        ),
+      ];
     case 'fleet_owner':
-      items.add(
-        const _NavItem(
+      return const <_NavItem>[
+        _NavItem(
           path: '/fleet',
-          label: 'Fleet',
-          icon: Icons.directions_bus_outlined,
+          label: 'Home',
+          icon: Icons.dashboard_outlined,
+          selectedIcon: Icons.dashboard_rounded,
         ),
-      );
-      break;
+        _NavItem(
+          path: '/fleet/vehicles',
+          label: 'Vehicles',
+          icon: Icons.directions_bus_outlined,
+          selectedIcon: Icons.directions_bus_rounded,
+        ),
+        _NavItem(
+          path: '/fleet/drivers',
+          label: 'Drivers',
+          icon: Icons.groups_outlined,
+          selectedIcon: Icons.groups_rounded,
+        ),
+        _NavItem(
+          path: '/fleet/operations',
+          label: 'Ops',
+          icon: Icons.hub_outlined,
+          selectedIcon: Icons.hub_rounded,
+        ),
+      ];
     case 'admin':
-      items.add(
-        const _NavItem(
+      return const <_NavItem>[
+        _NavItem(
           path: '/admin',
           label: 'Admin',
           icon: Icons.admin_panel_settings_outlined,
+          selectedIcon: Icons.admin_panel_settings_rounded,
         ),
-      );
-      break;
+      ];
     case 'rider':
     default:
-      items.add(
-        const _NavItem(
+      return const <_NavItem>[
+        _NavItem(
           path: '/rider',
-          label: 'Rider',
-          icon: Icons.person_outline,
+          label: 'Home',
+          icon: Icons.home_outlined,
+          selectedIcon: Icons.home_rounded,
         ),
-      );
-      break;
+        _NavItem(
+          path: '/rider/trips',
+          label: 'Trips',
+          icon: Icons.route_outlined,
+          selectedIcon: Icons.route_rounded,
+        ),
+        _NavItem(
+          path: '/rider/safety',
+          label: 'Safety',
+          icon: Icons.shield_outlined,
+          selectedIcon: Icons.shield_rounded,
+        ),
+        _NavItem(
+          path: '/rider/profile',
+          label: 'Profile',
+          icon: Icons.person_outline_rounded,
+          selectedIcon: Icons.person_rounded,
+        ),
+      ];
   }
-  return items;
 }
 
 int _selectedIndexForPath(List<_NavItem> items, String currentPath) {
-  for (var i = 0; i < items.length; i++) {
-    if (isSelectedPath(currentPath, items[i].path)) {
-      return i;
+  for (var index = 0; index < items.length; index++) {
+    if (isSelectedPath(currentPath, items[index].path)) {
+      return index;
     }
   }
   return 0;
 }
 
+String _navigationSectionPath(String currentPath, String role) {
+  switch (normalizeRole(role)) {
+    case 'driver':
+      if (isSelectedPath(currentPath, '/driver/offer') ||
+          isSelectedPath(currentPath, '/driver/ride-ops') ||
+          isSelectedPath(currentPath, '/driver/jobs')) {
+        return '/driver/jobs';
+      }
+      if (isSelectedPath(currentPath, '/driver/earnings')) {
+        return '/driver/earnings';
+      }
+      if (isSelectedPath(currentPath, '/driver/profile') ||
+          isSelectedPath(currentPath, '/driver/route-chain')) {
+        return '/driver/profile';
+      }
+      return '/driver';
+    case 'fleet_owner':
+      if (isSelectedPath(currentPath, '/fleet/vehicles')) {
+        return '/fleet/vehicles';
+      }
+      if (isSelectedPath(currentPath, '/fleet/drivers')) {
+        return '/fleet/drivers';
+      }
+      if (isSelectedPath(currentPath, '/fleet/operations')) {
+        return '/fleet/operations';
+      }
+      return '/fleet';
+    case 'admin':
+      return '/admin';
+    case 'rider':
+    default:
+      if (isSelectedPath(currentPath, '/rider/safety')) {
+        return '/rider/safety';
+      }
+      if (isSelectedPath(currentPath, '/rider/profile') ||
+          isSelectedPath(currentPath, '/rider/documents') ||
+          isSelectedPath(currentPath, '/rider/next-of-kin')) {
+        return '/rider/profile';
+      }
+      if (isSelectedPath(currentPath, '/rider/trips') ||
+          isSelectedPath(currentPath, '/rider/request') ||
+          isSelectedPath(currentPath, '/rider/status') ||
+          isSelectedPath(currentPath, '/rider/offers') ||
+          isSelectedPath(currentPath, '/rider/paywall') ||
+          isSelectedPath(currentPath, '/rider/seats') ||
+          isSelectedPath(currentPath, '/rider/timeline') ||
+          isSelectedPath(currentPath, '/marketplace') ||
+          isSelectedPath(currentPath, '/dispatch')) {
+        return '/rider/trips';
+      }
+      return '/rider';
+  }
+}
+
+bool _isRootDestinationPath(String currentPath, String role) {
+  final sectionPath = _navigationSectionPath(currentPath, role);
+  switch (normalizeRole(role)) {
+    case 'driver':
+      return sectionPath == currentPath &&
+          <String>{
+            '/driver',
+            '/driver/jobs',
+            '/driver/earnings',
+            '/driver/profile',
+          }.contains(currentPath);
+    case 'fleet_owner':
+      return sectionPath == currentPath &&
+          <String>{
+            '/fleet',
+            '/fleet/vehicles',
+            '/fleet/drivers',
+            '/fleet/operations',
+          }.contains(currentPath);
+    case 'admin':
+      return currentPath == '/admin';
+    case 'rider':
+    default:
+      return sectionPath == currentPath &&
+          <String>{
+            '/rider',
+            '/rider/trips',
+            '/rider/safety',
+            '/rider/profile',
+          }.contains(currentPath);
+  }
+}
+
+String _fallbackBackPath(String currentPath, String role) {
+  final normalizedRole = normalizeRole(role);
+  if (currentPath == '/settings/about') {
+    return homeRouteForRole(normalizedRole);
+  }
+  return _navigationSectionPath(currentPath, normalizedRole);
+}
+
+String _shellEyebrowForRole(String role) {
+  switch (normalizeRole(role)) {
+    case 'driver':
+      return 'Driver workspace';
+    case 'fleet_owner':
+      return 'Fleet workspace';
+    case 'admin':
+      return 'Internal only';
+    case 'rider':
+    default:
+      return 'Passenger workspace';
+  }
+}
+
 String _titleForPath(String path) {
-  if (isSelectedPath(path, '/health')) {
-    return 'Health Check';
-  }
   if (isSelectedPath(path, '/rider/request')) {
-    return 'Request Ride';
-  }
-  if (isSelectedPath(path, '/rider/offers')) {
-    return 'Ride Offers';
-  }
-  if (isSelectedPath(path, '/rider/paywall')) {
-    return 'Paywall';
-  }
-  if (isSelectedPath(path, '/rider/seats')) {
-    return 'Seat Selection';
+    return 'Plan your journey';
   }
   if (isSelectedPath(path, '/rider/status')) {
-    return 'Ride Status';
+    return 'Live trip status';
   }
-  if (isSelectedPath(path, '/rider/next-of-kin')) {
-    return 'Next-of-kin';
+  if (isSelectedPath(path, '/rider/offers')) {
+    return 'Ride offers';
   }
-  if (isSelectedPath(path, '/rider/documents')) {
-    return 'Documents';
+  if (isSelectedPath(path, '/rider/paywall')) {
+    return 'Upgrade travel';
+  }
+  if (isSelectedPath(path, '/rider/seats')) {
+    return 'Choose seats';
   }
   if (isSelectedPath(path, '/rider/timeline')) {
-    return 'Timeline';
+    return 'Trip timeline';
+  }
+  if (isSelectedPath(path, '/rider/next-of-kin')) {
+    return 'Emergency contact';
+  }
+  if (isSelectedPath(path, '/rider/documents')) {
+    return 'Travel documents';
   }
   if (isSelectedPath(path, '/dispatch/trips/new')) {
-    return 'Dispatch Create';
+    return 'Create dispatch trip';
   }
   if (isSelectedPath(path, '/dispatch/trips')) {
-    return 'Dispatch Trip';
-  }
-  if (isSelectedPath(path, '/driver/ride-ops')) {
-    return 'Driver Ride Ops';
-  }
-  if (isSelectedPath(path, '/driver/route-chain')) {
-    return 'Route Chain';
-  }
-  if (isSelectedPath(path, '/driver/offer')) {
-    return 'Driver Offer';
-  }
-  if (isSelectedPath(path, '/home')) {
-    return 'Rider';
-  }
-  if (isSelectedPath(path, '/rider')) {
-    return 'Rider';
+    return 'Dispatch trip';
   }
   if (isSelectedPath(path, '/marketplace/offers')) {
-    return 'Marketplace Offers';
+    return 'Travel offers';
   }
   if (isSelectedPath(path, '/marketplace/paywall')) {
-    return 'Marketplace Paywall';
+    return 'Upgrade options';
+  }
+  if (isSelectedPath(path, '/marketplace/seats/manage')) {
+    return 'Manage seats';
   }
   if (isSelectedPath(path, '/marketplace/seats')) {
-    return 'Marketplace Seats';
+    return 'Seat planning';
+  }
+  if (isSelectedPath(path, '/marketplace/receipt')) {
+    return 'Purchase receipt';
+  }
+  if (isSelectedPath(path, '/marketplace/upgrade')) {
+    return 'Preview change';
   }
   if (isSelectedPath(path, '/marketplace/billing')) {
-    return 'Marketplace Billing';
+    return 'Billing';
   }
   if (isSelectedPath(path, '/marketplace/invites')) {
-    return 'Marketplace Invites';
+    return 'Seat invites';
   }
   if (isSelectedPath(path, '/marketplace/timeline')) {
-    return 'Marketplace Timeline';
+    return 'Purchase timeline';
   }
-  if (isSelectedPath(path, '/driver')) {
-    return 'Driver';
+  if (isSelectedPath(path, '/driver/offer')) {
+    return 'Offer on a trip';
   }
-  if (isSelectedPath(path, '/fleet')) {
-    return 'Fleet';
+  if (isSelectedPath(path, '/driver/ride-ops')) {
+    return 'Trip operations';
   }
-  if (isSelectedPath(path, '/admin')) {
-    return 'Admin';
+  if (isSelectedPath(path, '/driver/route-chain')) {
+    return 'Route chain';
+  }
+  if (isSelectedPath(path, '/driver/earnings')) {
+    return 'Earnings';
+  }
+  if (isSelectedPath(path, '/driver/profile')) {
+    return 'Driver profile';
+  }
+  if (isSelectedPath(path, '/driver/jobs')) {
+    return 'Driver trips';
+  }
+  if (isSelectedPath(path, '/fleet/vehicles')) {
+    return 'Fleet vehicles';
+  }
+  if (isSelectedPath(path, '/fleet/drivers')) {
+    return 'Fleet drivers';
+  }
+  if (isSelectedPath(path, '/fleet/operations')) {
+    return 'Fleet operations';
+  }
+  if (isSelectedPath(path, '/health')) {
+    return 'System health';
   }
   if (isSelectedPath(path, '/settings/about')) {
-    return 'About';
+    return 'About HAIL-O';
   }
-  return 'Hail-O Core';
+  if (isSelectedPath(path, '/admin')) {
+    return 'Internal admin';
+  }
+  if (isSelectedPath(path, '/driver')) {
+    return 'Driver command';
+  }
+  if (isSelectedPath(path, '/fleet')) {
+    return 'Fleet command';
+  }
+  if (isSelectedPath(path, '/rider/safety')) {
+    return 'Safety & support';
+  }
+  if (isSelectedPath(path, '/rider/profile')) {
+    return 'Profile';
+  }
+  if (isSelectedPath(path, '/rider/trips')) {
+    return 'Trips';
+  }
+  if (isSelectedPath(path, '/rider') || isSelectedPath(path, '/home')) {
+    return 'Passenger home';
+  }
+  return 'HAIL-O';
 }

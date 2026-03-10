@@ -3,15 +3,18 @@ import 'package:hailo_core/core/routing/role_routes.dart';
 
 void main() {
   group('role routes', () {
-    test('buildAuthRedirectPath routes admin paths to admin-login', () {
-      final redirect = buildAuthRedirectPath(
-        requestedPath: '/admin/users',
-        requestedUri: Uri.parse('/admin/users?tab=security'),
-      );
+    test(
+      'buildAuthRedirectPath routes admin paths to internal admin login',
+      () {
+        final redirect = buildAuthRedirectPath(
+          requestedPath: '/admin/users',
+          requestedUri: Uri.parse('/admin/users?tab=security'),
+        );
 
-      expect(redirect, startsWith('/admin-login?next='));
-      expect(redirect, contains('admin%2Fusers'));
-    });
+        expect(redirect, startsWith('$internalAdminLoginPath?next='));
+        expect(redirect, contains('admin%2Fusers'));
+      },
+    );
 
     test('buildAuthRedirectPath routes non-admin paths to login', () {
       final redirect = buildAuthRedirectPath(
@@ -46,6 +49,11 @@ void main() {
     test('role checks are normalized', () {
       expect(isRoleAllowed('/fleet', 'fleet'), isTrue);
       expect(isRoleAllowed('/admin', 'driver'), isFalse);
+    });
+
+    test('hidden admin auth path is not discoverable in public navigation', () {
+      expect(isPublicPath(internalAdminLoginPath), isTrue);
+      expect(isDiscoverablePublicPath(internalAdminLoginPath), isFalse);
     });
   });
 }

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_tokens.dart';
+import 'premium_ui.dart';
+
 class LoadingOverlay extends StatelessWidget {
   const LoadingOverlay({
     super.key,
@@ -23,24 +26,26 @@ class LoadingOverlay extends StatelessWidget {
         child,
         Positioned.fill(
           child: ColoredBox(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: const Color(0xFF061A2E).withValues(alpha: 0.16),
             child: Center(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: PremiumPanel(
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
                       ),
-                      const SizedBox(width: 12),
-                      Text(message),
+                      const SizedBox(width: HailoSpacing.md),
+                      Expanded(
+                        child: Text(
+                          message,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
                     ],
                   ),
                 ),

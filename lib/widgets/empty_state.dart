@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'premium_ui.dart';
+
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
@@ -22,31 +24,41 @@ class EmptyState extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, size: 52, color: colorScheme.primary),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: textTheme.titleLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              style: textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: PremiumPanel(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(icon, size: 32, color: colorScheme.primary),
               ),
-              textAlign: TextAlign.center,
-            ),
-            if (actionLabel != null && onAction != null) ...<Widget>[
-              const SizedBox(height: 14),
-              FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (actionLabel != null && onAction != null) ...<Widget>[
+                const SizedBox(height: 16),
+                FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

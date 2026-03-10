@@ -1,14 +1,32 @@
 const String bootPath = '/boot';
+const String landingPath = '/';
+const String loginPath = '/login';
+const String signupPath = '/signup';
+const String driverApplicationPath = '/apply/driver';
+const String fleetRegistrationPath = '/apply/fleet';
+const String internalAdminLoginPath = '/internal/auth/admin';
 
 const Set<String> publicAuthPaths = <String>{
-  '/',
-  '/login',
-  '/signup',
-  '/admin-login',
+  landingPath,
+  loginPath,
+  signupPath,
+  driverApplicationPath,
+  fleetRegistrationPath,
+  internalAdminLoginPath,
 };
+
+enum PublicAccountRole { rider, driver, fleetOwner }
 
 bool isPublicPath(String path) {
   return publicAuthPaths.contains(path);
+}
+
+bool isDiscoverablePublicPath(String path) {
+  return path == landingPath ||
+      path == loginPath ||
+      path == signupPath ||
+      path == driverApplicationPath ||
+      path == fleetRegistrationPath;
 }
 
 String normalizeRole(String? role) {
@@ -20,6 +38,39 @@ String normalizeRole(String? role) {
     return 'rider';
   }
   return normalized;
+}
+
+String backendRoleForPublicAccount(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return 'driver';
+    case PublicAccountRole.fleetOwner:
+      return 'fleet_owner';
+    case PublicAccountRole.rider:
+      return 'rider';
+  }
+}
+
+String labelForPublicAccount(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return 'Driver';
+    case PublicAccountRole.fleetOwner:
+      return 'Fleet Owner';
+    case PublicAccountRole.rider:
+      return 'Passenger';
+  }
+}
+
+String registrationPathForPublicAccount(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return driverApplicationPath;
+    case PublicAccountRole.fleetOwner:
+      return fleetRegistrationPath;
+    case PublicAccountRole.rider:
+      return signupPath;
+  }
 }
 
 bool isSelectedPath(String currentPath, String itemPath) {
@@ -83,9 +134,9 @@ String buildAuthRedirectPath({
 }) {
   final encodedNext = Uri.encodeQueryComponent(requestedUri.toString());
   if (isSelectedPath(requestedPath, '/admin')) {
-    return '/admin-login?next=$encodedNext';
+    return '$internalAdminLoginPath?next=$encodedNext';
   }
-  return '/login?next=$encodedNext';
+  return '$loginPath?next=$encodedNext';
 }
 
 String resolvePostLoginRoute({required String role, String? nextPath}) {

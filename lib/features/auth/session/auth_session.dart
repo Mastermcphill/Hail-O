@@ -193,8 +193,18 @@ class AuthSession extends ChangeNotifier {
     return AuthLoginResult(token: result.accessToken, role: result.role);
   }
 
-  Future<AuthLoginResult> register(String email, String password) async {
-    await _authApi.register(email: email, password: password);
+  Future<AuthLoginResult> register({
+    required String email,
+    required String password,
+    String role = 'rider',
+    String? displayName,
+  }) async {
+    await _authApi.register(
+      email: email,
+      password: password,
+      role: role,
+      displayName: displayName,
+    );
     return login(email, password);
   }
 

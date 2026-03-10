@@ -8,7 +8,9 @@ void main() {
     final router = _routerForTest();
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Sign in'));
+    final signInButton = find.widgetWithText(OutlinedButton, 'Sign in').first;
+    await tester.ensureVisible(signInButton);
+    await tester.tap(signInButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Login target'), findsOneWidget);
@@ -20,22 +22,51 @@ void main() {
     final router = _routerForTest();
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Get Started'));
+    final getStartedButton = find
+        .widgetWithText(FilledButton, 'Get started')
+        .first;
+    await tester.ensureVisible(getStartedButton);
+    await tester.tap(getStartedButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Signup target'), findsOneWidget);
   });
 
-  testWidgets('admin login button routes to admin login', (
+  testWidgets('driver CTA routes to driver application', (
     WidgetTester tester,
   ) async {
     final router = _routerForTest();
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-    await tester.tap(find.widgetWithText(TextButton, 'Admin login'));
+    final driverButton = find
+        .widgetWithText(OutlinedButton, 'Become a driver')
+        .first;
+    tester.widget<OutlinedButton>(driverButton).onPressed!.call();
     await tester.pumpAndSettle();
 
-    expect(find.text('Admin login target'), findsOneWidget);
+    expect(find.text('Driver signup target'), findsOneWidget);
+  });
+
+  testWidgets('fleet CTA routes to fleet registration', (
+    WidgetTester tester,
+  ) async {
+    final router = _routerForTest();
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+    final fleetButton = find
+        .widgetWithText(OutlinedButton, 'Register fleet')
+        .first;
+    tester.widget<OutlinedButton>(fleetButton).onPressed!.call();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Fleet signup target'), findsOneWidget);
+  });
+
+  testWidgets('admin is not visible on landing', (WidgetTester tester) async {
+    final router = _routerForTest();
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+    expect(find.textContaining('Admin', findRichText: true), findsNothing);
   });
 }
 
@@ -55,9 +86,14 @@ GoRouter _routerForTest() {
             const Scaffold(body: Center(child: Text('Signup target'))),
       ),
       GoRoute(
-        path: '/admin-login',
+        path: '/apply/driver',
         builder: (context, state) =>
-            const Scaffold(body: Center(child: Text('Admin login target'))),
+            const Scaffold(body: Center(child: Text('Driver signup target'))),
+      ),
+      GoRoute(
+        path: '/apply/fleet',
+        builder: (context, state) =>
+            const Scaffold(body: Center(child: Text('Fleet signup target'))),
       ),
     ],
   );

@@ -28,13 +28,18 @@ class AuthApi {
   Future<void> register({
     required String email,
     required String password,
+    String role = 'rider',
+    String? displayName,
   }) async {
+    final normalizedDisplayName = (displayName ?? '').trim();
     await _apiClient.post(
       ApiPaths.authRegister,
       body: <String, dynamic>{
         'email': email.trim(),
         'password': password,
-        'role': 'rider',
+        'role': normalizeRole(role),
+        if (normalizedDisplayName.isNotEmpty)
+          'display_name': normalizedDisplayName,
       },
     );
   }

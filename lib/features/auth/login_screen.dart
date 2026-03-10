@@ -3,7 +3,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/routing/role_routes.dart';
+import '../../theme/app_tokens.dart';
 import '../../widgets/loading_overlay.dart';
+import '../../widgets/premium_ui.dart';
 import 'data/auth_api.dart';
 import 'session/auth_session.dart';
 
@@ -25,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _otpCodeController = TextEditingController();
 
+  PublicAccountRole _accountRole = PublicAccountRole.rider;
   _AuthMode _mode = _AuthMode.otp;
   bool _isLoading = false;
   bool _otpRequested = false;
@@ -40,6 +43,8 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  bool get _supportsOtp => _accountRole == PublicAccountRole.rider;
+
   void _switchMode(_AuthMode mode) {
     if (_mode == mode) {
       return;
@@ -50,6 +55,21 @@ class _LoginScreenState extends State<LoginScreen> {
       _infoMessage = null;
       if (mode == _AuthMode.email) {
         _otpRequested = false;
+      }
+    });
+  }
+
+  void _switchAccountRole(PublicAccountRole role) {
+    if (_accountRole == role) {
+      return;
+    }
+    setState(() {
+      _accountRole = role;
+      _errorMessage = null;
+      _infoMessage = null;
+      _otpRequested = false;
+      if (!_supportsOtp) {
+        _mode = _AuthMode.email;
       }
     });
   }
@@ -120,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       setState(() {
         _otpRequested = true;
-        _infoMessage = 'OTP sent. Enter the code to continue.';
+        _infoMessage = 'Verification code sent. Enter it below to continue.';
       });
     } catch (error) {
       if (!mounted) {
@@ -150,7 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     if (!_looksLikeOtpCode(code)) {
       setState(() {
-        _errorMessage = 'Enter the OTP code.';
+        _errorMessage = 'Enter the OTP code we sent to your number.';
         _infoMessage = null;
       });
       return;
@@ -192,206 +212,275 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
+      backgroundColor: Colors.transparent,
       body: LoadingOverlay(
         isLoading: _isLoading,
         message: _mode == _AuthMode.otp
-            ? 'Verifying code...'
+            ? (_otpRequested ? 'Verifying your code...' : 'Requesting code...')
             : 'Signing you in...',
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  SizedBox(
-                    height: 52,
-                    child: Image.asset(
-                      'assets/brand/logo_mark.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.local_taxi,
-                        size: 36,
-                        color: colorScheme.primary,
-                      ),
+        child: AuthExperienceFrame(
+          eyebrow: 'HAIL-O access',
+          title: 'Move through the network with one refined sign in.',
+          description:
+              'Passengers, drivers, and fleet operators share one premium entry experience. The app routes each account to the correct workspace after authentication.',
+          highlights: const <String>[
+            'Role-aware routing after login without exposing internal tooling.',
+            'Phone OTP for fast passenger access and email login for every role.',
+            'Startup-safe session restore, graceful offline handling, and clear recovery states.',
+          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => context.go(landingPath),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('Back'),
+                ),
+              ),
+              const SizedBox(height: HailoSpacing.xs),
+              PremiumSectionHeader(
+                eyebrow: 'Sign in',
+                title: 'Choose your role context',
+                description: _roleDescription(_accountRole),
+              ),
+              const SizedBox(height: HailoSpacing.md),
+              Wrap(
+                spacing: HailoSpacing.sm,
+                runSpacing: HailoSpacing.sm,
+                children: PublicAccountRole.values
+                    .map((role) {
+                      final selected = _accountRole == role;
+                      return ChoiceChip(
+                        label: Text(labelForPublicAccount(role)),
+                        selected: selected,
+                        onSelected: (_) => _switchAccountRole(role),
+                        avatar: Icon(_iconForRole(role), size: 16),
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+              const SizedBox(height: HailoSpacing.md),
+              if (_supportsOtp) ...<Widget>[
+                SegmentedButton<_AuthMode>(
+                  showSelectedIcon: false,
+                  segments: const <ButtonSegment<_AuthMode>>[
+                    ButtonSegment<_AuthMode>(
+                      value: _AuthMode.otp,
+                      icon: Icon(Icons.sms_outlined),
+                      label: Text('Phone OTP'),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Welcome back',
-                    textAlign: TextAlign.center,
-                    style: textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  SegmentedButton<_AuthMode>(
-                    segments: const <ButtonSegment<_AuthMode>>[
-                      ButtonSegment<_AuthMode>(
-                        value: _AuthMode.otp,
-                        label: Text('Phone OTP'),
-                      ),
-                      ButtonSegment<_AuthMode>(
-                        value: _AuthMode.email,
-                        label: Text('Email'),
-                      ),
-                    ],
-                    selected: <_AuthMode>{_mode},
-                    onSelectionChanged: (selection) {
-                      final selected = selection.first;
-                      _switchMode(selected);
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  if (_mode == _AuthMode.email) ...<Widget>[
-                    Form(
-                      key: _emailFormKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          TextFormField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const <String>[AutofillHints.email],
-                            validator: (value) {
-                              final email = (value ?? '').trim();
-                              if (email.isEmpty) {
-                                return 'Email is required';
-                              }
-                              if (!_looksLikeEmail(email)) {
-                                return 'Enter a valid email';
-                              }
-                              return null;
-                            },
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _passwordController,
-                            obscureText: true,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const <String>[
-                              AutofillHints.password,
-                            ],
-                            onFieldSubmitted: (_) =>
-                                _isLoading ? null : _loginWithEmail(),
-                            validator: (value) {
-                              if ((value ?? '').isEmpty) {
-                                return 'Password is required';
-                              }
-                              return null;
-                            },
-                            decoration: const InputDecoration(
-                              labelText: 'Password',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Semantics(
-                            label: 'Sign in button',
-                            button: true,
-                            child: FilledButton(
-                              onPressed: _isLoading ? null : _loginWithEmail,
-                              child: const Text('Sign in'),
-                            ),
-                          ),
-                        ],
-                      ),
+                    ButtonSegment<_AuthMode>(
+                      value: _AuthMode.email,
+                      icon: Icon(Icons.alternate_email_rounded),
+                      label: Text('Email'),
                     ),
-                  ] else ...<Widget>[
-                    TextField(
-                      controller: _phoneController,
-                      keyboardType: TextInputType.phone,
-                      textInputAction: _otpRequested
-                          ? TextInputAction.next
-                          : TextInputAction.done,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone (E.164)',
-                        hintText: '+2348012345678',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_otpRequested) ...<Widget>[
-                      TextField(
-                        controller: _otpCodeController,
-                        keyboardType: TextInputType.number,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _isLoading ? null : _verifyOtp(),
-                        decoration: const InputDecoration(
-                          labelText: 'OTP code',
-                          border: OutlineInputBorder(),
+                  ],
+                  selected: <_AuthMode>{_mode},
+                  onSelectionChanged: (selection) =>
+                      _switchMode(selection.first),
+                ),
+                const SizedBox(height: HailoSpacing.md),
+              ],
+              if (_mode == _AuthMode.email || !_supportsOtp) ...<Widget>[
+                Form(
+                  key: _emailFormKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const <String>[AutofillHints.username],
+                        validator: (value) {
+                          final email = (value ?? '').trim();
+                          if (email.isEmpty) {
+                            return 'Email is required';
+                          }
+                          if (!_looksLikeEmail(email)) {
+                            return 'Enter a valid email address';
+                          }
+                          return null;
+                        },
+                        decoration: InputDecoration(
+                          labelText: _accountRole == PublicAccountRole.rider
+                              ? 'Email'
+                              : 'Work email',
+                          hintText: _accountRole == PublicAccountRole.fleetOwner
+                              ? 'operations@yourfleet.com'
+                              : 'name@example.com',
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: _isLoading ? null : _verifyOtp,
-                        child: const Text('Verify code'),
+                      const SizedBox(height: HailoSpacing.md),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const <String>[AutofillHints.password],
+                        onFieldSubmitted: (_) =>
+                            _isLoading ? null : _loginWithEmail(),
+                        validator: (value) {
+                          if ((value ?? '').isEmpty) {
+                            return 'Password is required';
+                          }
+                          return null;
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          hintText: 'Enter your secure password',
+                        ),
                       ),
-                      TextButton(
-                        onPressed: _isLoading ? null : _requestOtp,
-                        child: const Text('Resend code'),
+                      const SizedBox(height: HailoSpacing.md),
+                      PremiumPill(
+                        label:
+                            'We will route you to the correct workspace automatically.',
+                        icon: Icons.verified_user_outlined,
                       ),
-                    ] else ...<Widget>[
+                      const SizedBox(height: HailoSpacing.lg),
                       FilledButton(
-                        onPressed: _isLoading ? null : _requestOtp,
-                        child: const Text('Request OTP'),
+                        onPressed: _isLoading ? null : _loginWithEmail,
+                        child: Text(_emailButtonLabel(_accountRole)),
                       ),
                     ],
-                  ],
-                  const SizedBox(height: 8),
-                  Semantics(
-                    label: 'Create account button',
-                    button: true,
-                    child: TextButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => context.go('/signup'),
-                      child: const Text('Create account'),
+                  ),
+                ),
+              ] else ...<Widget>[
+                TextField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  textInputAction: _otpRequested
+                      ? TextInputAction.next
+                      : TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone number',
+                    hintText: '+2348012345678',
+                  ),
+                ),
+                const SizedBox(height: HailoSpacing.sm),
+                PremiumPill(
+                  label:
+                      'Passenger OTP is built for quick, secure access on the move.',
+                  icon: Icons.flash_on_rounded,
+                ),
+                if (_otpRequested) ...<Widget>[
+                  const SizedBox(height: HailoSpacing.md),
+                  TextField(
+                    controller: _otpCodeController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _isLoading ? null : _verifyOtp(),
+                    decoration: const InputDecoration(
+                      labelText: 'Verification code',
+                      hintText: 'Enter the code you received',
                     ),
                   ),
-                  Semantics(
-                    label: 'Admin login button',
-                    button: true,
+                  const SizedBox(height: HailoSpacing.lg),
+                  FilledButton(
+                    onPressed: _isLoading ? null : _verifyOtp,
+                    child: const Text('Verify and continue'),
+                  ),
+                  const SizedBox(height: HailoSpacing.xs),
+                  Align(
+                    alignment: Alignment.centerLeft,
                     child: TextButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => context.go('/admin-login'),
-                      child: const Text('Admin login'),
+                      onPressed: _isLoading ? null : _requestOtp,
+                      child: const Text('Send a fresh code'),
                     ),
                   ),
-                  if (_infoMessage != null) ...<Widget>[
-                    const SizedBox(height: 8),
-                    Text(
-                      _infoMessage!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colorScheme.primary),
-                    ),
-                  ],
-                  if (_errorMessage != null) ...<Widget>[
-                    const SizedBox(height: 8),
-                    Text(
-                      _errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colorScheme.error),
-                    ),
-                  ],
+                ] else ...<Widget>[
+                  const SizedBox(height: HailoSpacing.lg),
+                  FilledButton(
+                    onPressed: _isLoading ? null : _requestOtp,
+                    child: const Text('Send verification code'),
+                  ),
                 ],
+              ],
+              const SizedBox(height: HailoSpacing.md),
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () => context.go(
+                        registrationPathForPublicAccount(_accountRole),
+                      ),
+                child: Text(_registrationLabel(_accountRole)),
               ),
-            ),
+              if (_infoMessage != null) ...<Widget>[
+                const SizedBox(height: HailoSpacing.xs),
+                Text(
+                  _infoMessage!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              if (_errorMessage != null) ...<Widget>[
+                const SizedBox(height: HailoSpacing.xs),
+                Text(
+                  _errorMessage!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
     );
+  }
+}
+
+String _roleDescription(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return 'Driver access for availability, active trips, earnings, and compliance.';
+    case PublicAccountRole.fleetOwner:
+      return 'Fleet access for operations, vehicles, drivers, settlements, and oversight.';
+    case PublicAccountRole.rider:
+      return 'Passenger access for booking, live journeys, support, and trusted road travel.';
+  }
+}
+
+String _emailButtonLabel(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return 'Enter driver workspace';
+    case PublicAccountRole.fleetOwner:
+      return 'Enter fleet workspace';
+    case PublicAccountRole.rider:
+      return 'Sign in';
+  }
+}
+
+String _registrationLabel(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return 'Need an operator account? Become a driver';
+    case PublicAccountRole.fleetOwner:
+      return 'Need an organization account? Register your fleet';
+    case PublicAccountRole.rider:
+      return 'New to HAIL-O? Create a passenger account';
+  }
+}
+
+IconData _iconForRole(PublicAccountRole role) {
+  switch (role) {
+    case PublicAccountRole.driver:
+      return Icons.local_taxi_outlined;
+    case PublicAccountRole.fleetOwner:
+      return Icons.directions_bus_rounded;
+    case PublicAccountRole.rider:
+      return Icons.person_outline_rounded;
   }
 }
 
