@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hailo_core/core/api/api_client.dart';
 import 'package:hailo_core/core/api/api_errors.dart';
 import 'package:hailo_core/core/storage/token_storage.dart';
+import 'package:hailo_core/features/auth/session/auth_storage.dart';
 import 'package:hailo_core/features/auth/session/auth_session.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -240,6 +242,73 @@ void main() {
       expect(await storage.readToken(), isNull);
       expect(await storage.readRole(), isNull);
     });
+
+    test(
+      'init times out hanging secure storage and falls back safely',
+      () async {
+        final storage = InMemoryTokenStorage();
+        final apiClient = ApiClient(
+          tokenStorage: storage,
+          httpClient: MockClient((_) async => http.Response('{}', 200)),
+        );
+        final session = AuthSession(
+          tokenStorage: storage,
+          apiClient: apiClient,
+          authStorage: HangingAuthStorage(),
+          startupStepTimeout: const Duration(milliseconds: 20),
+        );
+
+        await session.init();
+
+        expect(session.isReady, isTrue);
+        expect(session.isAuthenticated, isFalse);
+        expect(session.status, AuthStatus.anonymous);
+        expect(session.startupFailureCode, 'startup_storage_timeout');
+        expect(session.startupNotice, contains('secure storage'));
+      },
+    );
+
+    test('init times out slow session refresh and falls back safely', () async {
+      final expired = JWT(
+        <String, Object?>{'user_id': 'user-1', 'role': 'rider'},
+      ).sign(SecretKey('test-secret'), expiresIn: const Duration(seconds: -30));
+      final storage = InMemoryTokenStorage();
+      await storage.saveAuth(
+        token: expired,
+        role: 'rider',
+        refreshToken: 'refresh-token',
+      );
+      final apiClient = ApiClient(
+        tokenStorage: storage,
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/auth/token/refresh') {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            return http.Response(
+              jsonEncode(<String, Object?>{
+                'ok': true,
+                'access_token': 'late-token',
+              }),
+              200,
+              headers: <String, String>{'content-type': 'application/json'},
+            );
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+      final session = AuthSession(
+        tokenStorage: storage,
+        apiClient: apiClient,
+        startupNetworkTimeout: const Duration(milliseconds: 20),
+      );
+
+      await session.init();
+
+      expect(session.isReady, isTrue);
+      expect(session.isAuthenticated, isFalse);
+      expect(session.status, AuthStatus.anonymous);
+      expect(session.startupFailureCode, 'startup_refresh_timeout');
+      expect(session.startupNotice, contains('Session refresh took too long'));
+    });
   });
 }
 
@@ -330,4 +399,21 @@ class InMemoryTokenStorage extends TokenStorage {
   Future<void> deleteValue(String key) async {
     _values.remove(key);
   }
+}
+
+class HangingAuthStorage implements AuthStorage {
+  @override
+  Future<void> clearTokens() async {}
+
+  @override
+  Future<StoredAuthTokens?> loadTokens() {
+    return Completer<StoredAuthTokens?>().future;
+  }
+
+  @override
+  Future<void> saveTokens({
+    required String accessToken,
+    String? refreshToken,
+    String? role,
+  }) async {}
 }

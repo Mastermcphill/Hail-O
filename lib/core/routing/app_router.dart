@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../observability/app_observability.dart';
 import '../../features/admin/admin_home.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/auth/presentation/admin_login_screen.dart';
@@ -319,6 +322,7 @@ class AppRouter {
       ],
       redirect: _handleRedirect,
     );
+    router.routeInformationProvider.addListener(_handleRouteChange);
   }
 
   final ApiClient _apiClient;
@@ -326,9 +330,29 @@ class AppRouter {
   late final MarketplaceModule _marketplaceModule;
   late final DispatchRepository _dispatchRepository;
   late final GoRouter router;
+  bool _loggedFirstRouteDecision = false;
+  bool _loggedSplashDismissed = false;
 
   void dispose() {
+    router.routeInformationProvider.removeListener(_handleRouteChange);
     _marketplaceModule.dispose();
+  }
+
+  void _handleRouteChange() {
+    if (_loggedSplashDismissed) {
+      return;
+    }
+    final currentPath = router.routeInformationProvider.value.uri.path;
+    if (currentPath == bootPath) {
+      return;
+    }
+    _loggedSplashDismissed = true;
+    unawaited(
+      AppObservability.recordStartupStage(
+        stage: 'splash dismissed',
+        detail: 'route=$currentPath',
+      ),
+    );
   }
 
   String? _handleRedirect(BuildContext context, GoRouterState state) {
@@ -336,37 +360,52 @@ class AppRouter {
 
     if (!_authSession.isReady) {
       if (path == bootPath) {
-        return null;
+        return _recordFirstRouteDecision(path, null);
       }
-      return bootPath;
+      return _recordFirstRouteDecision(path, bootPath);
     }
 
     if (!_authSession.isAuthenticated) {
       if (path == bootPath) {
-        return '/';
+        return _recordFirstRouteDecision(path, '/');
       }
       if (isPublicPath(path)) {
-        return null;
+        return _recordFirstRouteDecision(path, null);
       }
-      return buildAuthRedirectPath(
-        requestedPath: path,
-        requestedUri: state.uri,
+      return _recordFirstRouteDecision(
+        path,
+        buildAuthRedirectPath(requestedPath: path, requestedUri: state.uri),
       );
     }
 
     final role = _authSession.roleNormalized;
     if (path == bootPath || path == '/home') {
-      return homeRouteForRole(role);
+      return _recordFirstRouteDecision(path, homeRouteForRole(role));
     }
 
     if (isPublicPath(path)) {
-      return homeRouteForRole(role);
+      return _recordFirstRouteDecision(path, homeRouteForRole(role));
     }
 
     if (isRoleRoute(path) && !isRoleAllowed(path, role)) {
-      return homeRouteForRole(role);
+      return _recordFirstRouteDecision(path, homeRouteForRole(role));
     }
-    return null;
+    return _recordFirstRouteDecision(path, null);
+  }
+
+  String? _recordFirstRouteDecision(String path, String? redirectTarget) {
+    if (_loggedFirstRouteDecision) {
+      return redirectTarget;
+    }
+    _loggedFirstRouteDecision = true;
+    final resolvedTarget = redirectTarget ?? path;
+    unawaited(
+      AppObservability.recordStartupStage(
+        stage: 'first route decision made',
+        detail: '$path -> $resolvedTarget',
+      ),
+    );
+    return redirectTarget;
   }
 }
 

@@ -1,9 +1,12 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class TokenStorage {
-  const TokenStorage({
-    FlutterSecureStorage storage = const FlutterSecureStorage(),
-  }) : _storage = storage;
+  const TokenStorage({FlutterSecureStorage storage = _defaultStorage})
+    : _storage = storage;
+
+  static const FlutterSecureStorage _defaultStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(resetOnError: true),
+  );
 
   static const _tokenKey = 'auth_token';
   static const _roleKey = 'user_role';

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -145,6 +146,32 @@ class AppObservability {
       await scope.setUser(null);
       await scope.removeTag('role');
     });
+  }
+
+  static Future<void> recordStartupStage({
+    required String stage,
+    String? detail,
+    SentryLevel level = SentryLevel.info,
+  }) {
+    final sanitizedStage = scrubText(stage);
+    final sanitizedDetail = _scrubNullable(detail);
+    developer.log(
+      sanitizedDetail == null || sanitizedDetail.isEmpty
+          ? sanitizedStage
+          : '$sanitizedStage | $sanitizedDetail',
+      name: 'hailo.startup',
+    );
+    return Sentry.addBreadcrumb(
+      Breadcrumb(
+        type: 'navigation',
+        category: 'startup',
+        message: sanitizedStage,
+        data: sanitizedDetail == null
+            ? null
+            : <String, dynamic>{'detail': sanitizedDetail},
+        level: level,
+      ),
+    );
   }
 
   static FutureOr<SentryEvent?> beforeSend(SentryEvent event, Hint hint) {

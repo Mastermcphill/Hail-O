@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'core/api/api_client.dart';
 import 'core/api/server_warmup_notifier.dart';
 import 'core/connectivity/connectivity_notifier.dart';
+import 'core/observability/app_observability.dart';
 import 'core/routing/app_router.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/session/auth_session.dart';
@@ -36,15 +39,22 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
       tokenStorage: _tokenStorage,
       apiClient: _apiClient,
     );
-    _apiClient.setAuthFailureHandler(() => _authSession.logout());
-    _authSession.init();
     _serverWarmupNotifier = ServerWarmupNotifier();
     _connectivityNotifier = ConnectivityNotifier();
+    unawaited(
+      AppObservability.recordStartupStage(
+        stage: 'services initialized',
+        detail: 'api, auth, warmup, and connectivity services created',
+      ),
+    );
+    _apiClient.setAuthFailureHandler(() => _authSession.logout());
+    _authSession.init();
     if (widget.enableStartupWarmup) {
       _serverWarmupNotifier.start(_apiClient);
       _connectivityNotifier.start();
     }
     _appRouter = AppRouter(apiClient: _apiClient, authSession: _authSession);
+    unawaited(AppObservability.recordStartupStage(stage: 'router ready'));
   }
 
   @override
@@ -81,11 +91,18 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
         supportedLocales: const <Locale>[Locale('en')],
         routerConfig: _appRouter.router,
         builder: (context, child) {
+          final authSession = context.watch<AuthSession>();
           final warming = context.watch<ServerWarmupNotifier>().isWarming;
           final offline = context.watch<ConnectivityNotifier>().isOffline;
+          final startupNotice = authSession.startupNotice;
           return Stack(
             children: <Widget>[
               child ?? const SizedBox.shrink(),
+              if (startupNotice != null)
+                _StartupRecoveryBanner(
+                  message: startupNotice,
+                  onDismiss: authSession.dismissStartupNotice,
+                ),
               if (offline) const _OfflineBanner(message: 'Offline mode'),
               if (warming) const _WarmupBanner(message: 'Waking server...'),
             ],
@@ -130,6 +147,63 @@ class _WarmupBanner extends StatelessWidget {
                 Text(
                   message,
                   style: TextStyle(color: colorScheme.onInverseSurface),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StartupRecoveryBanner extends StatelessWidget {
+  const _StartupRecoveryBanner({
+    required this.message,
+    required this.onDismiss,
+  });
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: colorScheme.tertiaryContainer.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: colorScheme.onTertiaryContainer,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(color: colorScheme.onTertiaryContainer),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    Icons.close,
+                    size: 18,
+                    color: colorScheme.onTertiaryContainer,
+                  ),
+                  onPressed: onDismiss,
                 ),
               ],
             ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -16,24 +17,47 @@ class AuthSession extends ChangeNotifier {
     required TokenStorage tokenStorage,
     required ApiClient apiClient,
     AuthStorage? authStorage,
+    Duration startupStepTimeout = const Duration(seconds: 4),
+    Duration startupNetworkTimeout = const Duration(seconds: 10),
   }) : _authStorage =
            authStorage ?? SecureAuthStorage(tokenStorage: tokenStorage),
-       _authApi = AuthApi(apiClient: apiClient);
+       _authApi = AuthApi(apiClient: apiClient),
+       _startupStepTimeout = startupStepTimeout,
+       _startupNetworkTimeout = startupNetworkTimeout;
 
   final AuthStorage _authStorage;
   final AuthApi _authApi;
+  final Duration _startupStepTimeout;
+  final Duration _startupNetworkTimeout;
 
   bool _initialized = false;
   String? _token;
   String? _role;
   AuthStatus _status = AuthStatus.loading;
   Future<void>? _initFuture;
+  String _startupStage = 'Preparing startup';
+  String? _startupFailureCode;
+  String? _startupFailureMessage;
+  bool _startupNoticeDismissed = false;
 
   bool get isReady => _initialized;
   bool get isAuthenticated => _status == AuthStatus.authenticated;
   String get roleNormalized => normalizeRole(_role);
   String? get token => _token;
   AuthStatus get status => _status;
+  String get startupStage => _startupStage;
+  String? get startupFailureCode => _startupFailureCode;
+  String? get startupFailureMessage => _startupFailureMessage;
+  String? get startupNotice =>
+      _startupNoticeDismissed ? null : _startupFailureMessage;
+
+  void dismissStartupNotice() {
+    if (_startupNoticeDismissed) {
+      return;
+    }
+    _startupNoticeDismissed = true;
+    notifyListeners();
+  }
 
   Future<void> init() {
     if (_initialized) {
@@ -48,9 +72,17 @@ class AuthSession extends ChangeNotifier {
 
   Future<void> _initInternal() async {
     _status = AuthStatus.loading;
-    notifyListeners();
+    _setStartupStage('auth/session restore started');
     try {
-      final stored = await _authStorage.loadTokens();
+      final stored = await _criticalStartupStep<StoredAuthTokens?>(
+        stage: 'reading secure session storage',
+        future: _authStorage.loadTokens(),
+        timeout: _startupStepTimeout,
+        timeoutCode: 'startup_storage_timeout',
+        timeoutMessage:
+            'Session restore timed out while reading secure storage. The app will continue without a saved session.',
+      );
+      _setStartupStage('storage ready');
       final storedToken = stored?.accessToken ?? '';
       final storedRole = stored?.role;
       final storedRefreshToken = stored?.refreshToken;
@@ -62,33 +94,28 @@ class AuthSession extends ChangeNotifier {
             role: storedRole,
           );
           if (!refreshed) {
-            await _authStorage.clearTokens();
-            await AppObservability.clearAuthenticatedUser();
-            _token = null;
-            _role = null;
-            _status = AuthStatus.anonymous;
+            await _clearTokensBestEffort();
+            await _clearObservabilityBestEffort();
+            _setAnonymousState();
           }
         } else {
-          _token = normalizedToken;
-          _role = normalizeRole(storedRole);
-          _status = AuthStatus.authenticated;
-          await _attachUserToObservability(
+          _setAuthenticatedState(
+            token: normalizedToken,
+            role: normalizeRole(storedRole),
+          );
+          await _attachUserToObservabilityBestEffort(
             token: normalizedToken,
             role: _role ?? 'rider',
           );
         }
       } else {
-        _token = null;
-        _role = null;
-        _status = AuthStatus.anonymous;
-        await AppObservability.clearAuthenticatedUser();
+        _setAnonymousState();
+        await _clearObservabilityBestEffort();
       }
-    } catch (_) {
-      await _authStorage.clearTokens();
-      await AppObservability.clearAuthenticatedUser();
-      _token = null;
-      _role = null;
-      _status = AuthStatus.anonymous;
+      _clearStartupFailure();
+      _setStartupStage('auth/session restore completed');
+    } catch (error, stackTrace) {
+      await _recoverFromStartupFailure(error, stackTrace);
     } finally {
       _initialized = true;
       notifyListeners();
@@ -104,23 +131,30 @@ class AuthSession extends ChangeNotifier {
       return false;
     }
     try {
-      final refreshedAccessToken = await _authApi.refreshAccessToken(
-        refreshToken: normalizedRefreshToken,
+      final refreshedAccessToken = await _criticalStartupStep<String>(
+        stage: 'refreshing persisted session',
+        future: _authApi.refreshAccessToken(
+          refreshToken: normalizedRefreshToken,
+        ),
+        timeout: _startupNetworkTimeout,
+        timeoutCode: 'startup_refresh_timeout',
+        timeoutMessage:
+            'Session refresh took too long. The app will continue without a saved session.',
       );
       final normalizedRole = normalizeRole(role);
-      await _authStorage.saveTokens(
+      await _persistTokensBestEffort(
         accessToken: refreshedAccessToken,
         role: normalizedRole,
         refreshToken: normalizedRefreshToken,
       );
-      _token = refreshedAccessToken;
-      _role = normalizedRole;
-      _status = AuthStatus.authenticated;
-      await _attachUserToObservability(
+      _setAuthenticatedState(token: refreshedAccessToken, role: normalizedRole);
+      await _attachUserToObservabilityBestEffort(
         token: refreshedAccessToken,
         role: normalizedRole,
       );
       return true;
+    } on AuthStartupFailure {
+      rethrow;
     } catch (_) {
       return false;
     }
@@ -167,9 +201,7 @@ class AuthSession extends ChangeNotifier {
   Future<void> logout() async {
     await _authStorage.clearTokens();
     await AppObservability.clearAuthenticatedUser();
-    _token = null;
-    _role = null;
-    _status = AuthStatus.anonymous;
+    _setAnonymousState();
     if (!_initialized) {
       _initialized = true;
     }
@@ -190,14 +222,161 @@ class AuthSession extends ChangeNotifier {
       role: role,
       refreshToken: refreshToken,
     );
-    _token = token;
-    _role = normalizeRole(role);
-    _status = AuthStatus.authenticated;
+    _setAuthenticatedState(token: token, role: role);
     await _attachUserToObservability(token: token, role: _role ?? 'rider');
     if (!_initialized) {
       _initialized = true;
     }
     notifyListeners();
+  }
+
+  void _setAnonymousState() {
+    _token = null;
+    _role = null;
+    _status = AuthStatus.anonymous;
+  }
+
+  void _setAuthenticatedState({required String token, required String role}) {
+    _token = token;
+    _role = normalizeRole(role);
+    _status = AuthStatus.authenticated;
+  }
+
+  void _setStartupStage(String stage, {String? detail, bool notify = true}) {
+    _startupStage = stage;
+    unawaited(
+      AppObservability.recordStartupStage(stage: stage, detail: detail),
+    );
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<T> _criticalStartupStep<T>({
+    required String stage,
+    required Future<T> future,
+    required Duration timeout,
+    required String timeoutCode,
+    required String timeoutMessage,
+  }) async {
+    _setStartupStage(stage);
+    try {
+      return await future.timeout(timeout);
+    } on TimeoutException catch (error) {
+      throw AuthStartupFailure(
+        code: timeoutCode,
+        message: timeoutMessage,
+        stage: stage,
+        cause: error,
+      );
+    }
+  }
+
+  Future<void> _bestEffortStartupStep({
+    required String stage,
+    required Future<void> future,
+    String? detail,
+  }) async {
+    try {
+      await future.timeout(_startupStepTimeout);
+    } on TimeoutException {
+      unawaited(
+        AppObservability.recordStartupStage(
+          stage: '$stage skipped',
+          detail:
+              'Step exceeded ${_startupStepTimeout.inSeconds}s timeout${detail == null ? '' : ' ($detail)'}',
+        ),
+      );
+    } catch (error) {
+      unawaited(
+        AppObservability.recordStartupStage(
+          stage: '$stage skipped',
+          detail: '$error${detail == null ? '' : ' ($detail)'}',
+        ),
+      );
+    }
+  }
+
+  Future<void> _persistTokensBestEffort({
+    required String accessToken,
+    required String role,
+    String? refreshToken,
+  }) {
+    return _bestEffortStartupStep(
+      stage: 'persisting refreshed session',
+      future: _authStorage.saveTokens(
+        accessToken: accessToken,
+        role: role,
+        refreshToken: refreshToken,
+      ),
+    );
+  }
+
+  Future<void> _clearTokensBestEffort() {
+    return _bestEffortStartupStep(
+      stage: 'clearing unusable session',
+      future: _authStorage.clearTokens(),
+    );
+  }
+
+  Future<void> _attachUserToObservabilityBestEffort({
+    required String token,
+    required String role,
+  }) {
+    return _bestEffortStartupStep(
+      stage: 'attaching session observability',
+      future: _attachUserToObservability(token: token, role: role),
+    );
+  }
+
+  Future<void> _clearObservabilityBestEffort() {
+    return _bestEffortStartupStep(
+      stage: 'clearing session observability',
+      future: AppObservability.clearAuthenticatedUser(),
+    );
+  }
+
+  void _clearStartupFailure() {
+    _startupFailureCode = null;
+    _startupFailureMessage = null;
+    _startupNoticeDismissed = false;
+  }
+
+  Future<void> _recoverFromStartupFailure(
+    Object error,
+    StackTrace stackTrace,
+  ) async {
+    final failure = _describeStartupFailure(error);
+    await _clearTokensBestEffort();
+    await _clearObservabilityBestEffort();
+    _setAnonymousState();
+    _startupFailureCode = failure.code;
+    _startupFailureMessage = failure.message;
+    _startupNoticeDismissed = false;
+    _setStartupStage(
+      'auth/session restore completed',
+      detail: '${failure.code} at ${failure.stage}',
+      notify: false,
+    );
+    unawaited(
+      AppObservability.recordStartupStage(
+        stage: 'startup recovered in safe mode',
+        detail: '${failure.code}: ${failure.message}\n$stackTrace',
+      ),
+    );
+  }
+
+  AuthStartupFailure _describeStartupFailure(Object error) {
+    if (error is AuthStartupFailure) {
+      return error;
+    }
+    return AuthStartupFailure(
+      code: 'startup_restore_failed',
+      message:
+          'Session restore failed during startup. The app continued in safe mode.',
+      stage: _startupStage,
+      cause: error,
+    );
   }
 
   Future<void> _attachUserToObservability({
@@ -297,5 +476,24 @@ class AuthSessionException implements Exception {
   @override
   String toString() {
     return '$code: $message';
+  }
+}
+
+class AuthStartupFailure implements Exception {
+  const AuthStartupFailure({
+    required this.code,
+    required this.message,
+    required this.stage,
+    this.cause,
+  });
+
+  final String code;
+  final String message;
+  final String stage;
+  final Object? cause;
+
+  @override
+  String toString() {
+    return '$code at $stage: $message${cause == null ? '' : ' ($cause)'}';
   }
 }

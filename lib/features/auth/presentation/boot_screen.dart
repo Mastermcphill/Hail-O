@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../session/auth_session.dart';
 
 class BootScreen extends StatelessWidget {
   const BootScreen({super.key});
@@ -6,6 +9,9 @@ class BootScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final session = context.watch<AuthSession>();
+    final startupMessage =
+        session.startupFailureMessage ?? session.startupStage;
 
     return Scaffold(
       body: Center(
@@ -29,7 +35,14 @@ class BootScreen extends StatelessWidget {
               const SizedBox(height: 16),
               const CircularProgressIndicator(),
               const SizedBox(height: 12),
-              const Text('Loading...'),
+              Text(startupMessage),
+              if (session.startupFailureMessage != null) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  'Continuing in safe mode...',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+              ],
             ],
           ),
         ),
