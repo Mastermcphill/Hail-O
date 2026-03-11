@@ -291,7 +291,7 @@ class _SignupCopy {
           highlights: <String>[
             'Purpose-built driver dashboard for trip flow, performance, and support.',
             'Seamless progression into vehicle and compliance setup after account creation.',
-            'Premium operator UX without exposing any admin or internal tooling.',
+            'Premium operator UX with a focused onboarding path.',
           ],
           formEyebrow: 'Become a driver',
           formTitle: 'Create your operator profile',
@@ -318,7 +318,7 @@ class _SignupCopy {
           highlights: <String>[
             'Role-correct fleet operator workspace for operations, vehicles, and earnings oversight.',
             'Built to scale from a few vehicles to a modern multi-city transport operation.',
-            'Conversion-ready registration flow with no public admin clutter.',
+            'Conversion-ready registration flow without public operational clutter.',
           ],
           formEyebrow: 'Register fleet',
           formTitle: 'Create your fleet operator account',

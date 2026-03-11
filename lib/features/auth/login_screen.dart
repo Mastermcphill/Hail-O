@@ -230,7 +230,7 @@ class _LoginScreenState extends State<LoginScreen> {
           highlights: const <String>[
             'Book premium rides across cities, states, and borders.',
             'Escrow payment protection stays visible through the booking flow.',
-            'Admin access remains hidden from public sign-in.',
+            'Role-aware routing keeps each workspace focused and private.',
           ],
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
