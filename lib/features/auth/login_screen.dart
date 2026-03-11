@@ -223,14 +223,14 @@ class _LoginScreenState extends State<LoginScreen> {
             ? (_otpRequested ? 'Verifying your code...' : 'Requesting code...')
             : 'Signing you in...',
         child: AuthExperienceFrame(
-          eyebrow: 'HAIL-O access',
-          title: 'Move through the network with one refined sign in.',
+          eyebrow: 'Hail-O Rideshare',
+          title: 'Sign in to book, drive, or operate your fleet.',
           description:
-              'Passengers, drivers, and fleet operators share one premium entry experience. The app routes each account to the correct workspace after authentication.',
+              'Continue as Passenger, Driver, or Fleet Operator. Passenger booking stays fast with OTP while operator workspaces stay role-correct and private.',
           highlights: const <String>[
-            'Role-aware routing after login without exposing internal tooling.',
-            'Phone OTP for fast passenger access and email login for every role.',
-            'Startup-safe session restore, graceful offline handling, and clear recovery states.',
+            'Book premium rides across cities, states, and borders.',
+            'Escrow payment protection stays visible through the booking flow.',
+            'Admin access remains hidden from public sign-in.',
           ],
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -246,7 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: HailoSpacing.xs),
               PremiumSectionHeader(
                 eyebrow: 'Sign in',
-                title: 'Choose your role context',
+                title: 'Continue in the right role',
                 description: _roleDescription(_accountRole),
               ),
               const SizedBox(height: HailoSpacing.md),
@@ -443,11 +443,11 @@ class _LoginScreenState extends State<LoginScreen> {
 String _roleDescription(PublicAccountRole role) {
   switch (role) {
     case PublicAccountRole.driver:
-      return 'Driver access for availability, active trips, earnings, and compliance.';
+      return 'Driver access for online status, assigned trips, earnings, and compliance.';
     case PublicAccountRole.fleetOwner:
-      return 'Fleet access for operations, vehicles, drivers, settlements, and oversight.';
+      return 'Fleet Operator access for vehicles, drivers, route operations, and settlement oversight.';
     case PublicAccountRole.rider:
-      return 'Passenger access for booking, live journeys, support, and trusted road travel.';
+      return 'Passenger access for booking rides, choosing seats, and tracking protected trips.';
   }
 }
 
@@ -456,7 +456,7 @@ String _emailButtonLabel(PublicAccountRole role) {
     case PublicAccountRole.driver:
       return 'Enter driver workspace';
     case PublicAccountRole.fleetOwner:
-      return 'Enter fleet workspace';
+      return 'Enter fleet operator workspace';
     case PublicAccountRole.rider:
       return 'Sign in';
   }
@@ -467,7 +467,7 @@ String _registrationLabel(PublicAccountRole role) {
     case PublicAccountRole.driver:
       return 'Need an operator account? Become a driver';
     case PublicAccountRole.fleetOwner:
-      return 'Need an organization account? Register your fleet';
+      return 'Need an operator account? Register your fleet';
     case PublicAccountRole.rider:
       return 'New to HAIL-O? Create a passenger account';
   }

@@ -68,6 +68,37 @@ void main() {
 
     expect(find.textContaining('Admin', findRichText: true), findsNothing);
   });
+
+  testWidgets('landing communicates ridesharing and escrow protection', (
+    WidgetTester tester,
+  ) async {
+    final router = _routerForTest();
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+    expect(find.text('Hail-O Rideshare'), findsWidgets);
+    expect(
+      find.text('Premium rides across cities, states, and borders'),
+      findsWidgets,
+    );
+    expect(find.textContaining('Escrow payment protection'), findsOneWidget);
+  });
+
+  testWidgets('search rides routes to preview results', (
+    WidgetTester tester,
+  ) async {
+    final router = _routerForTest();
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+    final fields = find.byType(TextFormField);
+    await tester.enterText(fields.at(0), 'Victoria Island');
+    await tester.enterText(fields.at(1), 'Lekki Phase 1');
+    final searchButton = find.widgetWithText(FilledButton, 'Search rides');
+    await tester.ensureVisible(searchButton);
+    await tester.tap(searchButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Preview target'), findsOneWidget);
+  });
 }
 
 GoRouter _routerForTest() {
@@ -94,6 +125,11 @@ GoRouter _routerForTest() {
         path: '/apply/fleet',
         builder: (context, state) =>
             const Scaffold(body: Center(child: Text('Fleet signup target'))),
+      ),
+      GoRoute(
+        path: '/preview/results',
+        builder: (context, state) =>
+            const Scaffold(body: Center(child: Text('Preview target'))),
       ),
     ],
   );

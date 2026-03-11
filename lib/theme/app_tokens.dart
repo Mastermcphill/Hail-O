@@ -23,6 +23,7 @@ class HailoDurations {
   static const Duration quick = Duration(milliseconds: 180);
   static const Duration standard = Duration(milliseconds: 320);
   static const Duration slow = Duration(milliseconds: 520);
+  static const Duration page = Duration(milliseconds: 420);
 }
 
 @immutable
@@ -56,27 +57,27 @@ class HailoThemeTokens extends ThemeExtension<HailoThemeTokens> {
   final Gradient panelGradient;
 
   static const HailoThemeTokens light = HailoThemeTokens(
-    canvas: Color(0xFFF3F8FC),
-    canvasStrong: Color(0xFFE8F0F9),
+    canvas: Color(0xFFF5F8FC),
+    canvasStrong: Color(0xFFEAF1F8),
     surfacePrimary: Color(0xFFFFFFFF),
-    surfaceSecondary: Color(0xFFF8FBFF),
-    surfaceMuted: Color(0xFFEFF4FA),
-    outlineSoft: Color(0xFFD5E0EC),
-    glow: Color(0xFF7BD7FF),
+    surfaceSecondary: Color(0xFFF8FBFE),
+    surfaceMuted: Color(0xFFEEF4F8),
+    outlineSoft: Color(0xFFD8E2EC),
+    glow: Color(0xFF93D9FF),
     success: Color(0xFF0F9F6E),
     warning: Color(0xFFB8740E),
     pageGradient: LinearGradient(
-      colors: <Color>[Color(0xFFF4F9FD), Color(0xFFE8F2FB), Color(0xFFF9FCFF)],
+      colors: <Color>[Color(0xFFF6F9FC), Color(0xFFEDF4FB), Color(0xFFFFFFFF)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
     heroGradient: LinearGradient(
-      colors: <Color>[Color(0xFF062748), Color(0xFF0B4F86), Color(0xFF1591E8)],
+      colors: <Color>[Color(0xFF082C46), Color(0xFF0B3C5D), Color(0xFF1F7AE0)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
     panelGradient: LinearGradient(
-      colors: <Color>[Color(0xF2FFFFFF), Color(0xEAF6FDFF)],
+      colors: <Color>[Color(0xF5FFFFFF), Color(0xEEF7FCFF)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),

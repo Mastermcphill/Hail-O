@@ -55,5 +55,14 @@ void main() {
       expect(isPublicPath(internalAdminLoginPath), isTrue);
       expect(isDiscoverablePublicPath(internalAdminLoginPath), isFalse);
     });
+
+    test('preview results path stays public and discoverable', () {
+      expect(isPublicPath(previewResultsPath), isTrue);
+      expect(isDiscoverablePublicPath(previewResultsPath), isTrue);
+    });
+
+    test('fleet public role uses operator wording', () {
+      expect(labelForPublicAccount(PublicAccountRole.fleetOwner), 'Fleet Operator');
+    });
   });
 }

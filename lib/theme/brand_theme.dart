@@ -4,17 +4,18 @@ import 'app_tokens.dart';
 
 class BrandTheme {
   static ThemeData light() {
-    const seed = Color(0xFF0A7CFF);
+    const primary = Color(0xFF0B3C5D);
+    const electricBlue = Color(0xFF1F7AE0);
     const baseText = Color(0xFF10233A);
+    const background = Color(0xFFF5F8FC);
     const surface = Color(0xFFFFFFFF);
-    const background = Color(0xFFF3F8FC);
 
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: seed,
+      seedColor: electricBlue,
       brightness: Brightness.light,
-      primary: seed,
-      secondary: const Color(0xFF18A8FF),
-      tertiary: const Color(0xFF00A4C7),
+      primary: electricBlue,
+      secondary: const Color(0xFF5DAEFF),
+      tertiary: const Color(0xFF0B3C5D),
       surface: surface,
       error: const Color(0xFFC53754),
       onPrimary: Colors.white,
@@ -28,58 +29,70 @@ class BrandTheme {
       scaffoldBackgroundColor: background,
       materialTapTargetSize: MaterialTapTargetSize.padded,
       visualDensity: VisualDensity.standard,
+      fontFamily: 'Inter',
     );
 
     final textTheme = base.textTheme.copyWith(
       displayLarge: base.textTheme.displayLarge?.copyWith(
+        fontSize: 36,
         fontWeight: FontWeight.w800,
-        letterSpacing: -1.4,
+        letterSpacing: -1.6,
         color: baseText,
       ),
       displayMedium: base.textTheme.displayMedium?.copyWith(
+        fontSize: 32,
         fontWeight: FontWeight.w800,
-        letterSpacing: -1.2,
+        letterSpacing: -1.3,
         color: baseText,
       ),
       headlineLarge: base.textTheme.headlineLarge?.copyWith(
+        fontSize: 28,
         fontWeight: FontWeight.w800,
         letterSpacing: -1.0,
         color: baseText,
       ),
       headlineMedium: base.textTheme.headlineMedium?.copyWith(
+        fontSize: 24,
         fontWeight: FontWeight.w800,
         letterSpacing: -0.8,
         color: baseText,
       ),
       headlineSmall: base.textTheme.headlineSmall?.copyWith(
+        fontSize: 22,
         fontWeight: FontWeight.w700,
         letterSpacing: -0.5,
         color: baseText,
       ),
       titleLarge: base.textTheme.titleLarge?.copyWith(
+        fontSize: 20,
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
+        letterSpacing: -0.35,
         color: baseText,
       ),
       titleMedium: base.textTheme.titleMedium?.copyWith(
+        fontSize: 18,
         fontWeight: FontWeight.w700,
         color: baseText,
       ),
       titleSmall: base.textTheme.titleSmall?.copyWith(
+        fontSize: 16,
         fontWeight: FontWeight.w700,
         color: baseText,
       ),
       bodyLarge: base.textTheme.bodyLarge?.copyWith(
-        height: 1.5,
+        fontSize: 16,
+        height: 1.55,
         color: baseText,
       ),
       bodyMedium: base.textTheme.bodyMedium?.copyWith(
+        fontSize: 15,
         height: 1.5,
         color: baseText,
       ),
       bodySmall: base.textTheme.bodySmall?.copyWith(
+        fontSize: 13,
         height: 1.45,
-        color: const Color(0xFF566C86),
+        color: const Color(0xFF586E86),
       ),
       labelLarge: base.textTheme.labelLarge?.copyWith(
         fontWeight: FontWeight.w700,
@@ -96,10 +109,10 @@ class BrandTheme {
       extensions: const <ThemeExtension<dynamic>>[HailoThemeTokens.light],
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
-        foregroundColor: baseText,
+        foregroundColor: primary,
         elevation: 0,
         scrolledUnderElevation: 0,
-        centerTitle: false,
+        titleSpacing: HailoSpacing.lg,
         titleTextStyle: textTheme.titleLarge,
       ),
       cardTheme: CardThemeData(
@@ -117,8 +130,8 @@ class BrandTheme {
         style: FilledButton.styleFrom(
           elevation: 0,
           minimumSize: const Size.fromHeight(56),
-          backgroundColor: colorScheme.primary,
-          foregroundColor: colorScheme.onPrimary,
+          backgroundColor: electricBlue,
+          foregroundColor: Colors.white,
           textStyle: textTheme.labelLarge,
           shape: RoundedRectangleBorder(borderRadius: HailoRadii.sm),
           padding: const EdgeInsets.symmetric(
@@ -130,9 +143,9 @@ class BrandTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size.fromHeight(56),
-          foregroundColor: colorScheme.primary,
+          foregroundColor: primary,
           textStyle: textTheme.labelLarge,
-          side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.18)),
+          side: const BorderSide(color: Color(0xFFD8E2EC)),
           shape: RoundedRectangleBorder(borderRadius: HailoRadii.sm),
           padding: const EdgeInsets.symmetric(
             horizontal: HailoSpacing.lg,
@@ -142,7 +155,7 @@ class BrandTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: colorScheme.primary,
+          foregroundColor: electricBlue,
           textStyle: textTheme.labelLarge,
           shape: RoundedRectangleBorder(borderRadius: HailoRadii.sm),
           padding: const EdgeInsets.symmetric(
@@ -153,12 +166,12 @@ class BrandTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.88),
+        fillColor: Colors.white.withValues(alpha: 0.94),
         hintStyle: textTheme.bodyMedium?.copyWith(
-          color: const Color(0xFF6B8098),
+          color: const Color(0xFF6D8298),
         ),
         labelStyle: textTheme.bodyMedium?.copyWith(
-          color: const Color(0xFF5C7590),
+          color: const Color(0xFF5E748A),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: HailoSpacing.md,
@@ -166,11 +179,11 @@ class BrandTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: HailoRadii.sm,
-          borderSide: const BorderSide(color: Color(0xFFD6E1EC)),
+          borderSide: const BorderSide(color: Color(0xFFD8E2EC)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: HailoRadii.sm,
-          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+          borderSide: const BorderSide(color: electricBlue, width: 1.6),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: HailoRadii.sm,
@@ -182,16 +195,16 @@ class BrandTheme {
         ),
         border: OutlineInputBorder(
           borderRadius: HailoRadii.sm,
-          borderSide: const BorderSide(color: Color(0xFFD6E1EC)),
+          borderSide: const BorderSide(color: Color(0xFFD8E2EC)),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: Colors.white.withValues(alpha: 0.94),
-        indicatorColor: colorScheme.primary.withValues(alpha: 0.12),
+        backgroundColor: Colors.white.withValues(alpha: 0.96),
+        indicatorColor: electricBlue.withValues(alpha: 0.12),
         labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>(
           (states) => textTheme.labelMedium?.copyWith(
             color: states.contains(WidgetState.selected)
-                ? colorScheme.primary
+                ? electricBlue
                 : const Color(0xFF6C8098),
             fontWeight: states.contains(WidgetState.selected)
                 ? FontWeight.w700
@@ -201,31 +214,32 @@ class BrandTheme {
         iconTheme: WidgetStateProperty.resolveWith<IconThemeData?>(
           (states) => IconThemeData(
             color: states.contains(WidgetState.selected)
-                ? colorScheme.primary
+                ? electricBlue
                 : const Color(0xFF6C8098),
           ),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF0B2441),
+        backgroundColor: primary,
         contentTextStyle: textTheme.bodyMedium?.copyWith(color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: HailoRadii.sm),
       ),
-      progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: colorScheme.primary,
-        circularTrackColor: colorScheme.primary.withValues(alpha: 0.12),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: electricBlue,
       ),
       chipTheme: base.chipTheme.copyWith(
-        padding: const EdgeInsets.symmetric(
-          horizontal: HailoSpacing.sm,
-          vertical: HailoSpacing.xs,
-        ),
-        backgroundColor: Colors.white,
-        selectedColor: colorScheme.primary.withValues(alpha: 0.10),
-        side: const BorderSide(color: Color(0xFFD6E1EC)),
         shape: RoundedRectangleBorder(borderRadius: HailoRadii.pill),
+        side: const BorderSide(color: Color(0xFFD8E2EC)),
+        backgroundColor: Colors.white.withValues(alpha: 0.92),
+        selectedColor: electricBlue.withValues(alpha: 0.12),
         labelStyle: textTheme.labelMedium,
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
       ),
     );
   }

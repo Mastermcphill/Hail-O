@@ -5,6 +5,10 @@ import '../../core/api/api_config.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
 import '../../core/api/mock_backend_store.dart';
+import '../../domain/models/latlng.dart';
+import '../../integrations/mapbox/mapbox_map_widget.dart';
+import '../../theme/app_tokens.dart';
+import '../../widgets/premium_ui.dart';
 import '../shared/ride_snapshot_card.dart';
 import '../shared/ride_timeline_widget.dart';
 
@@ -74,20 +78,88 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(HailoSpacing.lg),
         children: <Widget>[
-          Text(
-            'Purchase Timeline',
-            style: Theme.of(context).textTheme.headlineSmall,
+          PremiumPanel(
+            gradient: context.hailoTokens.heroGradient,
+            borderColor: Colors.white.withValues(alpha: 0.10),
+            child: Wrap(
+              spacing: HailoSpacing.xl,
+              runSpacing: HailoSpacing.lg,
+              children: <Widget>[
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const PremiumPill(
+                        label: 'Booking timeline',
+                        icon: Icons.fact_check_outlined,
+                        backgroundColor: Color(0x24FFFFFF),
+                        foregroundColor: Colors.white,
+                      ),
+                      const SizedBox(height: HailoSpacing.lg),
+                      Text(
+                        'Follow booking protection, seat confirmation, and arrival progress.',
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                PremiumPanel(
+                  padding: const EdgeInsets.all(HailoSpacing.md),
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      Colors.white.withValues(alpha: 0.12),
+                      Colors.white.withValues(alpha: 0.05),
+                    ],
+                  ),
+                  borderColor: Colors.white.withValues(alpha: 0.12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Purchase',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.76),
+                        ),
+                      ),
+                      const SizedBox(height: HailoSpacing.xs),
+                      Text(
+                        widget.purchaseId,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          SelectableText('purchase_id: ${widget.purchaseId}'),
-          if (widget.rideId != null && widget.rideId!.isNotEmpty)
-            SelectableText('ride_id: ${widget.rideId}'),
-          const SizedBox(height: 12),
+          const SizedBox(height: HailoSpacing.section),
+          SizedBox(
+            height: 240,
+            child: PremiumPanel(
+              padding: const EdgeInsets.all(HailoSpacing.sm),
+              child: ClipRRect(
+                borderRadius: HailoRadii.md,
+                child: const MapboxMapWidget(
+                  initialCenter: LatLng(latitude: 6.5244, longitude: 3.3792),
+                  initialZoom: 9.2,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: HailoSpacing.lg),
           if (_isLoading)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
+              padding: EdgeInsets.symmetric(vertical: HailoSpacing.section),
               child: Center(child: CircularProgressIndicator()),
             )
           else ...<Widget>[
@@ -95,17 +167,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
               key: const Key('timeline_widget'),
               snapshot: _snapshot,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: HailoSpacing.md),
             RideSnapshotCard(snapshot: _snapshot),
           ],
           if (_errorMessage != null) ...<Widget>[
-            const SizedBox(height: 10),
+            const SizedBox(height: HailoSpacing.md),
             Text(
               _errorMessage!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: HailoSpacing.section),
         ],
       ),
     );
@@ -118,8 +190,8 @@ Map<String, dynamic> _mockSnapshotForPurchase(
 ) {
   final purchase =
       MockBackendStore.purchasesById[purchaseId] ?? <String, dynamic>{};
-  final resolvedRideId = rideId ?? _readString(purchase['ride_id']);
-  final seats = (purchase['seat_ids'] as List<dynamic>? ?? <dynamic>[])
+  final resolvedRideId = rideId ?? _rideIdFromPurchase(purchaseId);
+  final seats = (purchase['seat_ids'] as List<dynamic>? ?? const <dynamic>[])
       .map((value) => value.toString())
       .toList(growable: false);
 

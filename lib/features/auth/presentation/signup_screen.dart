@@ -285,9 +285,9 @@ class _SignupCopy {
       case PublicAccountRole.driver:
         return const _SignupCopy(
           eyebrow: 'Driver onboarding',
-          heroTitle: 'Step into the HAIL-O operator network.',
+          heroTitle: 'Join the Hail-O driver network.',
           heroDescription:
-              'Create your driver account to receive trip opportunities, monitor performance, manage compliance, and access your earnings workspace.',
+              'Create your driver account to receive trip opportunities, manage compliance, and access a premium operator workspace.',
           highlights: <String>[
             'Purpose-built driver dashboard for trip flow, performance, and support.',
             'Seamless progression into vehicle and compliance setup after account creation.',
@@ -311,41 +311,41 @@ class _SignupCopy {
         );
       case PublicAccountRole.fleetOwner:
         return const _SignupCopy(
-          eyebrow: 'Fleet registration',
-          heroTitle: 'Launch a premium fleet command center.',
+          eyebrow: 'Fleet Operator onboarding',
+          heroTitle: 'Launch a premium fleet operator command center.',
           heroDescription:
-              'Register your fleet organization to manage vehicles, drivers, dispatch visibility, settlements, and compliance from one elevated workspace.',
+              'Register your fleet organization to manage vehicles, drivers, route operations, settlements, and compliance from one elevated workspace.',
           highlights: <String>[
-            'Role-correct fleet workspace for operations, vehicles, and earnings oversight.',
+            'Role-correct fleet operator workspace for operations, vehicles, and earnings oversight.',
             'Built to scale from a few vehicles to a modern multi-city transport operation.',
             'Conversion-ready registration flow with no public admin clutter.',
           ],
           formEyebrow: 'Register fleet',
-          formTitle: 'Create your fleet organization account',
+          formTitle: 'Create your fleet operator account',
           formDescription:
               'Start with the account layer first. Vehicle rosters, driver assignments, and compliance details are completed after sign-up.',
-          nameLabel: 'Fleet or company name',
+          nameLabel: 'Company name',
           nameHint: 'e.g. HAIL-O Executive Roadlines',
           nameError: 'Fleet name is required',
           nameLengthError: 'Enter your organization name',
           emailLabel: 'Operations email',
           emailHint: 'ops@yourfleet.com',
           trustNote:
-              'This step creates your fleet owner workspace and unlocks the operations dashboard.',
-          primaryCta: 'Register fleet',
+              'This step creates your fleet operator workspace and unlocks the operations dashboard.',
+          primaryCta: 'Create fleet operator account',
           secondaryCta: 'Already operating with us? Sign in',
-          loadingMessage: 'Registering your fleet...',
+          loadingMessage: 'Creating your fleet operator account...',
         );
       case PublicAccountRole.rider:
         return const _SignupCopy(
           eyebrow: 'Passenger account',
-          heroTitle: 'Join the flagship road-travel network.',
+          heroTitle: 'Create your premium rideshare account.',
           heroDescription:
-              'Create your passenger account for within-city, inter-city, inter-state, and cross-border road journeys with premium safety cues and elegant booking flow.',
+              'Create your passenger account for city, inter-city, inter-state, and cross-border rides with escrow protection and premium seat choice.',
           highlights: <String>[
             'Fast entry into booking, trip history, support, and profile tools.',
             'Designed for first-time riders without sacrificing a premium look and feel.',
-            'Trust-led experience with clear pricing, support, and travel mode guidance.',
+            'Trust-led booking with clear pricing, seat tiers, and travel mode guidance.',
           ],
           formEyebrow: 'Create account',
           formTitle: 'Open your passenger account',

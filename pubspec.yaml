@@ -95,6 +95,17 @@ flutter:
   assets:
     - assets/brand/
     - assets/illustrations/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -134,8 +145,8 @@ flutter_launcher_icons:
   remove_alpha_ios: true
 
 flutter_native_splash:
-  color: "#F7FAFC"
+  color: "#F5F8FC"
   image: assets/brand/logo_mark.png
   android_12:
     image: assets/brand/logo_mark.png
-    color: "#F7FAFC"
+    color: "#F5F8FC"

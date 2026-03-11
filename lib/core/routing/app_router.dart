@@ -39,6 +39,9 @@ import '../../features/rider/ride_request_screen.dart';
 import '../../features/rider/ride_status_screen.dart';
 import '../../features/rider/seat_selection_screen.dart';
 import '../../features/rider/timeline_screen.dart';
+import '../../features/rideshare/presentation/public_ride_preview_screen.dart';
+import '../../features/rideshare/presentation/rider_map_screen.dart';
+import '../../features/rideshare/presentation/rider_payments_screen.dart';
 import '../../features/settings/about_screen.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/premium_ui.dart';
@@ -63,6 +66,12 @@ class AppRouter {
         GoRoute(
           path: landingPath,
           builder: (context, state) => const LandingScreen(),
+        ),
+        GoRoute(
+          path: previewResultsPath,
+          builder: (context, state) => PublicRidePreviewScreen(
+            draftEncoded: state.uri.queryParameters['draft'],
+          ),
         ),
         GoRoute(
           path: loginPath,
@@ -130,9 +139,23 @@ class AppRouter {
               builder: (context, state) => const RiderProfileScreen(),
             ),
             GoRoute(
+              path: '/rider/map',
+              builder: (context, state) => const RiderMapScreen(),
+            ),
+            GoRoute(
+              path: '/rider/payments',
+              builder: (context, state) => const RiderPaymentsScreen(),
+            ),
+            GoRoute(
               path: '/rider/request',
-              builder: (context, state) =>
-                  RideRequestScreen(apiClient: _apiClient),
+              builder: (context, state) => RideRequestScreen(
+                apiClient: _apiClient,
+                draftEncoded: state.uri.queryParameters['draft'],
+                autoSearch:
+                    (state.uri.queryParameters['autosearch'] ?? '')
+                        .toLowerCase() ==
+                    '1',
+              ),
             ),
             GoRoute(
               path: '/rider/status/:rideId',
@@ -157,6 +180,7 @@ class AppRouter {
                     (state.uri.queryParameters['expired'] ?? '')
                         .toLowerCase() ==
                     'true',
+                draftEncoded: state.uri.queryParameters['draft'],
               ),
             ),
             GoRoute(
@@ -168,6 +192,13 @@ class AppRouter {
                     (state.uri.queryParameters['charter_mode'] ?? '')
                         .toLowerCase() ==
                     'true',
+                draftEncoded: state.uri.queryParameters['draft'],
+                offerPriceMinor: int.tryParse(
+                  state.uri.queryParameters['offer_price_minor'] ?? '',
+                ),
+                luggageCount: int.tryParse(
+                  state.uri.queryParameters['luggage_count'] ?? '',
+                ),
               ),
             ),
             GoRoute(
@@ -179,6 +210,7 @@ class AppRouter {
                     (state.uri.queryParameters['charter_mode'] ?? '')
                         .toLowerCase() ==
                     'true',
+                draftEncoded: state.uri.queryParameters['draft'],
               ),
             ),
             GoRoute(
@@ -441,7 +473,13 @@ class AppRouter {
     }
 
     if (isPublicPath(path)) {
-      return _recordFirstRouteDecision(path, homeRouteForRole(role));
+      final allowAuthenticatedPublicFlow =
+          path == driverApplicationPath ||
+          path == fleetRegistrationPath ||
+          path == previewResultsPath;
+      if (!allowAuthenticatedPublicFlow) {
+        return _recordFirstRouteDecision(path, homeRouteForRole(role));
+      }
     }
 
     if (isRoleRoute(path) && !isRoleAllowed(path, role)) {
@@ -490,7 +528,10 @@ class RoleNavigationScaffold extends StatelessWidget {
       currentPath,
       normalizedRole,
     );
-    final showShellChrome = currentPath != '/settings/about';
+    final showShellChrome =
+        currentPath != '/settings/about' &&
+        currentPath != '/rider' &&
+        currentPath != '/home';
     final showBottomNavigation = showShellChrome && items.length > 1;
 
     return BrandBackdrop(
@@ -736,10 +777,16 @@ List<_NavItem> _navigationItemsForRole(String role) {
           selectedIcon: Icons.route_rounded,
         ),
         _NavItem(
-          path: '/rider/safety',
-          label: 'Safety',
-          icon: Icons.shield_outlined,
-          selectedIcon: Icons.shield_rounded,
+          path: '/rider/map',
+          label: 'Map',
+          icon: Icons.map_outlined,
+          selectedIcon: Icons.map_rounded,
+        ),
+        _NavItem(
+          path: '/rider/payments',
+          label: 'Payments',
+          icon: Icons.payments_outlined,
+          selectedIcon: Icons.payments_rounded,
         ),
         _NavItem(
           path: '/rider/profile',
@@ -791,8 +838,14 @@ String _navigationSectionPath(String currentPath, String role) {
       return '/admin';
     case 'rider':
     default:
+      if (isSelectedPath(currentPath, '/rider/map')) {
+        return '/rider/map';
+      }
+      if (isSelectedPath(currentPath, '/rider/payments')) {
+        return '/rider/payments';
+      }
       if (isSelectedPath(currentPath, '/rider/safety')) {
-        return '/rider/safety';
+        return '/rider/profile';
       }
       if (isSelectedPath(currentPath, '/rider/profile') ||
           isSelectedPath(currentPath, '/rider/documents') ||
@@ -841,7 +894,8 @@ bool _isRootDestinationPath(String currentPath, String role) {
           <String>{
             '/rider',
             '/rider/trips',
-            '/rider/safety',
+            '/rider/map',
+            '/rider/payments',
             '/rider/profile',
           }.contains(currentPath);
   }
@@ -871,22 +925,28 @@ String _shellEyebrowForRole(String role) {
 
 String _titleForPath(String path) {
   if (isSelectedPath(path, '/rider/request')) {
-    return 'Plan your journey';
+    return 'Search rides';
   }
   if (isSelectedPath(path, '/rider/status')) {
-    return 'Live trip status';
+    return 'Trip tracking';
   }
   if (isSelectedPath(path, '/rider/offers')) {
-    return 'Ride offers';
+    return 'Ride matches';
   }
   if (isSelectedPath(path, '/rider/paywall')) {
-    return 'Upgrade travel';
+    return 'Booking summary';
   }
   if (isSelectedPath(path, '/rider/seats')) {
-    return 'Choose seats';
+    return 'Select seats';
   }
   if (isSelectedPath(path, '/rider/timeline')) {
     return 'Trip timeline';
+  }
+  if (isSelectedPath(path, '/rider/map')) {
+    return 'Network map';
+  }
+  if (isSelectedPath(path, '/rider/payments')) {
+    return 'Payments';
   }
   if (isSelectedPath(path, '/rider/next-of-kin')) {
     return 'Emergency contact';
@@ -969,11 +1029,11 @@ String _titleForPath(String path) {
   if (isSelectedPath(path, '/fleet')) {
     return 'Fleet command';
   }
-  if (isSelectedPath(path, '/rider/safety')) {
-    return 'Safety & support';
-  }
   if (isSelectedPath(path, '/rider/profile')) {
     return 'Profile';
+  }
+  if (isSelectedPath(path, '/rider/safety')) {
+    return 'Safety & support';
   }
   if (isSelectedPath(path, '/rider/trips')) {
     return 'Trips';

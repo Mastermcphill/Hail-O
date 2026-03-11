@@ -32,14 +32,17 @@ class AuthApi {
     String? displayName,
   }) async {
     final normalizedDisplayName = (displayName ?? '').trim();
+    final normalizedRole = normalizeRole(role);
     await _apiClient.post(
       ApiPaths.authRegister,
       body: <String, dynamic>{
         'email': email.trim(),
         'password': password,
-        'role': normalizeRole(role),
+        'role': normalizedRole,
         if (normalizedDisplayName.isNotEmpty)
           'display_name': normalizedDisplayName,
+        if (normalizedDisplayName.isNotEmpty && normalizedRole == 'fleet_owner')
+          'company_name': normalizedDisplayName,
       },
     );
   }

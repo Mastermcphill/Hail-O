@@ -28,7 +28,7 @@ class FleetHome extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         const PremiumPill(
-                          label: 'Fleet command center',
+                          label: 'Fleet operator command center',
                           icon: Icons.directions_bus_rounded,
                           backgroundColor: Color(0x29FFFFFF),
                           foregroundColor: Colors.white,
@@ -44,7 +44,7 @@ class FleetHome extends StatelessWidget {
                         ),
                         const SizedBox(height: HailoSpacing.md),
                         Text(
-                          'The fleet experience is built like a premium operations cockpit: vehicle visibility, driver coordination, settlement awareness, and compliance posture.',
+                          'The fleet operator experience is built like a premium operations cockpit: vehicle visibility, driver coordination, settlement awareness, and compliance posture.',
                           style: Theme.of(context).textTheme.bodyLarge
                               ?.copyWith(
                                 color: Colors.white.withValues(alpha: 0.88),

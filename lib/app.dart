@@ -80,7 +80,7 @@ class _HailoCoreAppState extends State<HailoCoreApp> {
         ),
       ],
       child: MaterialApp.router(
-        title: 'Hail-O Core',
+        title: 'Hail-O Rideshare',
         debugShowCheckedModeBanner: false,
         theme: BrandTheme.light(),
         localizationsDelegates: const <LocalizationsDelegate<dynamic>>[

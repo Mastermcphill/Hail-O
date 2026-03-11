@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/app_tokens.dart';
+import '../../widgets/premium_ui.dart';
+import '../../widgets/trust_badge.dart';
 import 'json_view.dart';
 
 class RideSnapshotCard extends StatefulWidget {
-  const RideSnapshotCard({
-    super.key,
-    required this.snapshot,
-  });
+  const RideSnapshotCard({super.key, required this.snapshot});
 
   final Map<String, dynamic> snapshot;
 
@@ -20,80 +20,90 @@ class _RideSnapshotCardState extends State<RideSnapshotCard> {
   @override
   Widget build(BuildContext context) {
     final ride = _asMap(widget.snapshot['ride']);
-    final rideId = _pickString(<dynamic>[
-      widget.snapshot['ride_id'],
-      ride['id'],
-    ]);
-    final status = _pickString(<dynamic>[
-      widget.snapshot['status'],
-      widget.snapshot['state'],
-      widget.snapshot['ride_status'],
-      ride['status'],
-      ride['state'],
-      ride['ride_status'],
-    ]);
-    final riderId = _pickString(<dynamic>[
-      widget.snapshot['rider_id'],
-      ride['rider_id'],
-    ]);
-    final driverId = _pickString(<dynamic>[
-      widget.snapshot['driver_id'],
-      ride['driver_id'],
-    ]);
+    final rideId =
+        _pickString(<dynamic>[widget.snapshot['ride_id'], ride['id']]) ?? '-';
+    final status =
+        _pickString(<dynamic>[
+          widget.snapshot['status'],
+          widget.snapshot['state'],
+          ride['status'],
+          ride['state'],
+        ]) ??
+        'Pending';
+    final driverId =
+        _pickString(<dynamic>[
+          widget.snapshot['driver_id'],
+          ride['driver_id'],
+        ]) ??
+        'Assigned operator';
     final money = _collectMoneyFields(ride, widget.snapshot);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _InfoRow(label: 'Ride id', value: rideId ?? '-'),
-            const SizedBox(height: 8),
-            _InfoRow(label: 'Status', value: status ?? '-'),
-            const SizedBox(height: 8),
-            _InfoRow(label: 'Rider id', value: riderId ?? '-'),
-            const SizedBox(height: 8),
-            _InfoRow(label: 'Driver id', value: driverId ?? '-'),
-            if (money.isNotEmpty) ...<Widget>[
-              const Divider(height: 24),
-              Text(
-                'Money',
-                style: Theme.of(context).textTheme.titleSmall,
+    return PremiumPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const PremiumSectionHeader(
+            eyebrow: 'Trip snapshot',
+            title: 'Live ride details in one place.',
+            description:
+                'Status, operator assignment, and fare context stay visible without exposing raw internal tooling.',
+          ),
+          const SizedBox(height: HailoSpacing.lg),
+          Wrap(
+            spacing: HailoSpacing.xs,
+            runSpacing: HailoSpacing.xs,
+            children: const <Widget>[
+              TrustBadge(
+                label: 'Escrow protected',
+                icon: Icons.lock_clock_outlined,
               ),
-              const SizedBox(height: 8),
-              for (final entry in money.entries)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _InfoRow(
-                    label: entry.key,
-                    value: entry.value.toString(),
-                  ),
-                ),
+              TrustBadge(
+                label: 'Trip-linked receipt',
+                icon: Icons.receipt_long_outlined,
+              ),
             ],
-            const Divider(height: 24),
-            TextButton.icon(
-              onPressed: () {
-                setState(() {
-                  _showJson = !_showJson;
-                });
-              },
-              icon: Icon(_showJson ? Icons.expand_less : Icons.expand_more),
-              label: Text(_showJson ? 'Hide JSON' : 'Show JSON'),
+          ),
+          const SizedBox(height: HailoSpacing.lg),
+          _InfoRow(label: 'Ride ID', value: rideId),
+          const SizedBox(height: HailoSpacing.sm),
+          _InfoRow(label: 'Status', value: status),
+          const SizedBox(height: HailoSpacing.sm),
+          _InfoRow(label: 'Operator', value: driverId),
+          if (money.isNotEmpty) ...<Widget>[
+            const SizedBox(height: HailoSpacing.lg),
+            Text(
+              'Fare and protection',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
-            if (_showJson) JsonView(data: widget.snapshot),
+            const SizedBox(height: HailoSpacing.sm),
+            for (final entry in money.entries) ...<Widget>[
+              _InfoRow(label: entry.key, value: entry.value.toString()),
+              const SizedBox(height: HailoSpacing.xs),
+            ],
           ],
-        ),
+          const SizedBox(height: HailoSpacing.md),
+          TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _showJson = !_showJson;
+              });
+            },
+            icon: Icon(
+              _showJson ? Icons.expand_less : Icons.data_object_rounded,
+            ),
+            label: Text(_showJson ? 'Hide raw snapshot' : 'Show raw snapshot'),
+          ),
+          if (_showJson) JsonView(data: widget.snapshot),
+        ],
       ),
     );
   }
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -104,14 +114,22 @@ class _InfoRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         SizedBox(
-          width: 120,
+          width: 132,
           child: Text(
             label,
-            style: Theme.of(context).textTheme.bodyMedium,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(child: SelectableText(value)),
+        Expanded(
+          child: Text(
+            value,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
       ],
     );
   }

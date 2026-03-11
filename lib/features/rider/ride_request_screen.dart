@@ -4,61 +4,58 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
+import '../../features/rideshare/models/ride_search_draft.dart';
 import '../../integrations/google/google_distance_service.dart';
+import '../../theme/app_tokens.dart';
+import '../../widgets/loading_overlay.dart';
+import '../../widgets/premium_ui.dart';
+import '../../widgets/ride_search_card.dart';
+import '../../widgets/trust_badge.dart';
 
 class RideRequestScreen extends StatefulWidget {
-  const RideRequestScreen({super.key, required this.apiClient});
+  const RideRequestScreen({
+    super.key,
+    required this.apiClient,
+    this.draftEncoded,
+    this.autoSearch = false,
+  });
 
   final ApiClient apiClient;
+  final String? draftEncoded;
+  final bool autoSearch;
 
   @override
   State<RideRequestScreen> createState() => _RideRequestScreenState();
 }
 
 class _RideRequestScreenState extends State<RideRequestScreen> {
-  final _pickupController = TextEditingController();
-  final _dropoffController = TextEditingController();
-  final _passengersController = TextEditingController(text: '1');
-  final _luggageCountController = TextEditingController(text: '0');
-  final _scheduledDepartureController = TextEditingController();
-  final _vehicleClassController = TextEditingController(text: 'sedan');
-  final _baseFareMinorController = TextEditingController(text: '0');
-  final _premiumMarkupMinorController = TextEditingController(text: '0');
-  final _connectionFeeMinorController = TextEditingController(text: '0');
-
   final GoogleDistanceService _distanceService = GoogleDistanceService();
 
-  String _tripScope = 'intra_city';
-  bool _charterMode = false;
+  late final RideSearchDraft _initialDraft;
   bool _isSubmitting = false;
-  bool _isEstimating = false;
   bool _isCheckingGate = true;
+  bool _autoSearchTriggered = false;
   int _distanceMeters = 12000;
   int _durationSeconds = 1800;
-  String _distanceSource = 'stub';
+  String _distanceSource = 'estimated';
 
   @override
   void initState() {
     super.initState();
-    _scheduledDepartureController.text = DateTime.now()
-        .toUtc()
-        .add(const Duration(minutes: 10))
-        .toIso8601String();
+    _initialDraft = RideSearchDraft.fromEncoded(widget.draftEncoded);
     _ensureNextOfKinGate();
   }
 
-  @override
-  void dispose() {
-    _pickupController.dispose();
-    _dropoffController.dispose();
-    _passengersController.dispose();
-    _luggageCountController.dispose();
-    _scheduledDepartureController.dispose();
-    _vehicleClassController.dispose();
-    _baseFareMinorController.dispose();
-    _premiumMarkupMinorController.dispose();
-    _connectionFeeMinorController.dispose();
-    super.dispose();
+  String get _returnToPath {
+    final draft = widget.draftEncoded;
+    if ((draft ?? '').isEmpty) {
+      return '/rider/request';
+    }
+    final params = <String, String>{
+      'draft': draft!,
+      if (widget.autoSearch) 'autosearch': '1',
+    };
+    return '/rider/request?${Uri(queryParameters: params).query}';
   }
 
   Future<void> _ensureNextOfKinGate() async {
@@ -67,6 +64,19 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     });
     try {
       await widget.apiClient.get(ApiPaths.meNextOfKin);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isCheckingGate = false;
+      });
+      if (widget.autoSearch &&
+          !_autoSearchTriggered &&
+          (_initialDraft.pickup.isNotEmpty ||
+              _initialDraft.destination.isNotEmpty)) {
+        _autoSearchTriggered = true;
+        _submitDraft(_initialDraft);
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -75,65 +85,37 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
           error is ApiException &&
           (error.statusCode == 404 || error.code == 'next_of_kin_not_set');
       if (shouldGate) {
-        context.go('/rider/next-of-kin?return_to=/rider/request');
+        context.go(
+          '/rider/next-of-kin?return_to=${Uri.encodeQueryComponent(_returnToPath)}',
+        );
         return;
       }
       _showErrorSnackBar(error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingGate = false;
-        });
-      }
+      setState(() {
+        _isCheckingGate = false;
+      });
     }
   }
 
-  Future<void> _estimateDistance() async {
-    final pickup = _pickupController.text.trim();
-    final dropoff = _dropoffController.text.trim();
-    if (pickup.isEmpty || dropoff.isEmpty) {
-      _showSnackBar('Enter pickup and dropoff first.');
+  Future<void> _submitDraft(RideSearchDraft draft) async {
+    if (draft.pickup.isEmpty || draft.destination.isEmpty) {
+      _showSnackBar('Enter pickup and destination to search rides.');
       return;
     }
-    setState(() {
-      _isEstimating = true;
-    });
-    try {
-      final estimate = await _distanceService.estimate(
-        origin: pickup,
-        destination: dropoff,
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _distanceMeters = estimate.distanceMeters;
-        _durationSeconds = estimate.durationSeconds;
-        _distanceSource = estimate.source;
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isEstimating = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     setState(() {
       _isSubmitting = true;
     });
     try {
-      final tripScope = _tripScopeToBackendValue(_tripScope);
-      if (tripScope == 'international' || tripScope == 'cross_country') {
+      if (draft.isCrossBorder) {
         final hasCrossBorderDoc = await _hasCrossBorderDocument();
         if (hasCrossBorderDoc == false) {
           if (!mounted) {
             return;
           }
-          context.go('/rider/documents?return_to=/rider/request');
+          context.go(
+            '/rider/documents?return_to=${Uri.encodeQueryComponent(_returnToPath)}',
+          );
           return;
         }
         if (hasCrossBorderDoc == null) {
@@ -141,38 +123,28 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
         }
       }
 
-      final pickup = _pickupController.text.trim();
-      final dropoff = _dropoffController.text.trim();
-      if (pickup.isNotEmpty && dropoff.isNotEmpty) {
-        final estimate = await _distanceService.estimate(
-          origin: pickup,
-          destination: dropoff,
-        );
-        _distanceMeters = estimate.distanceMeters;
-        _durationSeconds = estimate.durationSeconds;
-        _distanceSource = estimate.source;
-      }
-
-      final scheduledAt = DateTime.parse(
-        _scheduledDepartureController.text.trim(),
-      ).toUtc();
+      final estimate = await _distanceService.estimate(
+        origin: draft.pickup,
+        destination: draft.destination,
+      );
+      _distanceMeters = estimate.distanceMeters;
+      _durationSeconds = estimate.durationSeconds;
+      _distanceSource = estimate.source;
 
       final payload = <String, dynamic>{
-        'scheduled_departure_at': scheduledAt.toIso8601String(),
-        'trip_scope': tripScope,
-        'pickup': pickup,
-        'dropoff': dropoff,
-        'passengers': _parseInt(_passengersController.text),
-        'luggage_count': _parseInt(_luggageCountController.text),
-        'charter_mode': _charterMode,
+        'scheduled_departure_at': draft.departureAt.toUtc().toIso8601String(),
+        'trip_scope': draft.backendTripScope,
+        'pickup': draft.pickup,
+        'dropoff': draft.destination,
+        'passengers': draft.passengerCount,
+        'luggage_count': draft.luggageCount,
+        'charter_mode': draft.charterMode,
         'distance_meters': _distanceMeters,
         'duration_seconds': _durationSeconds,
-        'vehicle_class': _vehicleClassController.text.trim().isEmpty
-            ? 'sedan'
-            : _vehicleClassController.text.trim(),
-        'base_fare_minor': _parseInt(_baseFareMinorController.text),
-        'premium_markup_minor': _parseInt(_premiumMarkupMinorController.text),
-        'connection_fee_minor': _parseInt(_connectionFeeMinorController.text),
+        'vehicle_class': draft.vehicleClassPreset,
+        'base_fare_minor': draft.baseFareMinor,
+        'premium_markup_minor': draft.premiumMarkupMinor,
+        'connection_fee_minor': draft.connectionFeeMinor,
       };
 
       final response = await widget.apiClient.post(
@@ -189,8 +161,9 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       }
       context.go(
         '/rider/offers/${Uri.encodeComponent(rideId)}'
-        '?luggage_count=${_parseInt(_luggageCountController.text)}'
-        '&charter_mode=$_charterMode',
+        '?luggage_count=${draft.luggageCount}'
+        '&charter_mode=${draft.charterMode}'
+        '&draft=${Uri.encodeQueryComponent(draft.toEncoded())}',
       );
     } catch (error) {
       if (!mounted) {
@@ -223,159 +196,132 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isCheckingGate) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                'Request Ride',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _pickupController,
-                decoration: const InputDecoration(
-                  labelText: 'pickup',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _dropoffController,
-                decoration: const InputDecoration(
-                  labelText: 'dropoff',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _passengersController,
-                label: 'passengers',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _luggageCountController,
-                label: 'luggage_count',
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _tripScope,
-                decoration: const InputDecoration(
-                  labelText: 'trip_scope',
-                  border: OutlineInputBorder(),
-                ),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(
-                    value: 'intra_city',
-                    child: Text('intra_city'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'inter_city',
-                    child: Text('inter_city'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'international',
-                    child: Text('international'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  setState(() {
-                    _tripScope = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Charter mode'),
-                value: _charterMode,
-                onChanged: (value) {
-                  setState(() {
-                    _charterMode = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _scheduledDepartureController,
-                decoration: const InputDecoration(
-                  labelText: 'scheduled_departure_at (UTC ISO)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _vehicleClassController,
-                label: 'vehicle_class',
-                keyboardType: TextInputType.text,
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _baseFareMinorController,
-                label: 'base_fare_minor',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _premiumMarkupMinorController,
-                label: 'premium_markup_minor',
-              ),
-              const SizedBox(height: 12),
-              _LabeledTextField(
-                controller: _connectionFeeMinorController,
-                label: 'connection_fee_minor',
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    return LoadingOverlay(
+      isLoading: _isSubmitting || _isCheckingGate,
+      message: _isCheckingGate
+          ? 'Checking rider readiness...'
+          : 'Searching live rides...',
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(HailoSpacing.lg),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1080),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                PremiumPanel(
+                  gradient: context.hailoTokens.heroGradient,
+                  borderColor: Colors.white.withValues(alpha: 0.10),
+                  child: Wrap(
+                    spacing: HailoSpacing.xl,
+                    runSpacing: HailoSpacing.lg,
                     children: <Widget>[
-                      Text('distance_meters: $_distanceMeters'),
-                      const SizedBox(height: 4),
-                      Text('duration_seconds: $_durationSeconds'),
-                      const SizedBox(height: 4),
-                      Text('distance_source: $_distanceSource'),
-                      const SizedBox(height: 8),
-                      FilledButton.tonal(
-                        onPressed: _isEstimating ? null : _estimateDistance,
-                        child: _isEstimating
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const PremiumPill(
+                              label: 'Live ride search',
+                              icon: Icons.search_rounded,
+                              backgroundColor: Color(0x24FFFFFF),
+                              foregroundColor: Colors.white,
+                            ),
+                            const SizedBox(height: HailoSpacing.lg),
+                            Text(
+                              'Search premium rides with the real booking engine.',
+                              style: Theme.of(context).textTheme.headlineMedium
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: HailoSpacing.md),
+                            Text(
+                              'This step uses the authenticated ride request API, preserves passenger readiness gates, and sends you into live ride matches.',
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.88),
+                                  ),
+                            ),
+                            const SizedBox(height: HailoSpacing.lg),
+                            Wrap(
+                              spacing: HailoSpacing.xs,
+                              runSpacing: HailoSpacing.xs,
+                              children: const <Widget>[
+                                TrustBadge(
+                                  label: 'Escrow protected booking',
+                                  icon: Icons.lock_clock_outlined,
+                                  tint: Colors.white,
                                 ),
-                              )
-                            : const Text('Estimate Distance'),
+                                TrustBadge(
+                                  label: 'Seat tier aware',
+                                  icon: Icons.event_seat_outlined,
+                                  tint: Colors.white,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: PremiumPanel(
+                          padding: const EdgeInsets.all(HailoSpacing.md),
+                          gradient: LinearGradient(
+                            colors: <Color>[
+                              Colors.white.withValues(alpha: 0.12),
+                              Colors.white.withValues(alpha: 0.05),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderColor: Colors.white.withValues(alpha: 0.14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                'Route intelligence',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: HailoSpacing.md),
+                              _MetricLine(
+                                label: 'Distance',
+                                value:
+                                    '${(_distanceMeters / 1000).toStringAsFixed(1)} km',
+                              ),
+                              const SizedBox(height: HailoSpacing.xs),
+                              _MetricLine(
+                                label: 'Travel time',
+                                value:
+                                    '${(_durationSeconds / 60).round()} mins',
+                              ),
+                              const SizedBox(height: HailoSpacing.xs),
+                              _MetricLine(
+                                label: 'Estimate source',
+                                value: _distanceSource,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _isSubmitting ? null : _submit,
-                child: _isSubmitting
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Submit Ride Request'),
-              ),
-            ],
+                const SizedBox(height: HailoSpacing.section),
+                RideSearchCard(
+                  initialDraft: _initialDraft,
+                  caption: 'Search live rides',
+                  primaryLabel: 'Search rides',
+                  showCharterMode: true,
+                  onSubmit: _submitDraft,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -383,8 +329,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   }
 
   void _showErrorSnackBar(Object error) {
-    final message = formatApiError(error);
-    _showSnackBar(message);
+    _showSnackBar(formatApiError(error));
   }
 
   void _showSnackBar(String message) {
@@ -394,39 +339,37 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
   }
 }
 
-class _LabeledTextField extends StatelessWidget {
-  const _LabeledTextField({
-    required this.controller,
-    required this.label,
-    this.keyboardType = TextInputType.number,
-  });
+class _MetricLine extends StatelessWidget {
+  const _MetricLine({required this.label, required this.value});
 
-  final TextEditingController controller;
   final String label;
-  final TextInputType keyboardType;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-      ),
+    return Row(
+      children: <Widget>[
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.78),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
-}
-
-int _parseInt(String value) {
-  return int.tryParse(value.trim()) ?? 0;
-}
-
-String _tripScopeToBackendValue(String value) {
-  if (value == 'inter_city') {
-    return 'inter_state';
-  }
-  return value;
 }
 
 String? _resolveRideId(Map<String, dynamic> response) {

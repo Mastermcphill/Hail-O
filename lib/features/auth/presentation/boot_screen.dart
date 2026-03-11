@@ -47,9 +47,18 @@ class BootScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: HailoSpacing.md),
                     Text(
-                      'Preparing your HAIL-O experience',
+                      'Preparing Hail-O Rideshare',
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: HailoSpacing.xs),
+                    Text(
+                      'Premium rides across cities, states, and borders',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: HailoSpacing.sm),
                     Text(

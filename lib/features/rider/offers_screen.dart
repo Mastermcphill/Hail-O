@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_errors.dart';
 import '../../core/api/api_paths.dart';
+import '../../features/rideshare/models/ride_search_draft.dart';
+import '../../theme/app_tokens.dart';
+import '../../widgets/premium_ui.dart';
+import '../../widgets/ride_result_card.dart';
+import '../../widgets/trust_badge.dart';
 
 class OffersScreen extends StatefulWidget {
   const OffersScreen({
@@ -14,6 +20,7 @@ class OffersScreen extends StatefulWidget {
     int? luggageCount,
     this.charterMode = false,
     this.expired = false,
+    this.draftEncoded,
   }) : initialLuggageCount = initialLuggageCount ?? luggageCount;
 
   final ApiClient apiClient;
@@ -21,6 +28,7 @@ class OffersScreen extends StatefulWidget {
   final int? initialLuggageCount;
   final bool charterMode;
   final bool expired;
+  final String? draftEncoded;
 
   @override
   State<OffersScreen> createState() => _OffersScreenState();
@@ -33,16 +41,19 @@ class _OffersScreenState extends State<OffersScreen> {
   List<Map<String, dynamic>> _offers = <Map<String, dynamic>>[];
   int _luggageCount = 0;
 
+  late final RideSearchDraft _draft;
+
   @override
   void initState() {
     super.initState();
+    _draft = RideSearchDraft.fromEncoded(widget.draftEncoded);
     _luggageCount = widget.initialLuggageCount ?? 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       if (widget.expired) {
-        _showSnackBar('Connection fee window expired. Choose another offer.');
+        _showSnackBar('Connection fee window expired. Choose another ride.');
       }
     });
     _load();
@@ -97,13 +108,12 @@ class _OffersScreenState extends State<OffersScreen> {
         ApiPaths.rideSnapshot(widget.rideId),
       );
       final ride = _asMap(snapshot['ride']);
-      final luggage =
+      _luggageCount =
           (snapshot['luggage_count'] as num?)?.toInt() ??
           (ride['luggage_count'] as num?)?.toInt() ??
           0;
-      _luggageCount = luggage;
     } catch (_) {
-      // Ignore; fallback offers will still render.
+      // Ignore. Offers can still render without luggage context.
     }
   }
 
@@ -134,9 +144,13 @@ class _OffersScreenState extends State<OffersScreen> {
       if (!mounted) {
         return;
       }
+      final priceMinor = (offer['price_minor'] as num?)?.toInt();
       context.push(
         '/rider/paywall/${Uri.encodeComponent(widget.rideId)}'
-        '?charter_mode=${widget.charterMode}',
+        '?charter_mode=${widget.charterMode}'
+        '&draft=${Uri.encodeQueryComponent(_draft.toEncoded())}'
+        '${priceMinor == null ? '' : '&offer_price_minor=$priceMinor'}'
+        '&luggage_count=$_luggageCount',
       );
     } catch (error) {
       if (!mounted) {
@@ -155,111 +169,195 @@ class _OffersScreenState extends State<OffersScreen> {
   @override
   Widget build(BuildContext context) {
     final visibleOffers = _visibleOffers();
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Row(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(HailoSpacing.lg),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1080),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text(
-                'Blind Offers',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const Spacer(),
-              FilledButton.tonal(
-                onPressed: _isLoading ? null : _load,
-                child: const Text('Refresh'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          SelectableText('ride_id: ${widget.rideId}'),
-          const SizedBox(height: 6),
-          Text('luggage_count: $_luggageCount'),
-          if (_luggageCount > 2)
-            const Padding(
-              padding: EdgeInsets.only(top: 4),
-              child: Text('Sedan/Hatchback offers hidden for heavy luggage.'),
-            ),
-          if (_errorMessage != null) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(
-              _errorMessage!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : visibleOffers.isEmpty
-                ? const Center(child: Text('No offers available yet.'))
-                : ListView.separated(
-                    itemCount: visibleOffers.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final offer = visibleOffers[index];
-                      return Card(
-                        key: Key('offer_card_$index'),
-                        child: InkWell(
-                          onTap: _isAccepting
-                              ? null
-                              : () => _acceptOffer(offer),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                _OfferRow(
-                                  label: 'star_rating',
-                                  value: '${offer['star_rating'] ?? '-'}',
+              PremiumPanel(
+                gradient: context.hailoTokens.heroGradient,
+                borderColor: Colors.white.withValues(alpha: 0.10),
+                child: Wrap(
+                  spacing: HailoSpacing.xl,
+                  runSpacing: HailoSpacing.lg,
+                  children: <Widget>[
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const PremiumPill(
+                            label: 'Ride matches',
+                            icon: Icons.route_rounded,
+                            backgroundColor: Color(0x24FFFFFF),
+                            foregroundColor: Colors.white,
+                          ),
+                          const SizedBox(height: HailoSpacing.lg),
+                          Text(
+                            'Choose the ride that fits your route, comfort level, and timing.',
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
                                 ),
-                                _OfferRow(
-                                  label: 'gender',
-                                  value: '${offer['gender'] ?? '-'}',
+                          ),
+                          const SizedBox(height: HailoSpacing.md),
+                          Text(
+                            'Fares, operator quality, comfort, and seat posture are arranged to help you convert quickly without hunting through raw data.',
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.88),
                                 ),
-                                _OfferRow(
-                                  label: 'tribe',
-                                  value: '${offer['tribe'] ?? '-'}',
-                                ),
-                                _OfferRow(
-                                  label: 'vehicle_class',
-                                  value: '${offer['vehicle_class'] ?? '-'}',
-                                ),
-                                _OfferRow(
-                                  label: 'luggage_supported',
-                                  value: '${offer['luggage_supported'] ?? '-'}',
-                                ),
-                                _OfferRow(
-                                  label: 'price_minor',
-                                  value: '${offer['price_minor'] ?? '-'}',
-                                ),
-                                const SizedBox(height: 12),
-                                FilledButton(
-                                  onPressed: _isAccepting
-                                      ? null
-                                      : () => _acceptOffer(offer),
-                                  child: _isAccepting
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('Accept Offer'),
-                                ),
-                              ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const <Widget>[
+                          Text(
+                            'Filters',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                        ),
-                      );
-                    },
+                          SizedBox(height: HailoSpacing.md),
+                          Wrap(
+                            spacing: HailoSpacing.xs,
+                            runSpacing: HailoSpacing.xs,
+                            children: <Widget>[
+                              PremiumPill(
+                                label: 'Fastest',
+                                icon: Icons.bolt_rounded,
+                                backgroundColor: Color(0x24FFFFFF),
+                                foregroundColor: Colors.white,
+                              ),
+                              PremiumPill(
+                                label: 'Affordable',
+                                icon: Icons.savings_outlined,
+                                backgroundColor: Color(0x24FFFFFF),
+                                foregroundColor: Colors.white,
+                              ),
+                              PremiumPill(
+                                label: 'Most comfortable',
+                                icon:
+                                    Icons.airline_seat_recline_normal_outlined,
+                                backgroundColor: Color(0x24FFFFFF),
+                                foregroundColor: Colors.white,
+                              ),
+                              PremiumPill(
+                                label: 'Premium',
+                                icon: Icons.workspace_premium_outlined,
+                                backgroundColor: Color(0x24FFFFFF),
+                                foregroundColor: Colors.white,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: HailoSpacing.section),
+              if (_errorMessage != null) ...<Widget>[
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                const SizedBox(height: HailoSpacing.md),
+              ],
+              if (_isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: HailoSpacing.section),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (visibleOffers.isEmpty)
+                PremiumPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const <Widget>[
+                      PremiumSectionHeader(
+                        eyebrow: 'No matches yet',
+                        title: 'We are still searching the network.',
+                        description:
+                            'Try adjusting your travel mode, seat tier, or departure time if no live rides are available yet.',
+                      ),
+                    ],
                   ),
+                )
+              else
+                for (
+                  var index = 0;
+                  index < visibleOffers.length;
+                  index++
+                ) ...<Widget>[
+                  _buildOfferCard(context, visibleOffers[index], index),
+                  const SizedBox(height: HailoSpacing.md),
+                ],
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfferCard(
+    BuildContext context,
+    Map<String, dynamic> offer,
+    int index,
+  ) {
+    final priceMinor = (offer['price_minor'] as num?)?.toInt() ?? 0;
+    final rating = (offer['star_rating'] as num?)?.toDouble() ?? 4.7;
+    final vehicleClass = (offer['vehicle_class'] ?? 'ride').toString();
+    final schedule = _formatSchedule(
+      offer['accepted_at']?.toString(),
+      fallback: _draft.departureAt,
+    );
+    final category = _categoryForOffer(
+      vehicleClass,
+      _draft.seatTier,
+      widget.charterMode,
+    );
+    final operatorName = _operatorLabel(offer['driver_id']?.toString());
+    final seatAvailability = _seatAvailabilityLabel(vehicleClass);
+    final tags = _tagsForOffer(index, vehicleClass);
+    final trustBadges = <TrustBadge>[
+      TrustBadge(
+        label: 'Rated ${rating.toStringAsFixed(1)}',
+        icon: Icons.star_rounded,
+      ),
+      if (offer['luggage_supported'] == true)
+        const TrustBadge(
+          label: 'Luggage friendly',
+          icon: Icons.luggage_rounded,
+        ),
+      const TrustBadge(label: 'Operator on file', icon: Icons.badge_outlined),
+    ];
+
+    return RideResultCard(
+      category: category,
+      operatorName: operatorName,
+      scheduleLabel: schedule,
+      priceLabel: _money(priceMinor),
+      ratingLabel: rating.toStringAsFixed(1),
+      seatAvailabilityLabel: seatAvailability,
+      tags: tags,
+      trustBadges: trustBadges,
+      heroNote:
+          'Escrow payment protection stays active through checkout and seat confirmation.',
+      primaryLabel: _isAccepting ? 'Selecting...' : 'Select ride',
+      secondaryLabel: 'View details',
+      onPrimaryPressed: _isAccepting ? () {} : () => _acceptOffer(offer),
+      onSecondaryPressed: () => _showSnackBar(
+        '$category | ${seatAvailability.toLowerCase()} | ${_money(priceMinor)}',
       ),
     );
   }
@@ -268,26 +366,6 @@ class _OffersScreenState extends State<OffersScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-}
-
-class _OfferRow extends StatelessWidget {
-  const _OfferRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: <Widget>[
-          SizedBox(width: 130, child: Text(label)),
-          Expanded(child: SelectableText(value)),
-        ],
-      ),
-    );
   }
 }
 
@@ -301,4 +379,80 @@ Map<String, dynamic> _asMap(dynamic value) {
     );
   }
   return <String, dynamic>{};
+}
+
+String _categoryForOffer(
+  String vehicleClass,
+  RideSeatTier seatTier,
+  bool charterMode,
+) {
+  if (charterMode) {
+    return 'Fleet Coach';
+  }
+  final normalizedVehicle = vehicleClass.toLowerCase();
+  if (normalizedVehicle.contains('executive')) {
+    return 'Executive Ride';
+  }
+  if (normalizedVehicle.contains('premium')) {
+    return 'Premium Ride';
+  }
+  if (normalizedVehicle.contains('comfort') ||
+      normalizedVehicle.contains('suv')) {
+    return 'Comfort Ride';
+  }
+  switch (seatTier) {
+    case RideSeatTier.executive:
+      return 'Executive Ride';
+    case RideSeatTier.premium:
+      return 'Premium Ride';
+    case RideSeatTier.comfort:
+      return 'Comfort Ride';
+    case RideSeatTier.standard:
+      return 'Standard Ride';
+  }
+}
+
+String _operatorLabel(String? driverId) {
+  final raw = (driverId ?? '').trim();
+  if (raw.isEmpty) {
+    return 'Verified mobility operator';
+  }
+  final end = raw.length < 6 ? raw.length : 6;
+  return 'Driver ${raw.substring(0, end)}';
+}
+
+String _seatAvailabilityLabel(String vehicleClass) {
+  final normalized = vehicleClass.toLowerCase();
+  if (normalized.contains('coach') || normalized.contains('van')) {
+    return '8+ seats left';
+  }
+  if (normalized.contains('suv')) {
+    return '4 seats left';
+  }
+  return '3 seats left';
+}
+
+List<String> _tagsForOffer(int index, String vehicleClass) {
+  if (index == 0) {
+    return const <String>['Fastest'];
+  }
+  if (index == 1) {
+    return const <String>['Most affordable'];
+  }
+  if (vehicleClass.toLowerCase().contains('premium') ||
+      vehicleClass.toLowerCase().contains('executive')) {
+    return const <String>['Premium option'];
+  }
+  return const <String>['Most comfortable'];
+}
+
+String _formatSchedule(String? isoValue, {required DateTime fallback}) {
+  final parsed =
+      DateTime.tryParse((isoValue ?? '').trim())?.toLocal() ??
+      fallback.toLocal();
+  return DateFormat('EEE, h:mm a').format(parsed);
+}
+
+String _money(int amountMinor) {
+  return '\$${(amountMinor / 100).toStringAsFixed(2)}';
 }

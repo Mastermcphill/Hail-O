@@ -4,10 +4,12 @@ const String loginPath = '/login';
 const String signupPath = '/signup';
 const String driverApplicationPath = '/apply/driver';
 const String fleetRegistrationPath = '/apply/fleet';
+const String previewResultsPath = '/preview/results';
 const String internalAdminLoginPath = '/internal/auth/admin';
 
 const Set<String> publicAuthPaths = <String>{
   landingPath,
+  previewResultsPath,
   loginPath,
   signupPath,
   driverApplicationPath,
@@ -23,6 +25,7 @@ bool isPublicPath(String path) {
 
 bool isDiscoverablePublicPath(String path) {
   return path == landingPath ||
+      path == previewResultsPath ||
       path == loginPath ||
       path == signupPath ||
       path == driverApplicationPath ||
@@ -56,7 +59,7 @@ String labelForPublicAccount(PublicAccountRole role) {
     case PublicAccountRole.driver:
       return 'Driver';
     case PublicAccountRole.fleetOwner:
-      return 'Fleet Owner';
+      return 'Fleet Operator';
     case PublicAccountRole.rider:
       return 'Passenger';
   }
